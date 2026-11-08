@@ -1,0 +1,26 @@
+{
+  "name": "worlds-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/server/src/index.js",
+    "start:prod": "NODE_ENV=production SERVE_CLIENT=1 node dist/server/src/index.js",
+    "backup": "node scripts/backup.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "jose": "^5.10.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

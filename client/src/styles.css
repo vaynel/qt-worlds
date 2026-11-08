@@ -1,0 +1,2388 @@
+:root {
+  --ink: #4a3426;
+  --ink-soft: #8a6a50;
+  --paper: rgba(255, 248, 234, 0.88);
+  --paper-line: rgba(176, 120, 72, 0.28);
+  --accent: #c8644a;
+  --glow: #ffc46b;
+  --safe-top: max(14px, env(safe-area-inset-top));
+  --safe-left: max(14px, env(safe-area-inset-left));
+  --safe-right: max(14px, env(safe-area-inset-right));
+  --safe-bottom: max(14px, env(safe-area-inset-bottom));
+  font-family: 'Pretendard', 'Noto Sans KR', 'Noto Sans CJK KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  color: var(--ink);
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #f2e6cf;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#world-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+  cursor: grab;
+}
+
+#world-canvas:active {
+  cursor: grabbing;
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+  border-radius: 16px;
+  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.16);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+
+#hud-top {
+  position: absolute;
+  top: var(--safe-top);
+  left: var(--safe-left);
+  right: var(--safe-right);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.place-card {
+  padding: 9px 16px 10px;
+  min-width: 128px;
+}
+
+.place-card strong {
+  display: block;
+  margin-top: 1px;
+  font-size: 1.12rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.clock-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 10px 12px;
+}
+
+.clock-card strong {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sky-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.sky-icon.sun {
+  background: radial-gradient(circle, #ffd27a 45%, rgba(255, 196, 107, 0.35) 46%, transparent 70%);
+}
+
+.sky-icon.moon {
+  background: #f2edd8;
+  box-shadow: inset -6px -2px 0 0 #c9c0a0;
+}
+
+#prompt {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 64px);
+  transform: translateX(-50%);
+  max-width: min(540px, calc(100vw - 32px));
+  padding: 12px 18px;
+  text-align: center;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  pointer-events: none;
+  animation: rise 0.45s ease-out;
+}
+
+#prompt strong {
+  display: block;
+  color: var(--accent);
+  font-size: 1rem;
+  margin-bottom: 2px;
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: var(--safe-bottom);
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: calc(100vw - 32px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(74, 52, 38, 0.62);
+  color: #fff8ea;
+  font-size: 0.85rem;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 1.2s ease;
+}
+
+.hint.faded {
+  opacity: 0;
+}
+
+/* Floating joystick: only on touch devices, left-bottom thumb zone. */
+#stick-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: min(48vw, 260px);
+  height: min(42vh, 260px);
+  display: none;
+  touch-action: none;
+}
+
+body.touch #stick-zone {
+  display: block;
+}
+
+#stick-base {
+  position: absolute;
+  left: calc(var(--safe-left) + 62px);
+  top: calc(100% - var(--safe-bottom) - 96px);
+  width: 112px;
+  height: 112px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(255, 248, 234, 0.32);
+  border: 2px solid rgba(255, 248, 234, 0.7);
+  box-shadow: 0 4px 18px rgba(74, 52, 38, 0.18);
+  transition: background 0.2s;
+}
+
+#stick-base.active {
+  background: rgba(255, 248, 234, 0.48);
+}
+
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50px;
+  height: 50px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+  box-shadow: 0 3px 10px rgba(74, 52, 38, 0.25);
+}
+
+body.touch .hint {
+  bottom: calc(var(--safe-bottom) + 4px);
+  left: auto;
+  right: var(--safe-right);
+  transform: none;
+  max-width: 56vw;
+  border-radius: 14px;
+  text-align: right;
+}
+
+body.touch #prompt {
+  bottom: calc(var(--safe-bottom) + 200px);
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--paper-line);
+  border-radius: 12px;
+  background: rgba(255, 252, 244, 0.95);
+  padding: 10px 16px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff8ea;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 120, 72, 0.4);
+  background: #fffdf7;
+  font-size: 16px; /* >=16px stops iOS from zooming on focus */
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.net-status {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.net-status::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #b9a58a;
+  vertical-align: 1px;
+}
+
+.net-status.online::before {
+  background: #6aa86a;
+}
+
+.net-status.waiting::before {
+  background: #e0a040;
+}
+
+/* ---------- entry (nickname) ---------- */
+
+#entry {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(ellipse at 50% 120%, rgba(143, 179, 106, 0.55), transparent 60%),
+    linear-gradient(#f8eedb, #ecd9b8);
+  overflow-y: auto;
+}
+
+#entry.done {
+  display: none;
+}
+
+.entry-card {
+  width: min(360px, 100%);
+  padding: 26px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.entry-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.entry-sub {
+  margin: -4px 0 8px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+
+.entry-card label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.entry-row {
+  position: relative;
+}
+
+.entry-row input {
+  padding-right: 56px;
+}
+
+#nickname-count {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+#nickname-count.over {
+  color: #b03a2e;
+}
+
+#entry-submit {
+  margin-top: 4px;
+  padding: 12px;
+  font-size: 1rem;
+}
+
+#entry-submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+#entry-status {
+  margin: 0;
+  min-height: 1.3em;
+  font-size: 0.86rem;
+  color: #a2412f;
+  text-align: center;
+}
+
+#entry-status.info {
+  color: var(--ink-soft);
+}
+
+#entry-fallback {
+  display: flex;
+  gap: 8px;
+}
+
+#entry-fallback[hidden] {
+  display: none;
+}
+
+#entry-fallback button {
+  flex: 1;
+}
+
+/* ---------- in-world actions ---------- */
+
+#action-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 132px);
+  transform: translateX(-50%);
+  padding: 12px 22px;
+  font-size: 1rem;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(74, 52, 38, 0.25);
+}
+
+#action-btn[hidden],
+#toast[hidden],
+#chat[hidden] {
+  display: none;
+}
+
+#toast {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe-top) + 84px);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(74, 52, 38, 0.78);
+  color: #fff8ea;
+  font-size: 0.86rem;
+  pointer-events: none;
+}
+
+/* ---------- campfire chat ---------- */
+
+#chat {
+  position: absolute;
+  left: var(--safe-left);
+  bottom: calc(var(--safe-bottom) + 52px);
+  width: min(360px, calc(100vw - 28px));
+  padding: 10px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.chat-head strong {
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.chat-head span {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+#chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px;
+  max-height: 148px;
+  overflow-y: auto;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#chat-log:empty::before {
+  content: '아직 조용해요. 먼저 인사해 보세요.';
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+#chat-log .who {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+#chat-log .mine .who {
+  color: var(--accent);
+}
+
+#chat-form {
+  display: flex;
+  gap: 6px;
+}
+
+#chat-form button {
+  flex: none;
+  padding: 10px 14px;
+}
+
+/* Phones: chat sits under the HUD so the on-screen keyboard never covers it. */
+body.touch #chat {
+  top: calc(var(--safe-top) + 96px);
+  bottom: auto;
+  left: var(--safe-left);
+  right: var(--safe-right);
+  width: auto;
+}
+
+body.touch #chat-log {
+  max-height: 96px;
+}
+
+body.touch #action-btn {
+  left: auto;
+  right: var(--safe-right);
+  transform: none;
+  bottom: calc(var(--safe-bottom) + 120px);
+}
+
+body.chatting #stick-zone,
+body.chatting .hint,
+body.chatting #prompt {
+  visibility: hidden;
+}
+
+#loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(#f6ead2, #ead6b4);
+  transition: opacity 0.8s ease;
+  z-index: 10;
+}
+
+#loading[hidden] {
+  display: none;
+}
+
+#loading.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-card {
+  text-align: center;
+}
+
+.loading-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.loading-sub {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (max-width: 520px) {
+  .place-card strong {
+    font-size: 1rem;
+  }
+  .clock-card strong {
+    font-size: 0.92rem;
+  }
+  .hint {
+    font-size: 0.78rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #prompt {
+    animation: none;
+  }
+}
+
+/* =================== M3: word, book, meditation, 골방, audio =================== */
+
+.hud-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#tools {
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.tool {
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 0 4px 14px rgba(74, 52, 38, 0.14);
+  white-space: nowrap;
+}
+
+.tool.has-new {
+  background: #fff3d6;
+  border-color: rgba(200, 100, 74, 0.6);
+}
+
+.tool.sound[aria-pressed='false'] {
+  color: var(--ink-soft);
+}
+
+#meditate-btn,
+#letter-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 12px 22px;
+  font-size: 1rem;
+  box-shadow: 0 6px 18px rgba(74, 52, 38, 0.25);
+}
+
+#meditate-btn {
+  bottom: calc(var(--safe-bottom) + 188px);
+}
+
+#letter-btn {
+  top: calc(var(--safe-top) + 132px);
+  animation: glow-pulse 2.4s ease-in-out infinite;
+}
+
+#meditate-btn[hidden],
+#letter-btn[hidden],
+#closet-ui[hidden] {
+  display: none;
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 196, 107, 0.6), 0 6px 18px rgba(74, 52, 38, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(255, 196, 107, 0), 0 6px 18px rgba(74, 52, 38, 0.25);
+  }
+}
+
+body.touch #meditate-btn {
+  left: auto;
+  right: var(--safe-right);
+  transform: none;
+  bottom: calc(var(--safe-bottom) + 180px);
+}
+
+/* ---------- 골방 ---------- */
+
+body.closet #prompt,
+body.closet .hint,
+body.closet #stick-zone,
+body.closet #chat,
+body.closet #action-btn,
+body.closet #meditate-btn {
+  display: none;
+}
+
+#closet-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#closet-ui > * {
+  pointer-events: auto;
+}
+
+.closet-head {
+  position: absolute;
+  left: var(--safe-left);
+  top: calc(var(--safe-top) + 92px);
+  padding: 9px 14px;
+  max-width: 300px;
+}
+
+.closet-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.closet-head span {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.closet-actions {
+  position: absolute;
+  left: 50%;
+  bottom: var(--safe-bottom);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+
+.closet-actions button {
+  border-radius: 999px;
+  padding: 12px 20px;
+  box-shadow: 0 6px 18px rgba(74, 52, 38, 0.25);
+}
+
+.worship {
+  position: absolute;
+  z-index: 40; /* nothing may be drawn over the YouTube player */
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.worship[hidden] {
+  display: none;
+}
+
+.worship-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 4px;
+}
+
+.worship-head span {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.worship-frame {
+  position: relative;
+  width: 100%;
+  min-width: 200px;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #241b15;
+}
+
+.worship-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.worship-placeholder,
+.worship-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  color: #f3e6cf;
+  font-size: 0.86rem;
+  background: radial-gradient(circle at 50% 40%, #4a3628, #241b15 70%);
+}
+
+.worship-placeholder p {
+  margin: 0;
+}
+
+.worship-placeholder-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #ffe2a8;
+}
+
+.worship-link {
+  margin-top: 6px;
+  color: #ffd38a;
+}
+
+.worship-caption {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.worship-caption:empty {
+  display: none;
+}
+
+.worship-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.worship-controls:empty {
+  display: none;
+}
+
+.worship-count {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+
+body.touch .closet-head {
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 64px);
+  left: var(--safe-left);
+  right: var(--safe-right);
+  max-width: none;
+}
+
+#fade {
+  position: absolute;
+  inset: 0;
+  background: #2a1f18;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+  z-index: 25;
+}
+
+#fade.on {
+  opacity: 1;
+}
+
+/* ---------- modal sheets ---------- */
+
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--vvtop, 0px);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  height: var(--vvh, 100%);
+  background: rgba(42, 30, 22, 0.42);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.overlay.shown {
+  opacity: 1;
+}
+
+.sheet {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(var(--vvh, 100dvh) - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fffaf0;
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(42, 30, 22, 0.35);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-soft);
+  padding: 6px 10px;
+}
+
+/* ---------- letter / word page ---------- */
+
+.sheet.word-stage {
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  max-height: none;
+  perspective: 1200px;
+}
+
+.envelope {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 260px;
+  height: 168px;
+  margin: -84px 0 0 -130px;
+  background: linear-gradient(160deg, #fbf1dc, #ecdcbc);
+  border-radius: 8px;
+  box-shadow: 0 14px 32px rgba(42, 30, 22, 0.35);
+  animation: env-in 0.6s ease-out both, env-out 0.5s ease-in 1.15s forwards;
+  transform-style: preserve-3d;
+}
+
+.envelope-flap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-left: 130px solid transparent;
+  border-right: 130px solid transparent;
+  border-top: 96px solid #f0dfbd;
+  transform-origin: top center;
+  animation: flap-open 0.5s ease-in-out 0.55s forwards;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.08));
+}
+
+.envelope-seal {
+  position: absolute;
+  left: 50%;
+  top: 78px;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #d0604f, #9c3a2f);
+  animation: seal-off 0.3s ease-in 0.45s forwards;
+}
+
+@keyframes env-in {
+  from {
+    opacity: 0;
+    transform: translateY(-60px) rotate(-6deg) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes env-out {
+  to {
+    opacity: 0;
+    transform: translateY(70px) scale(0.92);
+  }
+}
+
+@keyframes flap-open {
+  to {
+    transform: rotateX(180deg);
+  }
+}
+
+@keyframes seal-off {
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+.word-page {
+  position: relative;
+  padding: 26px 24px 20px;
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(176, 120, 72, 0.06), transparent 8%, transparent 92%, rgba(176, 120, 72, 0.06)),
+    linear-gradient(#fffaf0, #fbf1dc);
+  box-shadow: 0 18px 48px rgba(42, 30, 22, 0.35);
+  max-height: calc(var(--vvh, 100dvh) - 32px);
+  overflow-y: auto;
+  transform-origin: 50% 0%;
+  animation: page-in 0.45s ease-out both;
+}
+
+.from-letter .word-page {
+  animation: page-unfold 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.95s both;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes page-unfold {
+  0% {
+    opacity: 0;
+    transform: translateY(60px) rotateX(78deg) scaleY(0.2);
+  }
+  45% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.word-head {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.word-eyebrow {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.word-date {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.word-body {
+  font-family: 'Noto Serif KR', 'Noto Serif CJK KR', 'Nanum Myeongjo', 'AppleMyungjo', serif;
+  line-height: 1.85;
+}
+
+.word-body p {
+  margin: 0 0 6px;
+}
+
+.word-body .ctx {
+  color: #a8937f;
+  font-size: 0.9rem;
+}
+
+.word-body .main {
+  margin: 10px 0;
+  padding: 12px 14px;
+  font-size: 1.16rem;
+  color: #3a2a1e;
+  background: rgba(255, 220, 160, 0.28);
+  border-left: 3px solid var(--glow);
+  border-radius: 4px 10px 10px 4px;
+}
+
+.vnum {
+  font-size: 0.68em;
+  margin-right: 4px;
+  color: var(--ink-soft);
+  font-family: inherit;
+}
+
+.word-ref {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.word-translation {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--paper-line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.word-hint {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.word-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* ---------- word book ---------- */
+
+.sheet.book {
+  display: flex;
+  flex-direction: column;
+  background: #f7ecd7;
+}
+
+.book-top,
+.book-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+
+.book-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.book-page {
+  margin: 0 14px;
+  padding: 20px 18px;
+  background: #fffaf0;
+  border-radius: 6px 14px 14px 6px;
+  box-shadow: inset 6px 0 10px -6px rgba(120, 80, 40, 0.3), 0 4px 14px rgba(74, 52, 38, 0.12);
+}
+
+.book-date {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.book-verse {
+  margin: 0;
+  font-family: 'Noto Serif KR', 'Noto Serif CJK KR', 'Nanum Myeongjo', serif;
+  font-size: 1.02rem;
+  line-height: 1.8;
+}
+
+.book-ref {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 6px 0 12px;
+  font-size: 0.88rem;
+}
+
+.book-none {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.book-note {
+  border-top: 1px dashed var(--paper-line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.book-note-head {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.book-field {
+  margin-bottom: 8px;
+}
+
+.book-field-label {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #fff8ea;
+  background: #b08a5c;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.book-field-text {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.book-count {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.book-empty {
+  padding: 24px 20px 32px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.book-empty-title {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ---------- meditation ---------- */
+
+.sheet.meditation {
+  display: flex;
+  flex-direction: column;
+}
+
+.med-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 6px;
+}
+
+.med-place {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  flex: 1 0 100%;
+}
+
+.med-close {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+}
+
+.med-steps {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.med-steps li {
+  font-size: 0.8rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f0e4cc;
+  color: var(--ink-soft);
+}
+
+.med-steps li.on {
+  background: var(--accent);
+  color: #fff8ea;
+  font-weight: 700;
+}
+
+.med-steps li.done {
+  background: #e2d2b0;
+  color: var(--ink);
+}
+
+.med-body {
+  padding: 8px 16px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.med-verse {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-family: 'Noto Serif KR', 'Noto Serif CJK KR', 'Nanum Myeongjo', serif;
+  line-height: 1.75;
+  background: rgba(255, 220, 160, 0.25);
+  border-left: 3px solid var(--glow);
+  border-radius: 4px 10px 10px 4px;
+  font-size: 0.95rem;
+}
+
+.med-verse.big {
+  font-size: 1.12rem;
+}
+
+.med-ref {
+  display: block;
+  margin-top: 6px;
+  font-style: normal;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.med-prompt {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.med-input {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 120, 72, 0.4);
+  background: #fffdf7;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.med-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(rgba(255, 250, 240, 0), #fffaf0 30%);
+}
+
+.med-foot button {
+  min-width: 96px;
+}
+
+.med-status {
+  margin: 0;
+  padding: 0 16px 10px;
+  font-size: 0.84rem;
+  color: #a2412f;
+  text-align: center;
+}
+
+.med-status:empty {
+  display: none;
+}
+
+/* Phones: sheets become full-height panels that track the visible viewport
+   (so the keyboard never hides the text field or the buttons). */
+@media (max-width: 600px) {
+  .overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .sheet {
+    max-height: var(--vvh, 100dvh);
+    border-radius: 18px 18px 0 0;
+  }
+  .sheet.meditation,
+  .sheet.book {
+    height: var(--vvh, 100dvh);
+    border-radius: 0;
+  }
+  .sheet.word-stage {
+    padding: 12px;
+    align-self: center;
+  }
+  .word-page {
+    padding: 22px 18px 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .envelope {
+    display: none;
+  }
+  .from-letter .word-page,
+  .word-page {
+    animation: none;
+  }
+}
+
+/* Phone fixes: keep the tool row and room buttons inside the screen. */
+.closet-actions button {
+  white-space: nowrap;
+}
+
+body.touch #tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 62vw;
+}
+
+body.touch .tool {
+  padding: 6px 10px;
+  font-size: 0.76rem;
+}
+
+body.touch .closet-head {
+  bottom: calc(var(--safe-bottom) + 78px);
+}
+
+/* =================== M3.1: persistent worship player + settings =================== */
+
+.worship-head {
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+}
+
+.worship-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.worship-label strong {
+  flex: none;
+}
+
+.worship-title {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worship-listen {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  border-radius: 999px;
+}
+
+.worship-listen[hidden] {
+  display: none;
+}
+
+.worship-close {
+  flex: none;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
+/* Docked mini player: 356x200 on desktop (bottom-right). */
+#worship.dock {
+  right: var(--safe-right);
+  bottom: var(--safe-bottom);
+  width: 372px;
+}
+
+#worship.dock .worship-frame,
+#worship.room .worship-frame {
+  min-width: 200px;
+  min-height: 200px;
+}
+
+#worship.dock .worship-frame {
+  width: 356px;
+  height: 200px;
+  aspect-ratio: auto;
+}
+
+/* 골방: the same element moves onto the room layout (no reload). */
+#worship.room {
+  right: var(--safe-right);
+  top: calc(var(--safe-top) + 132px);
+  width: min(420px, calc(100vw - 28px));
+}
+
+/* Phones: a 200x200 square on the right, above the action buttons and clear
+   of the joystick zone (bottom-left) and the chat panel (top). */
+body.touch #worship.dock {
+  right: var(--safe-right);
+  bottom: calc(var(--safe-bottom) + 262px);
+  width: 216px;
+}
+
+body.touch #worship.dock .worship-frame {
+  width: 200px;
+  height: 200px;
+}
+
+body.touch #worship.room {
+  left: var(--safe-left);
+  right: var(--safe-right);
+  width: auto;
+  top: calc(var(--safe-top) + 150px);
+}
+
+/* On the nickname screen (phones) keep it above the entry card. */
+body.touch:not(.in-world) #worship.dock {
+  bottom: auto;
+  top: calc(var(--safe-top) + 8px);
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+}
+
+/* Desktop sheets leave room for the docked player on the right. */
+@media (min-width: 1000px) {
+  body.worship-on:not(.touch) .overlay {
+    padding-right: 400px;
+  }
+}
+
+/* Narrow screens with a sheet open: player docks at the top and the sheet
+   takes the rest of the visible viewport, so neither covers the other. */
+@media (max-width: 999px) {
+  body.overlay-open #worship.dock,
+  body.overlay-open #worship.room {
+    top: calc(var(--vvtop, 0px) + 8px);
+    bottom: auto;
+    left: 50%;
+    right: auto;
+    width: min(372px, calc(100vw - 16px));
+    transform: translateX(-50%);
+  }
+  body.overlay-open #worship.dock .worship-frame,
+  body.overlay-open #worship.room .worship-frame {
+    width: 100%;
+    height: 200px;
+    aspect-ratio: auto;
+  }
+  body.overlay-open.worship-on .overlay {
+    top: calc(var(--vvtop, 0px) + 272px);
+    height: calc(var(--vvh, 100dvh) - 272px);
+    align-items: stretch;
+  }
+  body.overlay-open.worship-on .sheet {
+    max-height: 100%;
+  }
+  body.overlay-open.worship-on .sheet.meditation,
+  body.overlay-open.worship-on .sheet.book,
+  body.overlay-open.worship-on .sheet.settings {
+    height: 100%;
+    border-radius: 18px 18px 0 0;
+  }
+  /* With the keyboard up there is little height: keep the field and buttons. */
+  body.overlay-open.worship-on .med-verse:not(.big) {
+    max-height: 4.6em;
+    overflow: hidden;
+  }
+}
+
+/* ---------- settings ---------- */
+
+.tool.gear {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 6px 11px;
+}
+
+.sheet.settings {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+}
+
+.settings-body {
+  padding: 0 18px 18px;
+}
+
+.settings-section {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.settings-row {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.settings-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.settings-name {
+  font-weight: 600;
+}
+
+.settings-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.settings-slider {
+  width: 100%;
+  margin: 6px 0 2px;
+  accent-color: var(--accent);
+  height: 28px; /* comfortable touch target */
+}
+
+.settings-hint,
+.settings-note {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  font-weight: 600;
+}
+
+.settings-toggle input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+/* Opaque card so HUD text never shows through around the player. */
+#worship {
+  background: #fffaf0;
+}
+
+/* =================== M4: accounts, book actions, groups, lanterns =================== */
+
+/* Google sign-in button (light theme, per Google's branding guidelines). */
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #747775;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f1f1f;
+  font-family: 'Roboto', 'Noto Sans KR', 'Noto Sans CJK KR', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.google-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.google-g {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><path fill='%23EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/><path fill='%234285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'/><path fill='%23FBBC05' d='M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'/><path fill='%2334A853' d='M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/></svg>") center / contain no-repeat;
+}
+
+.entry-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.entry-pane[hidden] {
+  display: none;
+}
+
+#entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#entry-form label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+#entry-submit {
+  padding: 11px;
+}
+
+.entry-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+}
+
+.entry-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.entry-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.entry-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.entry-divider::before,
+.entry-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--paper-line);
+}
+
+.entry-step {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+.entry-welcome {
+  margin: 0;
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  font-weight: 500;
+  padding: 4px;
+}
+
+.danger {
+  color: #a2412f;
+}
+
+button.danger:not(.ghost) {
+  background: #a2412f;
+  color: #fff8ea;
+  border-color: transparent;
+}
+
+/* ---------- prompts ---------- */
+
+.prompt-body {
+  padding: 22px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prompt-body p {
+  margin: 0;
+}
+
+.prompt-title {
+  font-weight: 700;
+  font-size: 1.08rem;
+}
+
+.prompt-small {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.prompt-actions .google-btn {
+  width: auto;
+  flex: 1 1 200px;
+}
+
+.sheet.login-prompt {
+  width: min(440px, 100%);
+}
+
+/* ---------- book additions ---------- */
+
+.book-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+.tab {
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  background: #efe2c8;
+}
+
+.tab.on {
+  background: var(--accent);
+  color: #fff8ea;
+  border-color: transparent;
+}
+
+.book-page.saved {
+  margin-bottom: 12px;
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.note-actions button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
+.note-confirm {
+  font-size: 0.84rem;
+  color: #a2412f;
+}
+
+.share-form {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f7ecd7;
+}
+
+.share-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.share-option input {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+}
+
+.share-select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(176, 120, 72, 0.4);
+  background: #fffdf7;
+}
+
+.groups-status {
+  margin: 6px 16px 12px;
+  min-height: 1.2em;
+  font-size: 0.84rem;
+  color: #a2412f;
+}
+
+.groups-status.ok {
+  color: #3f7a4a;
+}
+
+.groups-error {
+  margin: 0 16px;
+  color: #a2412f;
+}
+
+/* ---------- groups ---------- */
+
+.sheet.groups {
+  width: min(480px, 100%);
+}
+
+.groups-body {
+  padding: 0 16px 16px;
+}
+
+.groups-list {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.groups-empty {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.group-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f7ecd7;
+}
+
+.group-info {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-meta {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.group-code {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: #fffaf0;
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+.group-item button {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.groups-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.groups-form button {
+  flex: none;
+}
+
+.settings-account {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--paper-line);
+}
+
+.settings-account .groups-status {
+  margin: 4px 0;
+}
+
+/* ---------- lantern card ---------- */
+
+.sheet.lantern-card {
+  width: min(520px, 100%);
+}
+
+.lantern-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pill {
+  font-size: 0.74rem;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #fff1cf;
+  border: 1px solid rgba(200, 140, 60, 0.35);
+}
+
+.pill.group {
+  background: #fbe3ec;
+  border-color: rgba(200, 100, 140, 0.35);
+}
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 4px;
+}
+
+.react {
+  flex: 1 1 90px;
+  border-radius: 999px;
+  padding: 10px 12px;
+}
+
+.react.on {
+  background: #ffe7b8;
+  border-color: rgba(200, 100, 74, 0.6);
+  font-weight: 700;
+}
+
+.lantern-own {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
+.lantern-prayed {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+/* M4.1: multi-verse passages */
+.word-body .main .main-line {
+  margin: 0;
+}
+
+.word-body .main .main-line + .main-line {
+  margin-top: 4px;
+}
+
+/* =================== M4.1: worship playlist player =================== */
+
+.worship-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.worship-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-btn {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn:hover {
+  background: #f3e6cc;
+}
+
+.icon-btn[aria-pressed='true'],
+.icon-btn[aria-expanded='true'] {
+  color: var(--accent);
+  background: #fbeedb;
+}
+
+.icon-btn[hidden],
+.worship-nav[hidden] {
+  display: none;
+}
+
+.worship-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.worship-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.worship-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worship-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.worship-volume input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  height: 24px;
+}
+
+.worship-volume-value {
+  width: 3em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.worship-drawer {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#worship.list-open .worship-drawer,
+#worship.size-large .worship-drawer {
+  display: flex;
+}
+
+.worship-volume-drawer {
+  display: none;
+}
+
+.worship-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.worship-track {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 10px;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 500;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.worship-track:hover {
+  background: #f6ead3;
+}
+
+.worship-track.on {
+  background: #ffe7b8;
+  font-weight: 700;
+}
+
+.worship-track-num {
+  flex: none;
+  width: 1.2em;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Phones, small: a 200x200 square; controls live in the header row and the
+   volume slider moves into the drawer, so the card stays clear of the
+   campfire chat (top) and the joystick zone (bottom-left). */
+body.touch #worship.size-small .worship-label {
+  display: none;
+}
+
+body.touch #worship.size-small .worship-head {
+  justify-content: flex-end;
+}
+
+body.touch #worship.size-small .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+body.touch #worship.size-small .worship-volume-main {
+  display: none;
+}
+
+body.touch #worship.size-small .worship-volume-drawer {
+  display: flex;
+}
+
+/* While the "찬양 듣기" prompt shows, prev/next make room for it; the song
+   list stays one tap away. */
+body.touch #worship.size-small.prompting .worship-nav {
+  display: none;
+}
+
+body.touch #worship.size-small .worship-listen {
+  padding: 4px 8px;
+  font-size: 0.74rem;
+}
+
+/* 크게: a centred panel, video with the track list beside it. */
+#worship.dock.size-large,
+#worship.room.size-large {
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  top: calc(var(--safe-top) + 96px);
+  transform: translateX(-50%);
+  width: min(78vw, 1100px);
+}
+
+#worship.size-large .worship-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 10px;
+  align-items: start;
+}
+
+body #worship.size-large .worship-frame,
+body.touch #worship.size-large .worship-frame {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+}
+
+#worship.size-large .worship-volume-main {
+  grid-column: 2;
+}
+
+#worship.size-large .worship-list {
+  max-height: min(46vh, 420px);
+}
+
+body.touch #worship.dock.size-large,
+body.touch #worship.room.size-large {
+  top: calc(var(--safe-top) + 8px);
+  left: 8px;
+  right: 8px;
+  width: auto;
+  transform: none;
+}
+
+body.touch #worship.size-large .worship-body {
+  grid-template-columns: 1fr;
+}
+
+body.touch #worship.size-large .worship-volume-main {
+  grid-column: 1;
+}
+
+body.touch #worship.size-large .worship-list {
+  max-height: 30vh;
+}
+
+@media (max-width: 700px) {
+  #worship.dock.size-large,
+  #worship.room.size-large {
+    top: calc(var(--safe-top) + 8px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    transform: none;
+  }
+  #worship.size-large .worship-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =================== M4.1: first-time guide =================== */
+
+.sheet.guide {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  background:
+    linear-gradient(90deg, rgba(176, 120, 72, 0.05), transparent 8%, transparent 92%, rgba(176, 120, 72, 0.05)),
+    linear-gradient(#fffaf0, #fbf1dc);
+}
+
+.guide-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px 0;
+}
+
+.guide-step {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 22px 12px;
+  line-height: 1.65;
+}
+
+.guide-title {
+  margin: 4px 0 12px;
+  font-size: 1.2rem;
+  color: var(--ink);
+}
+
+.guide-body p {
+  margin: 0 0 8px;
+}
+
+.guide-soft {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.guide-flow {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff1cf;
+  font-weight: 700;
+  text-align: center;
+}
+
+.guide-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.guide-list li {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  gap: 8px;
+  font-size: 0.92rem;
+}
+
+.guide-list strong {
+  color: var(--accent);
+}
+
+.guide-map {
+  display: block;
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto 10px;
+}
+
+.guide-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+.guide-nav button {
+  min-width: 88px;
+}
+
+.guide-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.guide-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e2d2b0;
+}
+
+.guide-dots span.on {
+  background: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .sheet.guide {
+    height: var(--vvh, 100dvh);
+    border-radius: 0;
+  }
+}
+
+@media (max-width: 999px) {
+  body.overlay-open.worship-on .sheet.guide {
+    height: 100%;
+    border-radius: 18px 18px 0 0;
+  }
+}
+
+/* Phones: the HUD 찬양 button shows its on/off state by colour. */
+.tool[aria-pressed='true'] {
+  background: #ffe7b8;
+  border-color: rgba(200, 100, 74, 0.5);
+}
+
+body.touch #tools {
+  flex-wrap: nowrap;
+  max-width: none;
+}

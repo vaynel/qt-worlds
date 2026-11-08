@@ -1,0 +1,145 @@
+import type { AccountInfo } from '../../../shared/protocol';
+import type { AudioEngine, AudioSettings } from '../audio/AudioEngine';
+import { api, ApiError, logout, startGoogleLogin } from '../net/api';
+import { button, el, Modal } from './dom';
+
+type SliderKey = 'master' | 'ambience' | 'worship' | 'ui';
+
+const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
+  { key: 'master', label: '전체', hint: '모든 소리의 크기' },
+  { key: 'ambience', label: '환경음', hint: '바람, 모닥불, 골방의 고요한 소리' },
+  { key: 'worship', label: '찬양', hint: '찬양 영상의 소리' },
+  { key: 'ui', label: '효과음', hint: '편지 종소리, 책장 넘기는 소리' },
+];
+
+/** ⚙ 설정: volume sliders and a mute switch, saved in localStorage. */
+export class SettingsView {
+  private readonly modal = new Modal('settings-overlay', '설정');
+
+  constructor(
+    private readonly audio: AudioEngine,
+    private readonly account: () => AccountInfo | null,
+    private readonly onNickname: (name: string) => void,
+    private readonly openGuide: () => void = () => undefined,
+  ) {
+    // Keep the sliders in sync when something else (the player) changes a level.
+    audio.onSettingsChange((s) => {
+      if (!this.modal.isOpen) return;
+      for (const key of ['master', 'ambience', 'worship', 'ui'] as const) {
+        const input = this.modal.sheet.querySelector<HTMLInputElement>(`#vol-${key}`);
+        if (input && document.activeElement !== input) input.value = String(s[key]);
+        const out = input?.parentElement?.querySelector('.settings-value');
+        if (out) out.textContent = `${s[key]}%`;
+      }
+    });
+  }
+
+  get isOpen(): boolean {
+    return this.modal.isOpen;
+  }
+
+  open() {
+    this.render(this.audio.settings);
+    this.modal.open();
+  }
+
+  private accountSection(): HTMLElement {
+    const box = el('div', 'settings-account');
+    box.append(el('p', 'settings-section', '계정'));
+    const acc = this.account();
+    if (!acc) {
+      box.append(el('p', 'settings-note', '로그인 없이 둘러보는 중이에요. 로그인하면 묵상을 저장하고 등불과 모임을 쓸 수 있어요.'));
+      const g = button('', 'google-btn', () => startGoogleLogin(true));
+      g.append(el('span', 'google-g'), el('span', 'google-label', 'Google로 로그인'));
+      box.append(g);
+      return box;
+    }
+    const form = el('form', 'groups-form');
+    const input = el('input');
+    input.id = 'settings-nickname';
+    input.type = 'text';
+    input.maxLength = 24;
+    input.value = acc.nickname;
+    input.setAttribute('aria-label', '닉네임');
+    const save = button('닉네임 바꾸기', '');
+    save.type = 'submit';
+    form.append(input, save);
+    const status = el('p', 'groups-status');
+    status.setAttribute('role', 'status');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api<{ user: { nickname: string } }>('POST', '/api/me/nickname', { nickname: input.value });
+        this.onNickname(r.user.nickname);
+        status.textContent = '바꿨어요. 다른 분들께는 다시 들어오면 새 이름으로 보여요.';
+      } catch (err) {
+        status.textContent = err instanceof ApiError ? err.message : '잠시 후 다시 시도해 주세요.';
+      }
+    });
+    const out = button('로그아웃', 'ghost', async () => {
+      try {
+        await logout();
+      } finally {
+        location.reload();
+      }
+    });
+    out.id = 'settings-logout';
+    box.append(form, status, out);
+    return box;
+  }
+
+  private render(s: AudioSettings) {
+    const sheet = this.modal.sheet;
+    sheet.className = 'sheet settings';
+    sheet.replaceChildren();
+    const top = el('header', 'book-top');
+    top.append(el('h2', 'book-title', '설정'), button('닫기', 'ghost', () => this.modal.close()));
+    sheet.append(top);
+
+    const body = el('div', 'settings-body');
+    body.append(el('p', 'settings-section', '소리'));
+    for (const { key, label, hint } of SLIDERS) {
+      const row = el('label', 'settings-row');
+      const name = el('span', 'settings-name', label);
+      const value = el('output', 'settings-value', `${s[key]}%`);
+      const input = el('input', 'settings-slider');
+      input.type = 'range';
+      input.min = '0';
+      input.max = '100';
+      input.step = '1';
+      input.value = String(s[key]);
+      input.id = `vol-${key}`;
+      input.setAttribute('aria-label', `${label} 음량`);
+      input.addEventListener('input', () => {
+        value.textContent = `${input.value}%`;
+        this.audio.update({ [key]: Number(input.value) });
+      });
+      const line = el('div', 'settings-line');
+      line.append(name, value);
+      row.append(line, input, el('span', 'settings-hint', hint));
+      body.append(row);
+    }
+
+    const mute = el('label', 'settings-toggle');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.id = 'vol-muted';
+    box.checked = s.muted;
+    box.addEventListener('change', () => {
+      this.audio.unlock();
+      this.audio.update({ muted: box.checked });
+    });
+    mute.append(box, el('span', '', '모든 소리 끄기'));
+    body.append(mute, el('p', 'settings-note', '소리 설정은 이 기기에 저장돼요.'));
+    const guide = button('사용 안내 다시 보기', '', () => {
+      this.modal.close();
+      this.openGuide();
+    });
+    guide.id = 'settings-guide';
+    const help = el('div', 'settings-account');
+    help.append(el('p', 'settings-section', '사용 안내'), guide);
+    body.append(help);
+    body.append(this.accountSection());
+    sheet.append(body);
+  }
+}

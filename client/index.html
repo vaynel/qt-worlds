@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#f2e6cf" />
+    <meta name="description" content="함께 말씀을 묵상하는 작은 세상" />
+    <link rel="icon" href="data:," />
+    <title>worlds · 말씀 나눔 월드</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="world-canvas" aria-label="말씀 나눔 월드 화면"></canvas>
+
+      <div id="entry">
+        <div class="entry-card card">
+          <p class="entry-title">말씀 나눔 월드</p>
+          <p class="entry-sub">함께 말씀을 묵상하는 작은 세상</p>
+
+          <section id="entry-signed-out" class="entry-pane">
+            <button type="button" id="btn-google" class="google-btn">
+              <span class="google-g" aria-hidden="true"></span>
+              <span class="google-label">Google로 로그인</span>
+            </button>
+            <label class="entry-check"><input type="checkbox" id="remember" checked /> 로그인 유지</label>
+            <p class="entry-note">로그인하면 묵상이 내 계정에 저장되고, 등불과 모임을 쓸 수 있어요.</p>
+            <div class="entry-divider"><span>또는</span></div>
+            <form id="entry-form" novalidate>
+              <label for="nickname">닉네임</label>
+              <div class="entry-row">
+                <input id="nickname" name="nickname" type="text" autocomplete="nickname" maxlength="24" enterkeyhint="go" placeholder="예: 은혜" />
+                <span id="nickname-count" aria-hidden="true">0/12</span>
+              </div>
+              <button type="submit" id="entry-submit">로그인 없이 둘러보기</button>
+            </form>
+          </section>
+
+          <form id="entry-nick" class="entry-pane" hidden novalidate>
+            <p class="entry-step">닉네임 정하기</p>
+            <p class="entry-note">다른 분과 겹치지 않는 1~12자 이름이에요. 나중에 설정에서 바꿀 수 있어요.</p>
+            <input id="account-nickname" type="text" maxlength="24" autocomplete="nickname" enterkeyhint="go" placeholder="예: 은혜" aria-label="닉네임" />
+            <button type="submit" id="nick-submit" class="primary">이 이름으로 시작하기</button>
+            <button type="button" class="link-btn entry-logout">다른 계정으로 로그인</button>
+          </form>
+
+          <section id="entry-signed-in" class="entry-pane" hidden>
+            <p class="entry-welcome"><strong id="entry-name"></strong> 님, 반가워요</p>
+            <button type="button" id="entry-continue" class="primary">입장하기</button>
+            <button type="button" id="entry-logout" class="link-btn entry-logout">로그아웃</button>
+          </section>
+
+          <p id="entry-status" role="status"></p>
+          <div id="entry-fallback" hidden>
+            <button type="button" id="entry-retry">다시 시도</button>
+            <button type="button" id="entry-solo">혼자 둘러보기</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading" role="status" hidden>
+        <div class="loading-card">
+          <p class="loading-title">말씀 나눔 월드</p>
+          <p class="loading-sub">세상을 준비하고 있어요…</p>
+        </div>
+      </div>
+
+      <header id="hud-top">
+        <section class="card place-card" aria-live="polite">
+          <span class="eyebrow">지금 있는 곳</span>
+          <strong id="place-name">중앙 광장</strong>
+          <span id="net-status" class="net-status"></span>
+        </section>
+        <div class="hud-right">
+          <section class="card clock-card" aria-label="한국 시간">
+            <span id="clock-icon" class="sky-icon sun" aria-hidden="true"></span>
+            <span class="clock-text">
+              <span class="eyebrow">서울 <span id="clock-phase">낮</span></span>
+              <strong id="clock-time">오후 12:00</strong>
+            </span>
+          </section>
+          <nav id="tools" aria-label="도구">
+            <button type="button" id="btn-word" class="tool">오늘의 말씀</button>
+            <button type="button" id="btn-book" class="tool">말씀 책</button>
+            <button type="button" id="btn-groups" class="tool">모임</button>
+            <button type="button" id="btn-worship" class="tool" aria-pressed="false">찬양</button>
+            <button type="button" id="btn-settings" class="tool gear" aria-label="설정">⚙</button>
+          </nav>
+        </div>
+      </header>
+
+      <div id="prompt" class="card" hidden></div>
+      <div id="toast" role="status" hidden></div>
+      <button id="action-btn" type="button" class="primary" hidden></button>
+      <button id="meditate-btn" type="button" hidden>묵상하기</button>
+      <button id="letter-btn" type="button" class="primary" hidden>편지 열기</button>
+
+      <section id="closet-ui" hidden aria-label="골방">
+        <div class="closet-head card">
+          <strong>골방</strong>
+          <span>나만의 기도 방이에요. 다른 사람은 보이지 않아요.</span>
+        </div>
+        <div class="closet-actions">
+          <button type="button" id="closet-meditate" class="primary">묵상하기</button>
+          <button type="button" id="closet-exit">밖으로 나가기</button>
+        </div>
+      </section>
+      <div id="fade" aria-hidden="true"></div>
+
+      <section id="chat" class="card" hidden aria-label="모닥불 이야기">
+        <div class="chat-head">
+          <strong>모닥불 이야기</strong>
+          <span>모닥불 곁에 있는 사람에게만 들려요</span>
+        </div>
+        <ol id="chat-log" aria-live="polite"></ol>
+        <form id="chat-form" autocomplete="off">
+          <input id="chat-input" type="text" maxlength="200" enterkeyhint="send" placeholder="이야기를 나눠 보세요" aria-label="보낼 말" />
+          <button type="submit" class="primary">보내기</button>
+        </form>
+      </section>
+      <p id="hint" class="hint"></p>
+
+      <div id="stick-zone" aria-hidden="true">
+        <div id="stick-base"><div id="stick-knob"></div></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

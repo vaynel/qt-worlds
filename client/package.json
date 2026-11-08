@@ -1,0 +1,24 @@
+{
+  "name": "worlds-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "screenshots": "node scripts/screenshots.mjs",
+    "test:m2": "node scripts/m2-test.mjs"
+  },
+  "dependencies": {
+    "simplex-noise": "^4.0.3",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.0",
+    "@types/three": "^0.184.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
+  }
+}

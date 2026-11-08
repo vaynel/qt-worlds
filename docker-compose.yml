@@ -1,0 +1,59 @@
+# Live: https://qt.log2u.me -> Cloudflare Tunnel (qt-tunnel) -> qt-worlds:5181  (127.0.0.1:5190 kept for local checks)
+services:
+  qt-worlds:
+    build: .
+    image: qt-worlds:latest
+    container_name: qt-worlds
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5190:5181"
+    env_file:
+      - deploy/.env.live
+    environment:
+      # Fixed here so the env file cannot override them.
+      NODE_ENV: production
+      SERVE_CLIENT: "1"
+      HOST: 0.0.0.0
+      PORT: "5181"
+      WORLDS_DB: /data/worlds.db
+      # Proxy headers are trusted only from loopback and the Docker bridge
+      # ranges (nginx reaches the container through the bridge gateway).
+      TRUSTED_PROXIES: loopback,docker
+      # cloudflared (qt-tunnel) sends the visitor IP in Cf-Connecting-Ip.
+      TRUST_CF_CONNECTING_IP: "1"
+      # Always HTTPS publicly (Cloudflare), so force Secure cookies.
+      COOKIE_SECURE: "1"
+      # Public site: browsers may only connect from the real origin.
+      WORLDS_ALLOWED_ORIGINS: https://qt.log2u.me
+      WORLDS_ORIGIN_STRICT: "1"
+      # Test-only switches: forced off (the server also refuses them in production).
+      WORLDS_AUTH_MOCK: "0"
+      WORLDS_TEST_MODE: "0"
+      WORLDS_ALLOW_TEST_DATES: "0"
+    volumes:
+      - qt-worlds-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Cloudflare Tunnel: outbound-only connection, no router port forwarding.
+  # Public hostname qt.log2u.me -> http://qt-worlds:5181 (set in the Zero Trust dashboard).
+  qt-tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    container_name: qt-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file:
+      - deploy/.env.tunnel   # TUNNEL_TOKEN=... (gitignored, chmod 600)
+    depends_on:
+      - qt-worlds
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  qt-worlds-data:

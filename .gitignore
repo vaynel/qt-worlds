@@ -1,0 +1,35 @@
+node_modules
+dist
+deploy/.env.live
+**/.env
+server/data/
+deploy/.env.tunnel
+deploy/tunnel_token.txt
+
+# raw downloads / runtime data
+data/raw/
+*.db
+*.db-wal
+*.db-shm
+**/backups/
+
+# secrets (examples are committed)
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.live.example
+**/.env.*
+!**/.env.*.example
+*oauth*.json
+client_secret*.json
+*.pem
+*token*.txt
+
+# test output
+test-results/
+playwright-report/
+coverage/
+
+# keep committed templates
+!**/.env.example
+!**/.env.*.example
