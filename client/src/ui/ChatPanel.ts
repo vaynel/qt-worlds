@@ -62,6 +62,7 @@ export class ChatPanel {
     if (visible === this.visible) return;
     this.visible = visible;
     this.root.hidden = !visible;
+    document.body.classList.toggle('chat-open', visible);
     if (!visible && this.focused) this.input.blur();
   }
 

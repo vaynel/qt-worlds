@@ -1,6 +1,10 @@
 import { randomInt } from 'node:crypto';
 import {
+  cleanMultiline,
   cleanText,
+  GROUP_CHAT_DAYS,
+  GROUP_CHAT_MAX,
+  type GroupMessage,
   DATE_RE,
   LANTERN_SLOTS,
   REACTION_TYPES,
@@ -241,6 +245,11 @@ export class GroupService {
     return new Set((this.db.prepare('SELECT group_id FROM group_members WHERE user_id = ?').all(userId) as { group_id: number }[]).map((r) => r.group_id));
   }
 
+  info(groupId: number): { id: number; name: string; ownerId: number } | null {
+    const g = this.db.prepare('SELECT id, name, owner_id FROM groups WHERE id = ?').get(groupId) as { id: number; name: string; owner_id: number } | undefined;
+    return g ? { id: g.id, name: g.name, ownerId: g.owner_id } : null;
+  }
+
   isMember(userId: number, groupId: number): boolean {
     return !!this.db.prepare('SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?').get(userId, groupId);
   }
@@ -473,5 +482,138 @@ export class LanternService {
   unsave(userId: number, id: number) {
     this.db.prepare('DELETE FROM saved_lanterns WHERE user_id = ? AND lantern_id = ?').run(userId, id);
     this.db.prepare("DELETE FROM reactions WHERE lantern_id = ? AND user_id = ? AND type = 'record'").run(id, userId);
+  }
+}
+
+// =============================================================================
+// 모임 채팅 (group text chat): members only, kept 7 days
+// =============================================================================
+
+interface MessageRow {
+  id: number;
+  group_id: number;
+  user_id: number | null;
+  kind: 'msg' | 'system';
+  text: string;
+  created_at: number;
+  deleted_at: number | null;
+  hidden_at: number | null;
+  nickname: string | null;
+}
+
+const SELECT_MESSAGE = `SELECT m.*, u.nickname AS nickname FROM group_messages m LEFT JOIN users u ON u.id = m.user_id`;
+
+export class GroupChatService {
+  constructor(
+    private readonly db: DB,
+    private readonly groups: GroupService,
+  ) {}
+
+  /** Non-members get the same 404 as a missing group. */
+  private member(userId: number, groupId: number) {
+    if (!Number.isInteger(groupId) || !this.groups.isMember(userId, groupId)) throw new HttpError(404, 'not_found', '모임을 찾을 수 없어요.');
+  }
+
+  out(m: MessageRow): GroupMessage {
+    const gone = m.deleted_at !== null || m.hidden_at !== null;
+    return {
+      id: m.id,
+      groupId: m.group_id,
+      userId: m.user_id,
+      nickname: m.kind === 'system' ? '' : (m.nickname ?? '알 수 없음'),
+      kind: m.kind,
+      text: gone ? '' : m.text,
+      createdAt: new Date(m.created_at).toISOString(),
+      deleted: m.deleted_at !== null,
+      hidden: m.hidden_at !== null,
+    };
+  }
+
+  get(id: number): GroupMessage | null {
+    const m = this.db.prepare(`${SELECT_MESSAGE} WHERE m.id = ?`).get(id) as MessageRow | undefined;
+    return m ? this.out(m) : null;
+  }
+
+  list(userId: number, groupId: number, before: number | null, limit = 50) {
+    this.member(userId, groupId);
+    const since = Date.now() - GROUP_CHAT_DAYS * DAY_MS;
+    const rows = this.db
+      .prepare(`${SELECT_MESSAGE} WHERE m.group_id = ? AND m.created_at >= ? ${before ? 'AND m.id < ?' : ''} ORDER BY m.id DESC LIMIT ?`)
+      .all(...(before ? [groupId, since, before, limit + 1] : [groupId, since, limit + 1])) as MessageRow[];
+    const hasMore = rows.length > limit;
+    return { messages: rows.slice(0, limit).reverse().map((m) => this.out(m)), hasMore };
+  }
+
+  post(userId: number, groupId: number, raw: unknown): GroupMessage {
+    this.member(userId, groupId);
+    const text = typeof raw === 'string' ? cleanMultiline(raw) : '';
+    if (!text) throw new HttpError(400, 'empty', '내용을 적어 주세요.');
+    if ([...text].length > GROUP_CHAT_MAX) throw new HttpError(400, 'too_long', `${GROUP_CHAT_MAX}자까지 보낼 수 있어요.`);
+    const info = this.db
+      .prepare("INSERT INTO group_messages (group_id, user_id, kind, text, created_at) VALUES (?, ?, 'msg', ?, ?)")
+      .run(groupId, userId, text, Date.now());
+    const id = Number(info.lastInsertRowid);
+    // Sending counts as reading everything up to it.
+    this.markRead(userId, groupId, id);
+    return this.get(id)!;
+  }
+
+  system(groupId: number, text: string): GroupMessage {
+    const info = this.db
+      .prepare("INSERT INTO group_messages (group_id, user_id, kind, text, created_at) VALUES (?, NULL, 'system', ?, ?)")
+      .run(groupId, text, Date.now());
+    return this.get(Number(info.lastInsertRowid))!;
+  }
+
+  /** Delete my own message. */
+  remove(userId: number, groupId: number, id: number): GroupMessage {
+    this.member(userId, groupId);
+    const r = this.db
+      .prepare("UPDATE group_messages SET deleted_at = ? WHERE id = ? AND group_id = ? AND user_id = ? AND kind = 'msg' AND deleted_at IS NULL")
+      .run(Date.now(), id, groupId, userId);
+    if (!r.changes) throw new HttpError(404, 'not_found', '내가 보낸 메시지만 지울 수 있어요.');
+    return this.get(id)!;
+  }
+
+  /** The group creator hides any message in their group. */
+  hide(userId: number, groupId: number, id: number): GroupMessage {
+    this.member(userId, groupId);
+    if (this.groups.info(groupId)?.ownerId !== userId) throw new HttpError(403, 'not_owner', '모임을 만든 분만 가릴 수 있어요.');
+    const r = this.db.prepare('UPDATE group_messages SET hidden_at = ? WHERE id = ? AND group_id = ? AND hidden_at IS NULL').run(Date.now(), id, groupId);
+    if (!r.changes) throw new HttpError(404, 'not_found', '메시지를 찾을 수 없어요.');
+    return this.get(id)!;
+  }
+
+  markRead(userId: number, groupId: number, lastId: number): number {
+    this.member(userId, groupId);
+    const max = (this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM group_messages WHERE group_id = ?').get(groupId) as { m: number }).m;
+    const id = Math.max(0, Math.min(Number.isInteger(lastId) ? lastId : max, max));
+    this.db
+      .prepare(
+        `INSERT INTO group_reads (group_id, user_id, last_read_id) VALUES (?, ?, ?)
+         ON CONFLICT (group_id, user_id) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`,
+      )
+      .run(groupId, userId, id);
+    return (this.db.prepare('SELECT last_read_id FROM group_reads WHERE group_id = ? AND user_id = ?').get(groupId, userId) as { last_read_id: number }).last_read_id;
+  }
+
+  /** Unread messages from others (not deleted/hidden), per group. */
+  unread(userId: number, groupId: number): number {
+    const since = Date.now() - GROUP_CHAT_DAYS * DAY_MS;
+    return (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM group_messages m
+           WHERE m.group_id = ? AND m.created_at >= ? AND m.kind = 'msg' AND (m.user_id IS NULL OR m.user_id != ?)
+             AND m.deleted_at IS NULL AND m.hidden_at IS NULL
+             AND m.id > COALESCE((SELECT last_read_id FROM group_reads r WHERE r.group_id = m.group_id AND r.user_id = ?), 0)`,
+        )
+        .get(groupId, since, userId, userId) as { n: number }
+    ).n;
+  }
+
+  /** Drop messages older than 7 days (hourly). `now` is injectable for tests. */
+  purge(now = Date.now()): number {
+    return this.db.prepare('DELETE FROM group_messages WHERE created_at < ?').run(now - GROUP_CHAT_DAYS * DAY_MS).changes;
   }
 }

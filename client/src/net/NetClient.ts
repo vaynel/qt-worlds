@@ -9,6 +9,9 @@ import {
   type WordPassage,
   type AccountInfo,
   type LanternInfo,
+  type VoicePeerInfo,
+  type VoiceSignal,
+  type GroupMessage,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -40,6 +43,15 @@ export interface NetHandlers {
   lantern(l: LanternInfo): void;
   lanternGone(id: number): void;
   correct(x: number, y: number, z: number): void;
+  voiceRoom(m: { groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[] }): void;
+  voicePeer(peer: VoicePeerInfo, joined: boolean): void;
+  voicePeerLeft(id: string): void;
+  voiceSignal(from: string, data: VoiceSignal): void;
+  voiceLeft(reason: 'left' | 'kicked' | 'removed'): void;
+  voiceError(code: ErrorCode, message: string): void;
+  groupChat(message: GroupMessage): void;
+  groupChatUpdate(message: GroupMessage): void;
+  groupRead(groupId: number, lastReadId: number): void;
 }
 
 /** Codes after which reconnecting would just fail again. */
@@ -144,6 +156,33 @@ export class NetClient {
         break;
       case 'correct':
         this.handlers.correct?.(msg.x, msg.y, msg.z);
+        break;
+      case 'voiceRoom':
+        this.handlers.voiceRoom?.(msg);
+        break;
+      case 'voicePeer':
+        this.handlers.voicePeer?.(msg.peer, msg.joined);
+        break;
+      case 'voicePeerLeft':
+        this.handlers.voicePeerLeft?.(msg.id);
+        break;
+      case 'voiceSignal':
+        this.handlers.voiceSignal?.(msg.from, msg.data);
+        break;
+      case 'voiceLeft':
+        this.handlers.voiceLeft?.(msg.reason);
+        break;
+      case 'voiceError':
+        this.handlers.voiceError?.(msg.code, msg.message);
+        break;
+      case 'groupChat':
+        this.handlers.groupChat?.(msg.message);
+        break;
+      case 'groupChatUpdate':
+        this.handlers.groupChatUpdate?.(msg.message);
+        break;
+      case 'groupRead':
+        this.handlers.groupRead?.(msg.groupId, msg.lastReadId);
         break;
       case 'word':
         this.handlers.word?.(msg.word);
@@ -266,6 +305,17 @@ export class NetClient {
         case 'word':
           if (msg.word && typeof msg.word.text === 'string') this.dispatch(msg);
           break;
+        case 'voiceRoom':
+        case 'voicePeer':
+        case 'voicePeerLeft':
+        case 'voiceSignal':
+        case 'voiceLeft':
+        case 'voiceError':
+        case 'groupChat':
+        case 'groupChatUpdate':
+        case 'groupRead':
+          this.dispatch(msg);
+          break;
         case 'error':
           if (msg.code === 'bad_nickname' || msg.code === 'full' || msg.code === 'version' || msg.code === 'name_taken') {
             refusal = new JoinRefused(msg.code, msg.message);
@@ -334,6 +384,35 @@ export class NetClient {
 
   stand(): void {
     this.raw({ t: 'stand' });
+  }
+
+  voiceJoin(groupId: number): void {
+    this.raw({ t: 'voiceJoin', groupId });
+  }
+
+  voiceLeave(): void {
+    this.raw({ t: 'voiceLeave' });
+  }
+
+  voiceSignal(to: string, data: VoiceSignal): void {
+    this.raw({ t: 'voiceSignal', to, data });
+  }
+
+  voiceMute(muted: boolean): void {
+    this.raw({ t: 'voiceMute', muted });
+  }
+
+  voiceSpeaking(speaking: boolean): void {
+    this.raw({ t: 'voiceSpeaking', speaking });
+  }
+
+  voiceKick(target: string): void {
+    this.raw({ t: 'voiceKick', target });
+  }
+
+  /** Test hook: drop the socket as a network blip would (auto-reconnects). */
+  debugDrop(): void {
+    this.ws?.close(4999, 'test drop');
   }
 
   close(): void {

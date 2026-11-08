@@ -28,6 +28,7 @@ export class NameTag {
   private nextCheck = 0;
   private name: string;
   private guest: boolean;
+  private speaking = false;
 
   constructor(
     private readonly parent: THREE.Object3D,
@@ -41,7 +42,7 @@ export class NameTag {
   }
 
   private build(): THREE.Sprite {
-    const s = createNameTag(this.name, this.guest);
+    const s = createNameTag(this.name, this.guest, false, this.speaking);
     s.position.set(0, this.height, 0);
     s.renderOrder = 11;
     this.parent.add(s);
@@ -58,6 +59,19 @@ export class NameTag {
 
   get visible(): boolean {
     return this.sprite.visible && this.sprite.material.opacity > 0.05;
+  }
+
+  /** 🔊 speaking ring while this person talks in a voice prayer room. */
+  setSpeaking(speaking: boolean) {
+    if (speaking === this.speaking) return;
+    this.speaking = speaking;
+    this.parent.remove(this.sprite);
+    disposeSprite(this.sprite);
+    this.sprite = this.build();
+  }
+
+  get isSpeaking(): boolean {
+    return this.speaking;
   }
 
   set(name: string, guest = this.guest) {

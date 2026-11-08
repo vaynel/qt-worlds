@@ -2,13 +2,13 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { MAX_FRAME_BYTES, MAX_PLAYERS } from '../../shared/protocol.js';
-import { Api } from './api.js';
+import { Api, IceServers } from './api.js';
 import { googleProvider, MockProvider, OidcFlow, Sessions, Users, type AuthConfig } from './auth.js';
 import { DailyWord } from './dailyWord.js';
 import { defaultDbPath, openDb, serverRoot } from './db.js';
 import { originAllowed, requestInfo, StaticClient } from './http.js';
 import { Room } from './Room.js';
-import { GroupService, LanternService, WordBookService } from './services.js';
+import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -50,6 +50,7 @@ const users = new Users(db);
 const groups = new GroupService(db);
 const lanterns = new LanternService(db, groups);
 const wordbook = new WordBookService(db, dailyWord, TEST_MODE);
+const chat = new GroupChatService(db, groups);
 
 const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, '') || null;
 const mock = AUTH_MOCK ? await MockProvider.create(`http://127.0.0.1:${PORT}/api/auth/mock`) : null;
@@ -74,7 +75,9 @@ const room = new Room({
   groups,
   lanterns,
 });
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room });
+const ice = new IceServers();
+if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, testMode: TEST_MODE });
 
 const clientDist = resolve(serverRoot(), '../client/dist');
 const staticClient = SERVE_CLIENT && StaticClient.available(clientDist) ? new StaticClient(clientDist) : null;
@@ -137,7 +140,12 @@ const heartbeat = setInterval(() => {
     ws.ping();
   }
 }, HEARTBEAT_MS);
-const sweeper = setInterval(() => sessions.sweep(), 3_600_000);
+// Hourly: expired sessions, and group chat older than 7 days.
+const sweeper = setInterval(() => {
+  sessions.sweep();
+  chat.purge();
+}, 3_600_000);
+chat.purge();
 
 http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /ws, api /api) seed=${SEED} max=${MAX}`));
 

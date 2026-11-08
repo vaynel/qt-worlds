@@ -121,6 +121,15 @@ export class RemotePlayers {
     return this.players.has(id);
   }
 
+  setSpeaking(id: string, speaking: boolean): void {
+    this.players.get(id)?.tag.setSpeaking(speaking);
+  }
+
+  /** Clear every speaking ring (left the room). */
+  clearSpeaking(): void {
+    for (const p of this.players.values()) p.tag.setSpeaking(false);
+  }
+
   rename(id: string, name: string): void {
     const p = this.players.get(id);
     if (!p) return;
@@ -191,7 +200,19 @@ export class RemotePlayers {
   }
 
   /** Plain data for the debug/test hook. */
-  describe(): { id: string; name: string; x: number; z: number; seat: number; visible: boolean; inside: boolean; tag: string; guest: boolean; tagVisible: boolean }[] {
+  describe(): {
+    id: string;
+    name: string;
+    x: number;
+    z: number;
+    seat: number;
+    visible: boolean;
+    inside: boolean;
+    tag: string;
+    speakingTag: boolean;
+    guest: boolean;
+    tagVisible: boolean;
+  }[] {
     return [...this.players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -201,6 +222,7 @@ export class RemotePlayers {
       visible: p.avatar.root.visible,
       inside: p.inside,
       tag: p.tag.text,
+      speakingTag: p.tag.isSpeaking,
       guest: p.tag.isGuest,
       tagVisible: p.avatar.root.visible && p.tag.visible,
     }));

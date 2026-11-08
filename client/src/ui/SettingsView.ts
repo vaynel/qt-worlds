@@ -3,13 +3,14 @@ import type { AudioEngine, AudioSettings } from '../audio/AudioEngine';
 import { api, ApiError, logout, startGoogleLogin } from '../net/api';
 import { button, el, Modal } from './dom';
 
-type SliderKey = 'master' | 'ambience' | 'worship' | 'ui';
+type SliderKey = 'master' | 'ambience' | 'worship' | 'ui' | 'voice';
 
 const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
   { key: 'master', label: '전체', hint: '모든 소리의 크기' },
   { key: 'ambience', label: '환경음', hint: '바람, 모닥불, 골방의 고요한 소리' },
   { key: 'worship', label: '찬양', hint: '찬양 영상의 소리' },
   { key: 'ui', label: '효과음', hint: '편지 종소리, 책장 넘기는 소리' },
+  { key: 'voice', label: '음성', hint: '음성 기도방에서 들리는 목소리' },
 ];
 
 /** ⚙ 설정: volume sliders and a mute switch, saved in localStorage. */
@@ -25,7 +26,7 @@ export class SettingsView {
     // Keep the sliders in sync when something else (the player) changes a level.
     audio.onSettingsChange((s) => {
       if (!this.modal.isOpen) return;
-      for (const key of ['master', 'ambience', 'worship', 'ui'] as const) {
+      for (const key of ['master', 'ambience', 'worship', 'ui', 'voice'] as const) {
         const input = this.modal.sheet.querySelector<HTMLInputElement>(`#vol-${key}`);
         if (input && document.activeElement !== input) input.value = String(s[key]);
         const out = input?.parentElement?.querySelector('.settings-value');

@@ -2588,3 +2588,342 @@ body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
 body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) .worship-list {
   max-height: clamp(84px, calc(var(--vvh, 100vh) - 470px), 200px);
 }
+
+/* =================== M5: voice prayer rooms =================== */
+
+.voice-chip {
+  position: absolute;
+  z-index: 20;
+  left: var(--safe-left);
+  top: calc(var(--safe-top) + 100px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(260px, calc(100vw - 28px));
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--paper-line);
+  background: #fffaf0;
+  box-shadow: 0 4px 14px rgba(74, 52, 38, 0.18);
+}
+
+.voice-chip[hidden] {
+  display: none;
+}
+
+.voice-chip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.voice-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-mic {
+  flex: none;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: #f3e6cc;
+  font-size: 0.95rem;
+}
+
+.voice-mic[aria-pressed='true'] {
+  background: #d9f0dc;
+}
+
+.voice-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #c9b99a;
+}
+
+.voice-chip.speaking .voice-dot,
+.voice-row.speaking .voice-dot {
+  background: #4caa60;
+  box-shadow: 0 0 0 4px rgba(76, 170, 96, 0.25);
+}
+
+/* Phones: top-left under the place card (left of the worship handle). */
+body.touch .voice-chip {
+  max-width: 132px;
+  top: calc(var(--safe-top) + 100px);
+}
+
+/* ...but when the campfire chat sits at the top, go just above the joystick. */
+body.touch.chat-open:not(.worship-mini) .voice-chip {
+  top: auto;
+  bottom: calc(min(42vh, 260px) + 10px);
+}
+
+.sheet.voice-sheet {
+  width: min(480px, 100%);
+}
+
+.voice-body {
+  padding: 0 16px 16px;
+}
+
+.voice-list {
+  list-style: none;
+  margin: 8px 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #f7ecd7;
+}
+
+.voice-row.me {
+  background: #fff1cf;
+}
+
+.voice-name {
+  flex: 1 1 90px;
+  font-weight: 600;
+}
+
+.voice-vol {
+  flex: 1 1 120px;
+  accent-color: var(--accent);
+}
+
+.voice-row button {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.voice-join {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.voice-join.on {
+  background: #d9f0dc;
+  color: var(--ink);
+}
+
+/* =================== M5: group chat (모임 채팅) =================== */
+
+.badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #d9483b;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+.tool .badge {
+  margin-left: 4px;
+}
+
+.group-open {
+  flex: 1 1 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 2px;
+}
+
+.voice-chat {
+  flex: none;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: #f3e6cc;
+}
+
+.sheet.group-panel {
+  display: flex;
+  flex-direction: column;
+  height: min(82vh, 680px);
+}
+
+.gchat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 10px;
+}
+
+.gchat-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 0;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gchat-more-row {
+  text-align: center;
+}
+
+.gchat-empty,
+.gsys {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  padding: 6px;
+}
+
+.gmsg {
+  max-width: 88%;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: #f7ecd7;
+  margin-top: 6px;
+}
+
+.gmsg.cont {
+  margin-top: 0;
+}
+
+.gmsg.mine {
+  align-self: flex-end;
+  background: #ffe7b8;
+}
+
+.gmsg-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.8rem;
+}
+
+.gmsg-time {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+
+.gmsg-text {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.gmsg-text.gone {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.gmsg-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.gmsg-actions button {
+  padding: 2px 6px;
+  font-size: 0.72rem;
+}
+
+.gchat-form {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.gchat-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 120, 72, 0.4);
+  background: #fffdf7;
+  font: inherit;
+  font-size: 16px; /* no iOS zoom */
+  line-height: 1.4;
+  resize: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.gchat-status {
+  margin: 4px 2px;
+}
+
+.gchat-status:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .sheet.group-panel {
+    height: var(--vvh, 100dvh);
+    border-radius: 0;
+  }
+}
+
+@media (max-width: 999px) {
+  body.overlay-open.worship-on .sheet.group-panel {
+    height: 100%;
+    border-radius: 18px 18px 0 0;
+  }
+}
+
+/* Short screens (keyboard up): the message list gives way first. */
+.gchat-list {
+  min-height: 40px;
+}
+
+.sheet.group-panel {
+  overflow: hidden;
+}
+
+@media (max-height: 560px) {
+  .group-panel .settings-note,
+  .group-panel .book-tabs {
+    padding-bottom: 4px;
+  }
+  .group-panel .book-top {
+    padding: 6px 12px;
+  }
+}

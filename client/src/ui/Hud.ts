@@ -130,6 +130,23 @@ export class Hud {
     this.wordBtn.classList.toggle('has-new', isNew);
   }
 
+  /** 🔴 unread group chat messages on the 모임 button. */
+  setGroupsUnread(n: number) {
+    let badge = this.groupsBtn.querySelector<HTMLSpanElement>('.badge');
+    if (n <= 0) {
+      badge?.remove();
+      this.groupsBtn.setAttribute('aria-label', '모임');
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge';
+      this.groupsBtn.append(badge);
+    }
+    badge.textContent = n > 99 ? '99+' : String(n);
+    this.groupsBtn.setAttribute('aria-label', `모임 · 읽지 않은 메시지 ${n}개`);
+  }
+
   /** 찬양 button shows whether the player is open. */
   setWorshipOpen(open: boolean) {
     this.worshipOpen = open;

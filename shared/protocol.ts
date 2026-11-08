@@ -15,7 +15,58 @@ export const NICKNAME_MAX = 12;
 export const CHAT_MAX = 200;
 export const MAX_PLAYERS = 50;
 /** Hard cap for one incoming frame, in bytes. */
-export const MAX_FRAME_BYTES = 2048;
+/** Hard cap for one incoming frame (voice SDP offers need a few KB). */
+export const MAX_FRAME_BYTES = 16 * 1024;
+
+/** Voice prayer rooms (one per group). */
+export const VOICE_MAX = 8;
+export const VOICE_SDP_MAX = 12_000;
+export const VOICE_CANDIDATE_MAX = 1024;
+/** Kicked users can't rejoin that room for this long. */
+export const VOICE_KICK_BLOCK_MS = 10 * 60 * 1000;
+
+export interface VoicePeerInfo {
+  /** Session (connection) id, as used in snapshots. */
+  id: string;
+  name: string;
+  muted: boolean;
+  speaking: boolean;
+  /** Group creator (may kick). */
+  owner: boolean;
+}
+
+/** Group text chat (모임 채팅). */
+export const GROUP_CHAT_MAX = 500;
+export const GROUP_CHAT_DAYS = 7;
+
+export interface GroupMessage {
+  id: number;
+  groupId: number;
+  /** null for system lines. */
+  userId: number | null;
+  nickname: string;
+  kind: 'msg' | 'system';
+  /** Empty when deleted or hidden. */
+  text: string;
+  createdAt: string;
+  deleted: boolean;
+  hidden: boolean;
+}
+
+/** NFC, strip control characters except line breaks, at most 3 blank lines in a row. */
+export function cleanMultiline(value: string): string {
+  return value
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(UNSAFE_CHARS_KEEP_NL, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+export type VoiceSignal =
+  | { type: 'offer' | 'answer'; sdp: string }
+  | { type: 'ice'; candidate: { candidate: string; sdpMid: string | null; sdpMLineIndex: number | null } };
 
 /** Shared layout facts both sides need for validation (metres). */
 export const CAMPFIRE = { x: 50, z: -12, chatRadius: 12 } as const;
@@ -87,7 +138,13 @@ export type ClientMessage =
   | ({ t: 'state' } & StatePayload)
   | { t: 'chat'; text: string }
   | { t: 'sit'; mat: number }
-  | { t: 'stand' };
+  | { t: 'stand' }
+  | { t: 'voiceJoin'; groupId: number }
+  | { t: 'voiceLeave' }
+  | { t: 'voiceSignal'; to: string; data: VoiceSignal }
+  | { t: 'voiceMute'; muted: boolean }
+  | { t: 'voiceSpeaking'; speaking: boolean }
+  | { t: 'voiceKick'; target: string };
 
 export interface PlayerInfo {
   id: string;
@@ -112,7 +169,11 @@ export type ErrorCode =
   | 'rate_limited'
   | 'not_near'
   | 'mat_taken'
-  | 'too_many';
+  | 'too_many'
+  | 'voice_not_member'
+  | 'voice_full'
+  | 'voice_blocked'
+  | 'voice_login';
 
 /** Logged-in account as the server sees it. */
 export interface AccountInfo {
@@ -166,6 +227,21 @@ export type ServerMessage =
   | { t: 'lanterns'; lanterns: LanternInfo[] }
   | { t: 'lantern'; lantern: LanternInfo }
   | { t: 'lanternGone'; id: number }
+  /** You are in a voice room: everyone already there (connect to each). */
+  | { t: 'voiceRoom'; groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[] }
+  /** Someone joined or changed mute/speaking. */
+  | { t: 'voicePeer'; peer: VoicePeerInfo; joined: boolean }
+  | { t: 'voicePeerLeft'; id: string }
+  | { t: 'voiceSignal'; from: string; data: VoiceSignal }
+  /** You left the room (left, kicked, removed from the group, error). */
+  | { t: 'voiceLeft'; reason: 'left' | 'kicked' | 'removed' }
+  | { t: 'voiceError'; code: ErrorCode; message: string }
+  /** New group chat message (members only). */
+  | { t: 'groupChat'; message: GroupMessage }
+  /** A message was deleted or hidden. */
+  | { t: 'groupChatUpdate'; message: GroupMessage }
+  /** This user read a group on some device (sync unread badges). */
+  | { t: 'groupRead'; groupId: number; lastReadId: number }
   /** The server refused a position (too fast); snap back here. */
   | { t: 'correct'; x: number; y: number; z: number }
   | { t: 'join'; player: PlayerInfo }
@@ -182,6 +258,8 @@ export type ServerMessage =
 // Control characters, zero-width/bidi tricks and line separators.
 // eslint-disable-next-line no-control-regex
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+const UNSAFE_CHARS_KEEP_NL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 
 /** NFC-normalise, trim and strip invisible/control characters. */
 export function cleanText(value: string): string {
@@ -267,6 +345,32 @@ export function parseClientMessage(data: string): ClientMessage | null {
       return Number.isInteger(m.mat) && (m.mat as number) >= 0 && (m.mat as number) < MAT_COUNT ? { t: 'sit', mat: m.mat as number } : null;
     case 'stand':
       return { t: 'stand' };
+    case 'voiceJoin':
+      return Number.isInteger(m.groupId) && (m.groupId as number) > 0 ? { t: 'voiceJoin', groupId: m.groupId as number } : null;
+    case 'voiceLeave':
+      return { t: 'voiceLeave' };
+    case 'voiceMute':
+      return typeof m.muted === 'boolean' ? { t: 'voiceMute', muted: m.muted } : null;
+    case 'voiceSpeaking':
+      return typeof m.speaking === 'boolean' ? { t: 'voiceSpeaking', speaking: m.speaking } : null;
+    case 'voiceKick':
+      return typeof m.target === 'string' && m.target.length <= 32 ? { t: 'voiceKick', target: m.target } : null;
+    case 'voiceSignal': {
+      if (typeof m.to !== 'string' || m.to.length > 32) return null;
+      const d = m.data as Record<string, unknown> | null;
+      if (!d || typeof d !== 'object') return null;
+      if ((d.type === 'offer' || d.type === 'answer') && typeof d.sdp === 'string' && d.sdp.length <= VOICE_SDP_MAX) {
+        return { t: 'voiceSignal', to: m.to, data: { type: d.type, sdp: d.sdp } };
+      }
+      if (d.type === 'ice') {
+        const c = d.candidate as Record<string, unknown> | null;
+        if (!c || typeof c !== 'object' || typeof c.candidate !== 'string' || c.candidate.length > VOICE_CANDIDATE_MAX) return null;
+        const mid = typeof c.sdpMid === 'string' && c.sdpMid.length <= 32 ? c.sdpMid : null;
+        const line = Number.isInteger(c.sdpMLineIndex) && (c.sdpMLineIndex as number) >= 0 && (c.sdpMLineIndex as number) < 64 ? (c.sdpMLineIndex as number) : null;
+        return { t: 'voiceSignal', to: m.to, data: { type: 'ice', candidate: { candidate: c.candidate, sdpMid: mid, sdpMLineIndex: line } } };
+      }
+      return null;
+    }
     default:
       return null;
   }

@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { safeReturn, type MockProvider, type OidcFlow, type Sessions, type SessionUser, type Users } from './auth.js';
 import { HttpError, originAllowed, RateLimiter, readJson, redirect, requestInfo, sendJson, type RequestInfo } from './http.js';
-import type { GroupService, LanternService, WordBookService } from './services.js';
+import type { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
+import type { GroupMessage } from '../../shared/protocol.js';
+import { TokenBucket } from './rateLimit.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -9,6 +11,71 @@ export interface RoomEvents {
   lanternRemoved(id: number): void;
   membershipChanged(userId: number): void;
   nicknameChanged(userId: number, nickname: string): void;
+  voiceCount(groupId: number): number;
+  groupChat(message: GroupMessage, update: boolean): void;
+  groupRead(userId: number, groupId: number, lastReadId: number): void;
+}
+
+/** ICE servers for WebRTC: short-lived Cloudflare TURN credentials, minted server-side. */
+export class IceServers {
+  private readonly cache = new Map<number, { servers: unknown[]; expires: number }>();
+  private warned = false;
+  private readonly keyId = process.env.TURN_KEY_ID?.trim() ?? '';
+  private readonly token = process.env.TURN_KEY_API_TOKEN?.trim() ?? '';
+  /** Overridable for tests (a local mock of the Cloudflare API). */
+  private readonly base = (process.env.TURN_API_BASE?.trim() || 'https://rtc.live.cloudflare.com').replace(/\/$/, '');
+  static readonly TTL_S = 1800;
+  /** Re-use minted credentials per user for a few minutes. */
+  static readonly CACHE_MS = 5 * 60 * 1000;
+  calls = 0;
+
+  get configured(): boolean {
+    return !!(this.keyId && this.token);
+  }
+
+  /** Only urls/username/credential are passed on: never the API key or token. */
+  private sanitize(list: unknown): unknown[] {
+    if (!Array.isArray(list)) return [];
+    const out: unknown[] = [];
+    for (const raw of list.slice(0, 8)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const s = raw as Record<string, unknown>;
+      const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u): u is string => typeof u === 'string' && /^(stun|turns?):/.test(u)).slice(0, 8);
+      if (urls.length === 0) continue;
+      const entry: Record<string, unknown> = { urls };
+      if (typeof s.username === 'string') entry.username = s.username;
+      if (typeof s.credential === 'string') entry.credential = s.credential;
+      out.push(entry);
+    }
+    return out;
+  }
+
+  async forUser(userId: number): Promise<unknown[]> {
+    const hit = this.cache.get(userId);
+    if (hit && hit.expires > Date.now()) return hit.servers;
+    if (!this.configured) {
+      if (!this.warned) {
+        console.warn('TURN_KEY_ID / TURN_KEY_API_TOKEN not set: voice uses STUN only (may fail behind CGNAT)');
+        this.warned = true;
+      }
+      return [{ urls: ['stun:stun.cloudflare.com:3478'] }];
+    }
+    this.calls++;
+    const res = await fetch(`${this.base}/v1/turn/keys/${encodeURIComponent(this.keyId)}/credentials/generate-ice-servers`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ttl: IceServers.TTL_S }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      console.error(`TURN credential request failed (${res?.status ?? 'network'})`);
+      return [{ urls: ['stun:stun.cloudflare.com:3478'] }];
+    }
+    const servers = this.sanitize(((await res.json().catch(() => ({}))) as { iceServers?: unknown }).iceServers);
+    this.cache.set(userId, { servers, expires: Date.now() + IceServers.CACHE_MS });
+    if (this.cache.size > 5000) this.cache.clear();
+    return servers;
+  }
 }
 
 export interface ApiDeps {
@@ -20,6 +87,10 @@ export interface ApiDeps {
   groups: GroupService;
   lanterns: LanternService;
   room: RoomEvents;
+  ice: IceServers;
+  chat: GroupChatService;
+  /** Test-only endpoints (simulated clock). Never in production. */
+  testMode: boolean;
 }
 
 type Handler = (ctx: Ctx) => Promise<void> | void;
@@ -44,6 +115,19 @@ export class Api {
   private readonly authLimit = new RateLimiter(Number(process.env.AUTH_RATE_LIMIT ?? 30), 60_000);
   private readonly nicknameLimit = new RateLimiter(10, 3_600_000);
   private readonly joinLimit = new RateLimiter(10, 60_000);
+  private readonly iceLimit = new RateLimiter(10, 60_000);
+  /** Group chat: burst 5, then 1 every 2 s, per user. */
+  private readonly chatBuckets = new Map<number, TokenBucket>();
+
+  private chatAllowed(userId: number): boolean {
+    let b = this.chatBuckets.get(userId);
+    if (!b) {
+      b = new TokenBucket(5, 0.5);
+      this.chatBuckets.set(userId, b);
+      if (this.chatBuckets.size > 10_000) this.chatBuckets.clear();
+    }
+    return b.take();
+  }
 
   constructor(private readonly d: ApiDeps) {
     const r = (method: string, path: string, handler: Handler) =>
@@ -141,24 +225,85 @@ export class Api {
     });
 
     // ---------------- groups
-    r('GET', '/api/groups', ({ res, user }) => sendJson(res, 200, { groups: d.groups.list(this.signedIn(user).id) }));
+    r('GET', '/api/groups', ({ res, user }) =>
+      sendJson(res, 200, {
+        groups: d.groups.list(this.signedIn(user).id).map((g) => ({ ...g, voice: d.room.voiceCount(g.id), unread: d.chat.unread(user!.id, g.id) })),
+      }),
+    );
+
+    // ---------------- 모임 채팅 (members only; others get 404)
+    r('GET', '/api/groups/:id/messages', ({ res, user, params, query }) => {
+      const u = this.signedIn(user);
+      const before = query.get('before') ? Number(query.get('before')) : null;
+      sendJson(res, 200, d.chat.list(u.id, id(params[0]), Number.isInteger(before) ? before : null));
+    });
+    r('POST', '/api/groups/:id/messages', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const gid = id(params[0]);
+      const body = await readJson(req);
+      if (!d.groups.isMember(u.id, gid)) throw new HttpError(404, 'not_found', '모임을 찾을 수 없어요.');
+      if (!this.chatAllowed(u.id)) throw new HttpError(429, 'rate_limited', '조금 천천히 보내 주세요.');
+      const m = d.chat.post(u.id, gid, body.text);
+      d.room.groupChat(m, false);
+      d.room.groupRead(u.id, gid, m.id);
+      sendJson(res, 201, m);
+    });
+    r('DELETE', '/api/groups/:id/messages/:mid', ({ res, user, params }) => {
+      const m = d.chat.remove(this.signedIn(user).id, id(params[0]), id(params[1]));
+      d.room.groupChat(m, true);
+      sendJson(res, 200, m);
+    });
+    r('POST', '/api/groups/:id/messages/:mid/hide', ({ res, user, params }) => {
+      const m = d.chat.hide(this.signedIn(user).id, id(params[0]), id(params[1]));
+      d.room.groupChat(m, true);
+      sendJson(res, 200, m);
+    });
+    r('POST', '/api/groups/:id/read', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const gid = id(params[0]);
+      const body = await readJson(req);
+      const last = d.chat.markRead(u.id, gid, Number(body.lastId));
+      d.room.groupRead(u.id, gid, last);
+      sendJson(res, 200, { lastReadId: last, unread: d.chat.unread(u.id, gid) });
+    });
+    if (d.testMode) {
+      // Test-only: purge as if the clock were `days` later.
+      r('POST', '/api/test/chat-purge', async ({ req, res }) => {
+        const days = Number((await readJson(req)).days) || 0;
+        sendJson(res, 200, { removed: d.chat.purge(Date.now() + days * 86_400_000) });
+      });
+    }
+
+    // ---------------- voice (ICE servers for group members only)
+    r('GET', '/api/voice/ice', async ({ res, user, query }) => {
+      const u = this.signedIn(user);
+      const groupId = Number(query.get('group'));
+      if (!Number.isInteger(groupId) || !d.groups.isMember(u.id, groupId)) throw new HttpError(403, 'voice_not_member', '모임 사람만 음성 기도방을 쓸 수 있어요.');
+      this.limit(this.iceLimit, `user:${u.id}`);
+      sendJson(res, 200, { iceServers: await d.ice.forUser(u.id) });
+    });
     r('POST', '/api/groups', async ({ req, res, user }) => {
       const u = this.signedIn(user);
       const g = d.groups.create(u.id, (await readJson(req)).name);
       d.room.membershipChanged(u.id);
+      d.room.groupChat(d.chat.system(g.id, `${u.nickname}님이 모임을 만들었어요`), false);
       sendJson(res, 201, g);
     });
     r('POST', '/api/groups/join', async ({ req, res, user }) => {
       const u = this.signedIn(user);
       this.limit(this.joinLimit, `user:${u.id}`);
+      const before = d.groups.list(u.id).length;
       const g = d.groups.join(u.id, (await readJson(req)).code);
       d.room.membershipChanged(u.id);
+      if (d.groups.list(u.id).length > before) d.room.groupChat(d.chat.system(g.id, `${u.nickname}님이 모임에 함께했어요`), false);
       sendJson(res, 200, g);
     });
     r('POST', '/api/groups/:id/leave', ({ res, user, params }) => {
       const u = this.signedIn(user);
-      d.groups.leave(u.id, id(params[0]));
+      const gid = id(params[0]);
+      d.groups.leave(u.id, gid);
       d.room.membershipChanged(u.id);
+      d.room.groupChat(d.chat.system(gid, `${u.nickname}님이 모임을 떠났어요`), false);
       sendJson(res, 200, { ok: true });
     });
 

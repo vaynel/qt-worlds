@@ -88,7 +88,7 @@ export function createLabelSprite(title: string, subtitle?: string): THREE.Sprit
  * Paper-style nickname tag above a player. Guests get a small "손님" marker.
  * `dark` keeps the older dark pill (used for lantern owner labels).
  */
-export function createNameTag(name: string, guest = false, dark = false): THREE.Sprite {
+export function createNameTag(name: string, guest = false, dark = false, speaking = false): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   const font = `700 ${22 * SCALE}px ${UI_FONT}`;
@@ -98,15 +98,43 @@ export function createNameTag(name: string, guest = false, dark = false): THREE.
   ctx.font = small;
   const markW = guest ? ctx.measureText('손님').width + 16 * SCALE : 0;
   const gap = guest ? 8 * SCALE : 0;
-  const width = Math.ceil(nameW + markW + gap + 30 * SCALE);
+  const speakW = speaking ? 26 * SCALE : 0;
+  const width = Math.ceil(nameW + markW + gap + speakW + 30 * SCALE);
   const height = 40 * SCALE;
   canvas.width = width;
   canvas.height = height;
   if (dark) pill(ctx, width, height, 20 * SCALE, false, 'rgba(74, 52, 38, 0.62)', 'rgba(255, 248, 234, 0.35)');
-  else pill(ctx, width, height, 20 * SCALE, false, 'rgba(255, 248, 234, 0.93)', 'rgba(176, 120, 72, 0.5)');
+  else pill(ctx, width, height, 20 * SCALE, false, 'rgba(255, 248, 234, 0.93)', speaking ? 'rgba(76, 170, 96, 0.95)' : 'rgba(176, 120, 72, 0.5)');
+  if (speaking) {
+    // Speaking ring: a bold green outline plus a small drawn speaker with waves.
+    ctx.lineWidth = 4 * SCALE;
+    ctx.strokeStyle = 'rgba(76, 170, 96, 0.95)';
+    ctx.beginPath();
+    ctx.roundRect(2 * SCALE, 2 * SCALE, width - 4 * SCALE, height - 4 * SCALE, 18 * SCALE);
+    ctx.stroke();
+  }
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   let x = 15 * SCALE;
+  if (speaking) {
+    const cy = height / 2;
+    ctx.fillStyle = '#3f8f52';
+    ctx.beginPath();
+    ctx.moveTo(x, cy - 4 * SCALE);
+    ctx.lineTo(x + 5 * SCALE, cy - 4 * SCALE);
+    ctx.lineTo(x + 11 * SCALE, cy - 9 * SCALE);
+    ctx.lineTo(x + 11 * SCALE, cy + 9 * SCALE);
+    ctx.lineTo(x + 5 * SCALE, cy + 4 * SCALE);
+    ctx.lineTo(x, cy + 4 * SCALE);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#3f8f52';
+    ctx.lineWidth = 2 * SCALE;
+    ctx.beginPath();
+    ctx.arc(x + 12 * SCALE, cy, 6 * SCALE, -0.8, 0.8);
+    ctx.stroke();
+    x += speakW;
+  }
   ctx.font = font;
   ctx.fillStyle = dark ? '#fff8ea' : '#3f2c20';
   ctx.fillText(name, x, height / 2 + SCALE);

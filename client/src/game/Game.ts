@@ -14,6 +14,8 @@ import { button, el } from '../ui/dom';
 import { LanternField } from '../world/LanternField';
 import { NameTag, type TagView } from '../world/NameTag';
 import { PathGlow } from '../world/PathGlow';
+import { VoiceClient } from '../voice/VoiceClient';
+import { VoicePanel } from '../ui/VoicePanel';
 import { Guide } from '../ui/Guide';
 import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
@@ -90,13 +92,15 @@ export class Game {
   private nearLantern: number | null = null;
   private localTag: NameTag | null = null;
   private readonly guide: Guide;
+  private voice: VoiceClient | null = null;
+  private voicePanel: VoicePanel | null = null;
   private pathGlow: PathGlow | null = null;
   private readonly guideDue: boolean;
   private readonly raycaster = new THREE.Raycaster();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    session: GameSession,
+    private readonly session: GameSession,
   ) {
     const params = new URLSearchParams(window.location.search);
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
@@ -160,18 +164,47 @@ export class Game {
       isTouch: () => this.input.isTouch,
       isInside: () => this.inCloset,
       onLocalName: (name, guest) => this.setLocalName(name, guest),
+      onReconnect: () => this.voice?.rejoinAfterReconnect(),
       tagView: () => this.tagView(),
       onWord: (word: WordPassage) => void this.devotion?.setWord(word),
     });
 
     this.audio = session.audio;
+    // Group voice prayer rooms (signed-in members only; the server enforces it).
+    if (session.net && session.account) {
+      const voice = new VoiceClient(session.net, {
+        onChange: () => this.onVoiceChange(),
+        toast: (text) => this.hud.toast(text, this.elapsed, 5),
+        onActive: (on) => {
+          session.worship.setDuck(on ? 0.2 : 1);
+          session.audio.duckForVoice(on);
+        },
+        masterVolume: () => session.audio.settings.voice,
+      });
+      this.voice = voice;
+      this.voicePanel = new VoicePanel(voice, (gid) => void this.groupsView.open(gid, 'chat'));
+      session.audio.onSettingsChange(() => voice.applyAllVolumes());
+    }
     this.store = session.store;
     this.account = session.account;
     this.lanterns = new LanternField(this.world.field);
     this.scene.add(this.lanterns.group);
     const needLogin = (reason: string) => this.loginPrompt.open(reason);
     this.lanternCard = new LanternCard(() => !!this.account, needLogin, () => undefined);
-    this.groupsView = new GroupsView(() => undefined);
+    this.groupsView = new GroupsView({
+      onChanged: () => undefined,
+      onVoice: (groupId) => void this.voice?.join(groupId),
+      onVoiceLeave: () => this.voice?.leave(),
+      currentVoice: () => this.voice?.groupId ?? null,
+      onUnread: (n) => this.hud.setGroupsUnread(n),
+    });
+    this.groupsView.setMe(session.account?.id ?? null);
+    if (session.account) void this.groupsView.refreshUnread();
+    session.net?.on({
+      groupChat: (m) => this.groupsView.receive(m),
+      groupChatUpdate: (m) => this.groupsView.update(m),
+      groupRead: (gid) => this.groupsView.readElsewhere(gid),
+    });
     session.net?.on({
       lanterns: (list) => this.lanterns.setAll(list),
       lantern: (l) => this.lanterns.upsert(l),
@@ -275,6 +308,16 @@ export class Game {
       this.chat.focus();
     }
   };
+
+  /** Voice state changed: panel, chip and speaking rings on name tags. */
+  private onVoiceChange() {
+    this.voicePanel?.update();
+    const v = this.voice;
+    if (!v) return;
+    this.social.remotes.clearSpeaking();
+    for (const p of v.peerList()) if (p.speaking && !p.localMuted) this.social.remotes.setSpeaking(p.id, true);
+    this.localTag?.setSpeaking(v.active && v.speaking && !v.muted);
+  }
 
   /** Our own nickname above our own avatar. */
   private setLocalName(name: string, guest: boolean) {
@@ -460,6 +503,11 @@ export class Game {
         this.player.teleport(x, z);
         this.rig.snap(this.player.position);
       },
+      voiceJoin: (groupId: number) => this.voice?.join(groupId),
+      voiceLeave: () => this.voice?.leave(),
+      voiceMute: (muted: boolean) => this.voice?.setMuted(muted),
+      voiceStats: () => this.voice?.stats(),
+      dropSocket: () => this.session.net?.debugDrop(),
       closetDoor: () => {
         const d = this.world.landmarks.closetDoor;
         return { x: d.x, z: d.z };
@@ -634,6 +682,7 @@ export class Game {
         lanterns: this.lanterns.describe(),
         nearLantern: this.nearLantern,
         guide: this.guide.describe(),
+        voice: this.voice?.describe() ?? null,
         localTag: this.localTag ? { text: this.localTag.text, guest: this.localTag.isGuest, visible: this.localTag.visible } : null,
       },
     };

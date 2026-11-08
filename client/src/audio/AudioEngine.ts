@@ -27,13 +27,15 @@ export interface AudioSettings {
   muted: boolean;
   /** Mute only the worship video (player's own mute button). */
   worshipMuted: boolean;
+  /** 음성: voices in a voice prayer room. */
+  voice: number;
 }
 
 /**
  * Defaults: ambience at 35 % of AMBIENCE_MAX = 0.175, about a third of the
  * M3 level (0.55), which users found too loud.
  */
-export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { master: 80, ambience: 35, worship: 70, ui: 60, muted: false, worshipMuted: false };
+export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { master: 80, ambience: 35, worship: 70, ui: 60, muted: false, worshipMuted: false, voice: 90 };
 
 const clamp100 = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : fallback;
@@ -50,6 +52,7 @@ function loadSettings(): AudioSettings {
         ui: clamp100(raw.ui, d.ui),
         muted: raw.muted === true,
         worshipMuted: raw.worshipMuted === true,
+        voice: clamp100(raw.voice, d.voice),
       };
     }
   } catch {
@@ -108,6 +111,7 @@ export class AudioEngine {
   private nextCrackle = 0;
   private mix: AmbienceMix = { wind: 1, fire: 0, room: 0 };
   private ducked = false;
+  private voiceDucked = false;
   settings: AudioSettings = loadSettings();
   private readonly listeners = new Set<(s: AudioSettings) => void>();
 
@@ -141,7 +145,7 @@ export class AudioEngine {
     const s = this.settings;
     return {
       master: s.muted ? 0 : (MASTER_MAX * s.master) / 100,
-      ambience: ((AMBIENCE_MAX * s.ambience) / 100) * (this.ducked ? DUCK_FACTOR : 1),
+      ambience: ((AMBIENCE_MAX * s.ambience) / 100) * (this.ducked ? DUCK_FACTOR : 1) * (this.voiceDucked ? DUCK_FACTOR : 1),
       ui: (UI_MAX * s.ui) / 100,
     };
   }
@@ -164,6 +168,7 @@ export class AudioEngine {
       ui: patch.ui !== undefined ? clamp100(patch.ui, s.ui) : s.ui,
       muted: patch.muted !== undefined ? patch.muted === true : s.muted,
       worshipMuted: patch.worshipMuted !== undefined ? patch.worshipMuted === true : s.worshipMuted,
+      voice: patch.voice !== undefined ? clamp100(patch.voice, s.voice) : s.voice,
     };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
@@ -317,6 +322,13 @@ export class AudioEngine {
   duck(on: boolean) {
     if (on === this.ducked) return;
     this.ducked = on;
+    this.applyBuses(0.4);
+  }
+
+  /** In a voice room: keep ambience quiet so voices are clear. */
+  duckForVoice(on: boolean) {
+    if (on === this.voiceDucked) return;
+    this.voiceDucked = on;
     this.applyBuses(0.4);
   }
 

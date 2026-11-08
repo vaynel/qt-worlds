@@ -5,6 +5,9 @@ import {
   MATS,
   MAT_COUNT,
   PROTOCOL_VERSION,
+  VOICE_KICK_BLOCK_MS,
+  VOICE_MAX,
+  type VoicePeerInfo,
   SIT_REACH,
   SNAPSHOT_HZ,
   parseClientMessage,
@@ -36,7 +39,11 @@ interface Client {
   baseName: string;
   state: StatePayload;
   seat: number;
-  buckets: { state: TokenBucket; chat: TokenBucket; seat: TokenBucket };
+  buckets: { state: TokenBucket; chat: TokenBucket; seat: TokenBucket; voice: TokenBucket; signal: TokenBucket; voiceState: TokenBucket };
+  /** Voice prayer room this connection is in (group id), or null. */
+  voiceGroup: number | null;
+  voiceMuted: boolean;
+  voiceSpeaking: boolean;
   strikes: number;
   strikeWindowStart: number;
   helloTimer: NodeJS.Timeout | null;
@@ -112,7 +119,14 @@ export class Room implements RoomEvents {
         state: new TokenBucket(30, 25),
         chat: new TokenBucket(3, 0.5),
         seat: new TokenBucket(4, 2),
+        voice: new TokenBucket(4, 0.5),
+        // ICE trickling comes in bursts; SDP is a handful per renegotiation.
+        signal: new TokenBucket(200, 40),
+        voiceState: new TokenBucket(20, 8),
       },
+      voiceGroup: null,
+      voiceMuted: true,
+      voiceSpeaking: false,
       strikes: 0,
       strikeWindowStart: Date.now(),
       helloTimer: null,
@@ -232,6 +246,118 @@ export class Room implements RoomEvents {
         this.freeSeat(client);
         return;
       }
+      case 'voiceJoin':
+        if (!client.buckets.voice.take()) return this.strike(client, 'rate_limited');
+        return this.voiceJoin(client, msg.groupId);
+      case 'voiceLeave':
+        if (!client.buckets.voice.take()) return this.strike(client, 'rate_limited');
+        return this.voiceLeave(client, 'left');
+      case 'voiceSignal': {
+        if (!client.buckets.signal.take()) return this.strike(client, 'rate_limited', true);
+        // Relay only between two connections in the same room.
+        const peer = this.clients.get(msg.to);
+        if (client.voiceGroup === null || !peer || peer === client || peer.voiceGroup !== client.voiceGroup) return;
+        this.send(peer, { t: 'voiceSignal', from: client.id, data: msg.data });
+        return;
+      }
+      case 'voiceMute':
+      case 'voiceSpeaking': {
+        if (!client.buckets.voiceState.take()) return this.strike(client, 'rate_limited', true);
+        if (client.voiceGroup === null) return;
+        if (msg.t === 'voiceMute') {
+          client.voiceMuted = msg.muted;
+          if (msg.muted) client.voiceSpeaking = false;
+        } else {
+          client.voiceSpeaking = msg.speaking && !client.voiceMuted;
+        }
+        this.voiceBroadcast(client.voiceGroup, { t: 'voicePeer', peer: this.voiceInfo(client), joined: false }, client);
+        return;
+      }
+      case 'voiceKick':
+        if (!client.buckets.voice.take()) return this.strike(client, 'rate_limited');
+        return this.voiceKick(client, msg.target);
+    }
+  }
+
+  // ---------------------------------------------------------------- voice rooms
+
+  /** groupId -> connection ids in that room (memory only; nothing is recorded). */
+  private readonly voiceRooms = new Map<number, Set<string>>();
+  /** "groupId:userId" -> blocked until (ms) after a kick. */
+  private readonly voiceBlocks = new Map<string, number>();
+
+  voiceCount(groupId: number): number {
+    return this.voiceRooms.get(groupId)?.size ?? 0;
+  }
+
+  private voiceInfo(c: Client): VoicePeerInfo {
+    const owner = c.voiceGroup !== null && c.userId !== null && this.options.groups?.info(c.voiceGroup)?.ownerId === c.userId;
+    return { id: c.id, name: c.name, muted: c.voiceMuted, speaking: c.voiceSpeaking, owner };
+  }
+
+  private voiceBroadcast(groupId: number, msg: ServerMessage, except?: Client) {
+    for (const id of this.voiceRooms.get(groupId) ?? []) {
+      const c = this.clients.get(id);
+      if (c && c !== except) this.send(c, msg);
+    }
+  }
+
+  private voiceError(client: Client, code: ErrorCode, message: string) {
+    this.send(client, { t: 'voiceError', code, message });
+  }
+
+  private voiceJoin(client: Client, groupId: number) {
+    const groups = this.options.groups;
+    if (client.userId === null || !groups) return this.voiceError(client, 'voice_login', '로그인하고 모임에 함께하면 음성 기도방을 쓸 수 있어요.');
+    const info = groups.info(groupId);
+    if (!info || !groups.isMember(client.userId, groupId)) {
+      return this.voiceError(client, 'voice_not_member', '모임 사람만 들어갈 수 있어요.');
+    }
+    const blockedUntil = this.voiceBlocks.get(`${groupId}:${client.userId}`) ?? 0;
+    if (blockedUntil > Date.now()) {
+      const min = Math.ceil((blockedUntil - Date.now()) / 60_000);
+      return this.voiceError(client, 'voice_blocked', `방장이 내보내서 ${min}분 뒤에 다시 들어올 수 있어요.`);
+    }
+    if (client.voiceGroup === groupId) return;
+    if (client.voiceGroup !== null) this.voiceLeave(client, 'left');
+    const room = this.voiceRooms.get(groupId) ?? new Set<string>();
+    if (room.size >= VOICE_MAX) return this.voiceError(client, 'voice_full', `음성 기도방은 ${VOICE_MAX}명까지 함께할 수 있어요.`);
+    client.voiceGroup = groupId;
+    client.voiceMuted = true; // everyone joins muted
+    client.voiceSpeaking = false;
+    const peers = [...room].map((id) => this.clients.get(id)).filter((c): c is Client => !!c).map((c) => this.voiceInfo(c));
+    room.add(client.id);
+    this.voiceRooms.set(groupId, room);
+    this.send(client, { t: 'voiceRoom', groupId, groupName: info.name, selfId: client.id, owner: info.ownerId === client.userId, peers });
+    this.voiceBroadcast(groupId, { t: 'voicePeer', peer: this.voiceInfo(client), joined: true }, client);
+    this.log(`voice join g${groupId} ${client.name} (${room.size})`);
+  }
+
+  private voiceLeave(client: Client, reason: 'left' | 'kicked' | 'removed') {
+    const groupId = client.voiceGroup;
+    if (groupId === null) return;
+    const room = this.voiceRooms.get(groupId);
+    room?.delete(client.id);
+    if (room && room.size === 0) this.voiceRooms.delete(groupId);
+    client.voiceGroup = null;
+    client.voiceSpeaking = false;
+    client.voiceMuted = true;
+    if (client.joined) this.send(client, { t: 'voiceLeft', reason });
+    this.voiceBroadcast(groupId, { t: 'voicePeerLeft', id: client.id });
+  }
+
+  private voiceKick(client: Client, targetId: string) {
+    const groupId = client.voiceGroup;
+    const target = this.clients.get(targetId);
+    if (groupId === null || !target || target.voiceGroup !== groupId || target === client) return;
+    if (this.options.groups?.info(groupId)?.ownerId !== client.userId) {
+      return this.voiceError(client, 'voice_not_member', '모임을 만든 분만 내보낼 수 있어요.');
+    }
+    if (target.userId !== null) this.voiceBlocks.set(`${groupId}:${target.userId}`, Date.now() + VOICE_KICK_BLOCK_MS);
+    this.voiceLeave(target, 'kicked');
+    // Every connection of that account leaves the room.
+    for (const c of this.clients.values()) {
+      if (c.userId === target.userId && c.voiceGroup === groupId) this.voiceLeave(c, 'kicked');
     }
   }
 
@@ -327,6 +453,23 @@ export class Room implements RoomEvents {
     }
   }
 
+  // ---------------------------------------------------------------- group chat
+
+  /** Deliver to connected members of that group only (membership is checked live). */
+  groupChat(message: import('../../shared/protocol.js').GroupMessage, update: boolean) {
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.userId === null || !c.groupIds.has(message.groupId)) continue;
+      this.send(c, update ? { t: 'groupChatUpdate', message } : { t: 'groupChat', message });
+    }
+  }
+
+  /** Read on one device: tell the user's other connections (badge sync). */
+  groupRead(userId: number, groupId: number, lastReadId: number) {
+    for (const c of this.clients.values()) {
+      if (c.joined && c.userId === userId) this.send(c, { t: 'groupRead', groupId, lastReadId });
+    }
+  }
+
   /** Live rename: every connection of that account gets the new name, and everyone sees it. */
   nicknameChanged(userId: number, nickname: string) {
     for (const c of this.clients.values()) {
@@ -345,6 +488,7 @@ export class Room implements RoomEvents {
       if (c.userId !== userId) continue;
       if (groups) c.groupIds = groups.groupIds(userId);
       if (c.joined) this.sendLanterns(c);
+      if (c.voiceGroup !== null && !c.groupIds.has(c.voiceGroup)) this.voiceLeave(c, 'removed');
     }
   }
 
@@ -382,6 +526,7 @@ export class Room implements RoomEvents {
     if (client.helloTimer) clearTimeout(client.helloTimer);
     if (!this.clients.delete(client.id)) return;
     if (!client.joined) return;
+    this.voiceLeave(client, 'left');
     client.joined = false;
     this.broadcast({ t: 'leave', id: client.id });
     if (client.seat >= 0) {

@@ -329,6 +329,14 @@ export class WorshipPlayer {
     return this.state === STATE.PLAYING;
   }
 
+  private duckFactor = 1;
+
+  /** Voice prayer room: play worship at ~20 % so voices are clear (1 = normal). */
+  setDuck(factor: number) {
+    this.duckFactor = factor;
+    this.setVolume(this.volume, this.muted, this.globalMuted);
+  }
+
   /** Apply volume from settings (also keeps both sliders in sync). */
   setVolume(volume: number, worshipMuted: boolean, globalMuted = false) {
     this.volume = volume;
@@ -341,7 +349,7 @@ export class WorshipPlayer {
     this.muteBtn.setAttribute('aria-label', worshipMuted ? '찬양 소리 켜기' : '찬양 음소거');
     this.muteBtn.title = this.muteBtn.getAttribute('aria-label')!;
     if (!this.player || !this.ready) return;
-    this.player.setVolume(volume);
+    this.player.setVolume(Math.round(volume * this.duckFactor));
     if (worshipMuted || globalMuted) this.player.mute();
     else this.player.unMute();
   }
@@ -784,6 +792,7 @@ export class WorshipPlayer {
       tracks: this.videos.length,
       listOpen: this.listOpen,
       volume: this.volume,
+      duck: this.duckFactor,
       muted: this.muted,
       promptVisible: !this.listen.hidden,
       iframes: document.querySelectorAll('iframe[src*="youtube"]').length,

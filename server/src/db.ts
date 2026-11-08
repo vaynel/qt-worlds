@@ -112,6 +112,27 @@ const MIGRATIONS: string[] = [
   `,
   // v2: first-login guide shown (once per account, across devices)
   `ALTER TABLE users ADD COLUMN onboarded_at INTEGER;`,
+  // v3: group text chat (kept 7 days) and per-user read pointers
+  `
+  CREATE TABLE group_messages (
+    id INTEGER PRIMARY KEY,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL DEFAULT 'msg' CHECK (kind IN ('msg', 'system')),
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    hidden_at INTEGER
+  );
+  CREATE INDEX group_messages_group ON group_messages(group_id, id);
+  CREATE INDEX group_messages_created ON group_messages(created_at);
+  CREATE TABLE group_reads (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (group_id, user_id)
+  );
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

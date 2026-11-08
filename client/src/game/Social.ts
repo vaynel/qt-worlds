@@ -25,6 +25,8 @@ export interface SocialOptions {
   /** Our own display name (welcome / live rename). */
   onLocalName?: (name: string, guest: boolean) => void;
   tagView?: () => import('../world/NameTag').TagView;
+  /** After a WebSocket reconnect (the server forgot room state). */
+  onReconnect?: () => void;
 }
 
 /**
@@ -100,7 +102,10 @@ export class Social {
     if (w.word) this.o.onWord?.(w.word);
     // Force a fresh state send so others see us where we really are.
     this.lastSent.t = 0;
-    if (isReconnect) this.o.hud.toast('다시 연결됐어요.', nowSeconds());
+    if (isReconnect) {
+      this.o.hud.toast('다시 연결됐어요.', nowSeconds());
+      this.o.onReconnect?.();
+    }
     this.refreshNetLine();
   }
 

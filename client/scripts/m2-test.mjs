@@ -242,7 +242,7 @@ try {
   far.send({ t: 'sit', mat: 99 });
   await sleep(400);
   check('malformed messages rejected', of(far, 'error').some((e) => e.code === 'bad_message') && far.closed === null);
-  far.send('x'.repeat(5000));
+  far.send('x'.repeat(20000)); // above MAX_FRAME_BYTES (16 KB)
   await sleep(500);
   check('oversized frame closes the socket', far.closed !== null, `close code=${far.closed}`);
 
