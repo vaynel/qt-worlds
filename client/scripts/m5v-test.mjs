@@ -438,7 +438,7 @@ try {
   const bNow = (await v(B)).selfId;
   await A.click(`.voice-kick[data-peer="${bNow}"]`);
   await until(B, () => window.__WORLDS_DEBUG__.m4.voice.state === 'idle', null, 15000);
-  check('owner kicks B; B leaves (mic released)', (await v(B)).micTracks.every((s) => s === 'ended'));
+  check('owner kicks B; B leaves (mic muted)', (await v(B)).micEnabled === false && (await v(B)).state === 'idle');
   await B.evaluate((g) => window.__WORLDS_TEST__.voiceJoin(g), gid);
   await B.waitForSelector('#toast:has-text("분 뒤")', { timeout: 15000 });
   check('kicked user cannot rejoin for 10 minutes', (await v(B)).state === 'idle', await B.textContent('#toast'));
@@ -451,10 +451,12 @@ try {
   await until(A, () => window.__WORLDS_DEBUG__.m4.voice.state === 'idle');
   const left = await v(A);
   check(
-    'leave cleans up: peers closed, audio elements removed, mic tracks stopped, ducking restored',
-    left.peers.length === 0 && left.audioElements === 0 && left.micTracks.length === 0 && (await debug(A)).m3.worship.duck === 1,
+    'leave cleans up: peers closed, audio removed, mic muted (kept for reuse), ducking restored',
+    left.peers.length === 0 && left.audioElements === 0 && left.micEnabled === false && (await debug(A)).m3.worship.duck === 1,
     JSON.stringify(left),
   );
+  await A.evaluate(() => window.__WORLDS_TEST__.voiceReleaseMic());
+  check('releasing the mic stops its tracks (page unload / 10 min out of voice)', (await v(A)).micTracks.length === 0);
 
   const unexpected = errors.filter((e) => !/Permissions policy/.test(e));
   check('no page errors', unexpected.length === 0, unexpected.slice(0, 3).join(' | '));

@@ -37,11 +37,21 @@ worship.onMuteToggle((m) => audio.update({ worshipMuted: m }));
 if (worshipVideos.length) void preloadYouTubeApi().catch(() => undefined);
 
 // Track the visible viewport so sheets sit above the on-screen keyboard.
+// Tablets: touch devices whose *screen* (not the current viewport, which the
+// keyboard shrinks) is at least 600 px on its short side.
+const touchCapable = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+const isTablet = touchCapable && Math.min(screen.width, screen.height) >= 600;
+document.body.classList.toggle('tablet', isTablet);
+
 function syncViewport() {
   const vv = window.visualViewport;
   const root = document.documentElement.style;
   root.setProperty('--vvh', `${vv ? vv.height : window.innerHeight}px`);
   root.setProperty('--vvtop', `${vv ? vv.offsetTop : 0}px`);
+  // How much of the layout viewport the on-screen keyboard covers (iOS keeps the
+  // layout viewport and shrinks only the visual one; Android usually resizes both).
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  root.setProperty('--kb', `${Math.round(kb)}px`);
 }
 syncViewport();
 window.visualViewport?.addEventListener('resize', syncViewport);

@@ -2942,3 +2942,205 @@ body.touch.chat-open:not(.worship-mini) .voice-chip {
   color: var(--ink-soft);
   font-size: 0.76rem;
 }
+
+/* =================== M5.2: tablet layout =================== */
+/* Tablets used to get the phone layout stretched: a full-width chat at a fixed
+   top offset, which the on-screen keyboard covered in landscape. */
+
+.chat-head-btn {
+  display: none;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+}
+
+body.touch.tablet .chat-head-btn {
+  display: inline-block;
+}
+
+body.touch.tablet .chat-head span {
+  flex: 1;
+  text-align: left;
+}
+
+/* Compact panel bottom-left, above the joystick. */
+body.touch.tablet #chat,
+body.touch.tablet.worship-mini #chat {
+  top: auto;
+  right: auto;
+  left: var(--safe-left);
+  bottom: calc(min(42vh, 260px) + 16px);
+  width: min(440px, 50vw);
+}
+
+@media (orientation: landscape) {
+  body.touch.tablet #chat,
+  body.touch.tablet.worship-mini #chat {
+    width: min(460px, 40vw);
+  }
+}
+
+body.touch.tablet #chat-log,
+body.touch.tablet.worship-mini #chat-log {
+  max-height: min(150px, 22vh);
+}
+
+body.touch.tablet #chat.collapsed #chat-log {
+  max-height: 3.1em;
+}
+
+/* Typing: sit right above the keyboard; the log gives way first. */
+body.touch.tablet.chatting #chat,
+body.touch.tablet.chatting.worship-mini #chat {
+  bottom: calc(var(--kb, 0px) + 8px);
+}
+
+body.touch.tablet.chatting #chat-log,
+body.touch.tablet.chatting.worship-mini #chat-log {
+  max-height: clamp(36px, calc(var(--vvh, 100vh) - 330px), 150px);
+}
+
+/* The voice chip stays top-left under the place card on tablets. */
+body.touch.tablet.chat-open .voice-chip,
+body.touch.tablet .voice-chip {
+  top: calc(var(--safe-top) + 100px);
+  bottom: auto;
+}
+
+/* The campfire blurb card isn't needed while its chat is open. */
+body.touch.tablet.chat-open #prompt {
+  display: none;
+}
+
+/* =================== M5.2: 골방 player sizes + fold states in the room =================== */
+
+.worship-roomsize {
+  display: none;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+#worship.room .worship-roomsize {
+  display: flex;
+}
+
+.worship-roomsize .seg {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  border-radius: 999px;
+}
+
+.worship-roomsize .seg[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff8ea;
+  border-color: transparent;
+}
+
+/* Sizes are relative to the viewport (not a fixed 402x226), and the height
+   is capped so the room buttons, header and HUD stay clear. */
+#worship.room.room-s,
+body.touch.tablet #worship.room.room-s {
+  width: min(372px, calc(100vw - 28px));
+}
+
+#worship.room.room-m,
+body.touch.tablet #worship.room.room-m {
+  width: clamp(min(372px, calc(100vw - 28px)), min(33vw, calc((100vh - 400px) * 16 / 9 + 16px)), calc(100vw - 28px));
+}
+
+#worship.room.room-l,
+body.touch.tablet #worship.room.room-l {
+  width: clamp(min(372px, calc(100vw - 28px)), min(58vw, calc((100vh - 400px) * 16 / 9 + 16px)), calc(100vw - 28px));
+}
+
+/* Tablets: right-anchored under the HUD (phones keep the full-width wall). */
+body.touch.tablet #worship.room.room-s,
+body.touch.tablet #worship.room.room-m,
+body.touch.tablet #worship.room.room-l {
+  left: auto;
+  right: var(--safe-right);
+  top: calc(var(--safe-top) + 132px);
+}
+
+/* 작게 in the room: the policy-minimum video with the pull-handle. */
+#worship.room.mini,
+body.touch #worship.room.mini {
+  left: auto;
+  right: var(--safe-right);
+  top: calc(var(--safe-top) + 132px);
+  bottom: auto;
+  width: 356px;
+}
+
+#worship.room.mini .worship-frame,
+body.touch #worship.room.mini .worship-frame {
+  width: 356px;
+  height: 200px;
+  aspect-ratio: auto;
+}
+
+body.touch:not(.tablet) #worship.room.mini {
+  width: 200px;
+  top: calc(var(--safe-top) + 150px);
+}
+
+body.touch:not(.tablet) #worship.room.mini .worship-frame {
+  width: 200px;
+  height: 200px;
+}
+
+/* Phones keep the full-width wall player; the steps change its footprint:
+   작게 = the 200x200 square on the right, 보통 = full width x 200,
+   크게 = full width and taller (still clear of the room header at the bottom). */
+body.touch:not(.tablet) #worship.room.room-s:not(.mini) {
+  left: auto;
+  width: 216px;
+}
+
+body.touch:not(.tablet) #worship.room.room-s:not(.mini) .worship-frame {
+  width: 200px;
+  height: 200px;
+  aspect-ratio: auto;
+}
+
+body.touch:not(.tablet) #worship.room.room-s:not(.mini) .worship-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+body.touch:not(.tablet) #worship.room.room-l:not(.mini) .worship-frame {
+  height: clamp(200px, calc(100vh - 560px), 300px);
+  aspect-ratio: auto;
+}
+
+/* Tablet 골방 header sits bottom-left (like phones) so it never meets the player. */
+body.touch.tablet .closet-head {
+  right: auto;
+  max-width: min(420px, 45vw);
+}
+
+/* M5.2: microphone pre-prompt / help */
+.mic-steps {
+  margin: 4px 0 6px;
+  padding-left: 1.3em;
+  line-height: 1.7;
+}
+
+/* Short phones typing under the 200x200 player: the log gives way so the
+   input stays above the keyboard (the player itself can't shrink below 200). */
+body.touch.chatting:not(.tablet) .chat-head span {
+  display: none;
+}
+
+body.touch.chatting.worship-mini:not(.tablet) #chat-log {
+  max-height: clamp(18px, calc(var(--vvh, 100vh) - var(--safe-top) - 334px - 96px), 96px);
+}
+
+/* Very short (keyboard up on a small phone): just the input; the speech
+   bubbles over the avatars still show the conversation. */
+@media (max-height: 480px) {
+  body.touch.chatting.worship-mini:not(.tablet) .chat-head,
+  body.touch.chatting.worship-mini:not(.tablet) #chat-log {
+    display: none;
+  }
+}

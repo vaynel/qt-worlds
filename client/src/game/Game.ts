@@ -16,6 +16,7 @@ import { NameTag, type TagView } from '../world/NameTag';
 import { PathGlow } from '../world/PathGlow';
 import { VoiceClient } from '../voice/VoiceClient';
 import { VoicePanel } from '../ui/VoicePanel';
+import { MicHelp } from '../ui/MicHelp';
 import { Guide } from '../ui/Guide';
 import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
@@ -94,6 +95,7 @@ export class Game {
   private readonly guide: Guide;
   private voice: VoiceClient | null = null;
   private voicePanel: VoicePanel | null = null;
+  private readonly micHelp = new MicHelp();
   private pathGlow: PathGlow | null = null;
   private readonly guideDue: boolean;
   private readonly raycaster = new THREE.Raycaster();
@@ -180,6 +182,8 @@ export class Game {
           session.audio.duckForVoice(on);
         },
         masterVolume: () => session.audio.settings.voice,
+        micPrePrompt: () => this.micHelp.prePrompt(),
+        micHelp: () => this.micHelp.help(),
       });
       this.voice = voice;
       this.voicePanel = new VoicePanel(voice, (gid) => void this.groupsView.open(gid, 'chat'));
@@ -276,7 +280,11 @@ export class Game {
     document.getElementById('closet-exit')!.addEventListener('click', () => this.leaveCloset());
 
     // Tap/click (not drag) on the canvas: open the letter if it was hit.
-    canvas.addEventListener('pointerdown', (e) => (this.tapStart = { x: e.clientX, y: e.clientY, t: performance.now() }));
+    canvas.addEventListener('pointerdown', (e) => {
+      this.tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+      // Tapping the world while typing puts the keyboard away (tablets/phones).
+      this.chat.blur();
+    });
     canvas.addEventListener('pointerup', (e) => {
       const s0 = this.tapStart;
       this.tapStart = null;
@@ -507,6 +515,7 @@ export class Game {
       voiceLeave: () => this.voice?.leave(),
       voiceMute: (muted: boolean) => this.voice?.setMuted(muted),
       voiceStats: () => this.voice?.stats(),
+      voiceReleaseMic: () => this.voice?.releaseMic(),
       dropSocket: () => this.session.net?.debugDrop(),
       closetDoor: () => {
         const d = this.world.landmarks.closetDoor;

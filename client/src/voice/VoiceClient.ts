@@ -25,6 +25,24 @@ export interface VoiceHooks {
   onActive: (active: boolean) => void;
   /** Master 음성 volume 0..100. */
   masterVolume: () => number;
+  /** Permission is "prompt": show our own explanation first; resolves true on [마이크 켜기]. */
+  micPrePrompt: () => Promise<boolean>;
+  /** Permission is denied: device-specific help; resolves true on [다시 시도]. */
+  micHelp: () => Promise<boolean>;
+}
+
+/** Keep the mic this long after leaving voice (re-joining needs no new prompt). */
+const MIC_KEEP_MS = 10 * 60 * 1000;
+export type MicPermission = 'granted' | 'prompt' | 'denied' | 'unknown';
+
+/** permissions.query where supported (Safari may not know 'microphone'). */
+export async function micPermission(): Promise<MicPermission> {
+  try {
+    const status = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+    return status ? (status.state as MicPermission) : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 const SPEAK_THRESHOLD = 0.035;
@@ -53,7 +71,11 @@ export class VoiceClient {
   private wantedGroup: number | null = null;
   private readonly audioRoot: HTMLElement;
   /** Signaling counters (diagnostics / tests). */
-  private readonly counters = { iceSent: 0, iceReceived: 0, iceErrors: 0, sdpSent: 0, sdpReceived: 0 };
+  private readonly counters = { iceSent: 0, iceReceived: 0, iceErrors: 0, sdpSent: 0, sdpReceived: 0, micRequests: 0 };
+  /** The user unmuted last (restored silently after a reconnect). */
+  private wantUnmuted = false;
+  private releaseTimer = 0;
+  private micBusy = false;
 
   constructor(
     private readonly net: NetClient,
@@ -72,6 +94,8 @@ export class VoiceClient {
       voiceError: (code, message) => this.onError(code, message),
     });
     document.addEventListener('visibilitychange', this.onVisibility);
+    // The page is going away: release the microphone (browser indicator off).
+    window.addEventListener('pagehide', () => this.releaseMic());
   }
 
   get active(): boolean {
@@ -107,9 +131,18 @@ export class VoiceClient {
 
   leave() {
     this.wantedGroup = null;
+    this.wantUnmuted = false;
     if (this.state === 'idle') return;
     this.net.voiceLeave();
     this.cleanup();
+  }
+
+  /** Stop the microphone for real (page unload, or 10 min out of voice). */
+  releaseMic() {
+    window.clearTimeout(this.releaseTimer);
+    this.stopAnalyser();
+    for (const t of this.mic?.getTracks() ?? []) t.stop();
+    this.mic = null;
   }
 
   /** After a WebSocket reconnect the server forgot us: rejoin if we were in a room. */
@@ -124,14 +157,20 @@ export class VoiceClient {
     this.hooks.onChange();
   }
 
-  /** Drop all peers; with releaseMic also stop the microphone. */
-  private cleanup(releaseMic = true) {
+  /**
+   * Drop all peers. The microphone is kept (muted) so a later unmute or
+   * rejoin needs no new permission prompt; it is released after MIC_KEEP_MS
+   * out of voice, or when the page closes.
+   */
+  private cleanup(leaving = true) {
     for (const id of [...this.peers.keys()]) this.closePeer(id, false);
-    if (releaseMic) {
-      this.stopAnalyser();
-      for (const t of this.mic?.getTracks() ?? []) t.stop();
-      this.mic = null;
-      this.muted = true;
+    for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = false;
+    this.muted = true;
+    if (leaving) {
+      window.clearTimeout(this.releaseTimer);
+      this.releaseTimer = window.setTimeout(() => {
+        if (this.state === 'idle') this.releaseMic();
+      }, MIC_KEEP_MS);
     }
     this.speaking = false;
     const wasActive = this.state !== 'idle';
@@ -149,6 +188,7 @@ export class VoiceClient {
       return;
     }
     const first = this.state !== 'in';
+    window.clearTimeout(this.releaseTimer);
     this.state = 'in';
     this.groupId = m.groupId;
     this.groupName = m.groupName;
@@ -161,6 +201,8 @@ export class VoiceClient {
     for (const p of m.peers) this.createPeer(p, true);
     if (first) this.hooks.onActive(true);
     this.hooks.onChange();
+    // After a reconnect, restore "unmuted" if the mic is already ours (no prompt).
+    if (this.wantUnmuted && this.mic) void this.setMuted(false);
   }
 
   private onPeer(info: VoicePeerInfo, joined: boolean) {
@@ -182,6 +224,7 @@ export class VoiceClient {
     if (reason === 'kicked') this.hooks.toast('방장이 음성 기도방에서 내보냈어요. 10분 뒤에 다시 들어올 수 있어요.');
     if (reason === 'removed') this.hooks.toast('모임에서 나와서 음성 기도방도 나왔어요.');
     this.wantedGroup = null;
+    this.wantUnmuted = false;
     this.cleanup();
   }
 
@@ -308,37 +351,64 @@ export class VoiceClient {
 
   // ---------------------------------------------------------------- mic
 
-  /** Unmuting the first time asks for the microphone. */
+  /**
+   * Listening never needs the mic. It is requested once, only on the first
+   * unmute (🎤), and then kept: mute/unmute just toggles track.enabled.
+   */
   async setMuted(muted: boolean) {
     if (this.state !== 'in') return;
     if (!muted && !this.mic) {
+      if (this.micBusy) return;
+      this.micBusy = true;
       try {
-        this.mic = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: false,
-        });
-      } catch (err) {
-        const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
-        this.hooks.toast(
-          denied
-            ? '마이크 권한이 거부되었어요. 브라우저(또는 휴대폰) 설정에서 이 사이트의 마이크를 허용해 주세요.'
-            : '마이크를 찾지 못했어요. 연결을 확인해 주세요.',
-        );
-        return;
+        if (!(await this.acquireMic())) return;
+      } finally {
+        this.micBusy = false;
       }
+      if (this.state !== 'in' || !this.mic) return;
+    }
+    if (!muted && this.mic) {
       const track = this.mic.getAudioTracks()[0];
       for (const p of this.peers.values()) {
         for (const t of p.pc.getTransceivers()) {
-          if (t.receiver.track.kind === 'audio' && !t.sender.track) await t.sender.replaceTrack(track);
+          if (t.receiver.track.kind === 'audio' && t.sender.track !== track) await t.sender.replaceTrack(track);
         }
       }
-      this.startAnalyser(this.mic);
+      if (!this.analyser) this.startAnalyser(this.mic);
     }
+    this.wantUnmuted = !muted;
     this.muted = muted;
     for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = !muted;
     if (muted) this.setSpeaking(false);
     this.net.voiceMute(muted);
     this.hooks.onChange();
+  }
+
+  /** Permission-aware single request: granted → silent; prompt → our pre-prompt; denied → help. */
+  private async acquireMic(): Promise<boolean> {
+    for (;;) {
+      const perm = await micPermission();
+      if (perm === 'denied') {
+        if (!(await this.hooks.micHelp())) return false;
+        continue; // 다시 시도
+      }
+      if (perm === 'prompt' && !(await this.hooks.micPrePrompt())) return false;
+      try {
+        this.counters.micRequests++;
+        this.mic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+        return true;
+      } catch (err) {
+        const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+        if (!denied) {
+          this.hooks.toast('마이크를 찾지 못했어요. 연결을 확인해 주세요.');
+          return false;
+        }
+        if (!(await this.hooks.micHelp())) return false;
+      }
+    }
   }
 
   private startAnalyser(stream: MediaStream) {
@@ -450,6 +520,8 @@ export class VoiceClient {
       muted: this.muted,
       speaking: this.speaking,
       micTracks: this.mic?.getTracks().map((t) => t.readyState) ?? [],
+      micEnabled: this.mic?.getAudioTracks().some((t) => t.enabled) ?? false,
+      wantUnmuted: this.wantUnmuted,
       peers: this.peerList().map((p) => ({
         id: p.id,
         name: p.name,

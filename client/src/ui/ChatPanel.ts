@@ -40,6 +40,28 @@ export class ChatPanel {
     });
     // Don't let taps on the panel start camera drags.
     this.root.addEventListener('pointerdown', (e) => e.stopPropagation());
+    // 작게: only the input and the latest lines; 닫기: put the keyboard away.
+    const collapse = document.getElementById('chat-collapse') as HTMLButtonElement | null;
+    collapse?.addEventListener('click', () => this.setCollapsed(!this.root.classList.contains('collapsed')));
+    document.getElementById('chat-close')?.addEventListener('click', () => {
+      this.input.blur();
+      this.setCollapsed(true);
+    });
+  }
+
+  setCollapsed(collapsed: boolean) {
+    this.root.classList.toggle('collapsed', collapsed);
+    const b = document.getElementById('chat-collapse');
+    if (b) {
+      b.textContent = collapsed ? '크게' : '작게';
+      b.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+    }
+    this.log.scrollTop = this.log.scrollHeight;
+  }
+
+  /** Tap outside the chat: dismiss the keyboard and restore the view. */
+  blur() {
+    if (this.focused) this.input.blur();
   }
 
   onSend(fn: (text: string) => void) {

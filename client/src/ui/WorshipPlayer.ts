@@ -77,6 +77,12 @@ export type WorshipSize = 'small' | 'large';
 export type WorshipFold = 'open' | 'mini' | 'folded';
 const IS_TOUCH = typeof window !== 'undefined' && (window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
 const FOLD_KEY = `worlds.worship.fold.${IS_TOUCH ? 'touch' : 'desktop'}`;
+/** phone / tablet / desktop (tablet = touch with a screen >= 600 px on its short side). */
+const DEVICE = !IS_TOUCH ? 'desktop' : typeof screen !== 'undefined' && Math.min(screen.width, screen.height) >= 600 ? 'tablet' : 'phone';
+const ROOM_FOLD_KEY = `worlds.worship.roomFold.${DEVICE}`;
+const ROOM_SIZE_KEY = `worlds.worship.roomSize.${DEVICE}`;
+/** 골방 wall player: 작게 = policy minimum, 보통 ≈ 1/3 of the width, 크게 ≈ 58 %. */
+export type RoomSize = 's' | 'm' | 'l';
 const SWIPE_PX = 28;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -155,6 +161,10 @@ export class WorshipPlayer {
   private muteHandler: (m: boolean) => void = () => undefined;
   private noticeHandler: (text: string) => void = () => undefined;
   private fold: WorshipFold;
+  /** The 골방 has its own fold state and size (default 펼침 · 보통). */
+  private roomFold: WorshipFold;
+  private roomSize: RoomSize;
+  private readonly roomSizeBtns: Record<RoomSize, HTMLButtonElement>;
   private effective: WorshipFold = 'open';
   private readonly handle: HTMLButtonElement;
   private readonly tab: HTMLButtonElement;
@@ -180,6 +190,17 @@ export class WorshipPlayer {
     }
     // Phones start small (video only); desktop keeps the full player.
     this.fold = savedFold === 'open' || savedFold === 'mini' || savedFold === 'folded' ? savedFold : IS_TOUCH ? 'mini' : 'open';
+    const read = (k: string) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    };
+    const rf = read(ROOM_FOLD_KEY);
+    this.roomFold = rf === 'mini' || rf === 'folded' ? rf : 'open';
+    const rs = read(ROOM_SIZE_KEY);
+    this.roomSize = rs === 's' || rs === 'l' ? rs : 'm';
 
     this.root = el('section', 'worship card size-small');
     this.root.id = 'worship';
@@ -245,9 +266,20 @@ export class WorshipPlayer {
     yt.append(this.ytLink, this.ytAlt);
     this.drawer.append(yt, drawerVolume, this.listEl);
 
+    // 골방 size steps (shown only in the room).
+    const sizes = el('div', 'worship-roomsize');
+    sizes.setAttribute('role', 'group');
+    sizes.setAttribute('aria-label', '골방 찬양 크기');
+    const mk = (k: RoomSize, label: string) => {
+      const b = button(label, 'seg', () => this.setRoomSize(k));
+      b.id = `worship-room-${k}`;
+      sizes.append(b);
+      return b;
+    };
+    this.roomSizeBtns = { s: mk('s', '작게'), m: mk('m', '보통'), l: mk('l', '크게') };
     const body = el('div', 'worship-body');
     const side = el('div', 'worship-side');
-    side.append(volumeRow, this.drawer);
+    side.append(sizes, volumeRow, this.drawer);
     body.append(this.frame, side);
     this.root.append(head, body, this.handle);
     this.renderList();
@@ -369,16 +401,22 @@ export class WorshipPlayer {
     const visible = this.mode !== 'hidden';
     // The 골방 keeps the player on the wall; while a sheet is open the player uses
     // the compact dock (or stays folded) so nothing overlaps.
-    let eff: WorshipFold = this.mode === 'room' ? 'open' : this.fold;
+    const inRoom = this.mode === 'room';
+    let eff: WorshipFold = inRoom ? this.roomFold : this.fold;
     if (modal && eff !== 'folded') eff = 'open';
     this.effective = eff;
-    const large = eff === 'open' && !modal && this.size === 'large' && !IS_TOUCH;
+    const large = !inRoom && eff === 'open' && !modal && this.size === 'large' && !IS_TOUCH;
+    for (const k of ['s', 'm', 'l'] as const) {
+      this.root.classList.toggle(`room-${k}`, inRoom && this.roomSize === k);
+      this.roomSizeBtns[k].setAttribute('aria-pressed', this.roomSize === k ? 'true' : 'false');
+    }
     this.root.classList.toggle('mini', eff === 'mini');
     this.root.classList.toggle('folded', eff === 'folded');
     this.root.classList.toggle('size-large', large);
     this.root.classList.toggle('size-small', !large);
     // Phones: 펼침 is the drawer view (list + volume).
-    this.root.classList.toggle('list-open', this.listOpen || (IS_TOUCH && eff === 'open' && !modal));
+    // In the 골방 the list stays behind its button so the wall player stays compact.
+    this.root.classList.toggle('list-open', this.listOpen || (IS_TOUCH && eff === 'open' && !modal && !inRoom));
     const body = document.body.classList;
     body.toggle('worship-large', large && visible);
     body.toggle('worship-on', visible && eff !== 'folded');
@@ -398,11 +436,24 @@ export class WorshipPlayer {
     return this.fold;
   }
 
+  setRoomSize(size: RoomSize) {
+    this.roomSize = size;
+    try {
+      localStorage.setItem(ROOM_SIZE_KEY, size);
+    } catch {
+      /* ignore */
+    }
+    this.applySize();
+  }
+
+  /** Sets the fold state of where the player is now (world dock or 골방). */
   setFold(fold: WorshipFold) {
     const wasFolded = this.effective === 'folded';
-    this.fold = fold;
+    const room = this.mode === 'room';
+    if (room) this.roomFold = fold;
+    else this.fold = fold;
     try {
-      localStorage.setItem(FOLD_KEY, fold);
+      localStorage.setItem(room ? ROOM_FOLD_KEY : FOLD_KEY, fold);
     } catch {
       /* ignore */
     }
@@ -412,7 +463,7 @@ export class WorshipPlayer {
   }
 
   private unfoldFromTab() {
-    this.setFold(IS_TOUCH ? 'mini' : 'open');
+    this.setFold(this.mode === 'room' || !IS_TOUCH ? 'open' : 'mini');
   }
 
   private resumeVisible() {
@@ -780,6 +831,9 @@ export class WorshipPlayer {
       mode: this.mode,
       size: this.size,
       fold: this.fold,
+      roomFold: this.roomFold,
+      roomSize: this.roomSize,
+      device: DEVICE,
       effective: this.effective,
       playedWhileFolded: this.playedWhileFolded,
       tabVisible: !this.tab.hidden,
