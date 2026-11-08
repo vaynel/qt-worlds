@@ -39,7 +39,8 @@ export class LanternCard {
     sheet.replaceChildren();
     const top = el('header', 'book-top');
     const title = el('div', 'lantern-title');
-    title.append(el('strong', '', `${d.nickname}의 등불`), el('span', d.group ? 'pill group' : 'pill', d.group ? `비공개 · ${d.group}` : '공개'));
+    const heading = d.anonymous ? (d.mine ? '내 등불 · 익명으로 나눴어요' : '익명의 등불') : `${d.nickname}의 등불`;
+    title.append(el('strong', '', heading), el('span', d.group ? 'pill group' : 'pill', d.group ? `비공개 · ${d.group}` : d.anonymous ? '공개 · 익명' : '공개'));
     top.append(title, button('닫기', 'ghost', () => this.modal.close()));
     sheet.append(top);
 

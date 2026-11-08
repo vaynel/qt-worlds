@@ -2927,3 +2927,18 @@ body.touch.chat-open:not(.worship-mini) .voice-chip {
     padding: 6px 12px;
   }
 }
+
+/* M5.1: anonymous option (public lanterns only) */
+.share-anon[hidden] {
+  display: none;
+}
+
+.share-anon-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.share-hint {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}

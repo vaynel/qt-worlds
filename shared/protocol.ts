@@ -181,6 +181,9 @@ export interface AccountInfo {
   nickname: string;
 }
 
+/** What everyone except the author sees for an anonymous lantern. */
+export const ANONYMOUS_NAME = '익명의 성도';
+
 export const REACTION_TYPES = ['amen', 'pray', 'record'] as const;
 export type ReactionType = (typeof REACTION_TYPES)[number];
 export const REACTION_LABELS: Record<ReactionType, string> = { amen: '아멘', pray: '기도하기', record: '기록하기' };
@@ -194,6 +197,8 @@ export interface LanternInfo {
   ref: string;
   /** null = 공개; otherwise the group's name (비공개, members only). */
   group: string | null;
+  /** Shared anonymously (public only): others see ANONYMOUS_NAME. */
+  anonymous: boolean;
   counts: Record<ReactionType, number>;
   mine: boolean;
 }

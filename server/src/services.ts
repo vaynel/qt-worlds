@@ -8,6 +8,7 @@ import {
   DATE_RE,
   LANTERN_SLOTS,
   REACTION_TYPES,
+  ANONYMOUS_NAME,
   seoulDate,
   type LanternDetail,
   type LanternInfo,
@@ -303,6 +304,7 @@ interface LanternRow {
   application: string;
   created_at: number;
   removed_at: number | null;
+  anonymous: number;
   nickname: string;
   group_name: string | null;
 }
@@ -344,15 +346,19 @@ export class LanternService {
   }
 
   private info(l: LanternRow, viewerId: number | null): LanternInfo {
+    const mine = viewerId !== null && l.user_id === viewerId;
+    // Anonymous: only the author ever sees their own name; user_id never leaves the server.
+    const anonymous = l.anonymous === 1;
     return {
       id: l.id,
       slot: l.slot,
-      nickname: l.nickname,
+      nickname: anonymous && !mine ? ANONYMOUS_NAME : l.nickname,
+      anonymous,
       date: l.date,
       ref: l.ref,
       group: l.group_id === null ? null : (l.group_name ?? '모임'),
       counts: this.counts(l.id),
-      mine: viewerId !== null && l.user_id === viewerId,
+      mine,
     };
   }
 
@@ -410,6 +416,8 @@ export class LanternService {
     } else if (body.visibility !== 'public') {
       throw new HttpError(400, 'bad_field', '공개 범위를 골라 주세요.');
     }
+    // 익명 is offered for public lanterns only.
+    const anonymous = groupId === null && body.anonymous === true ? 1 : 0;
     const existing = this.db.prepare('SELECT id FROM lanterns WHERE meditation_id = ? AND removed_at IS NULL AND created_at >= ?').get(meditationId, this.since());
     if (existing) throw new HttpError(409, 'exists', '이미 등불로 나눈 묵상이에요.');
     const today = (this.db.prepare('SELECT COUNT(*) n FROM lanterns WHERE user_id = ? AND created_at >= ?').get(userId, Date.now() - DAY_MS) as { n: number }).n;
@@ -433,10 +441,10 @@ export class LanternService {
       if (slot < 0) throw new HttpError(409, 'hill_full', '등불 언덕이 가득 찼어요. 내일 다시 밝혀 주세요.');
       const info = this.db
         .prepare(
-          `INSERT INTO lanterns (user_id, meditation_id, group_id, slot, date, ref, verse, translation, meditation, feeling, application, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO lanterns (user_id, meditation_id, group_id, slot, date, ref, verse, translation, meditation, feeling, application, created_at, anonymous)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(userId, m.id, groupId, slot, m.date, word.ref, word.text, word.translation || '개역한글판', m.meditation, m.feeling, m.application, Date.now());
+        .run(userId, m.id, groupId, slot, m.date, word.ref, word.text, word.translation || '개역한글판', m.meditation, m.feeling, m.application, Date.now(), anonymous);
       return Number(info.lastInsertRowid);
     })();
   }
@@ -459,8 +467,10 @@ export class LanternService {
       } else {
         this.db.prepare('INSERT INTO reactions (lantern_id, user_id, type, created_at) VALUES (?, ?, ?, ?)').run(id, userId, type, Date.now());
         if (type === 'record') {
+          // d.nickname is already ANONYMOUS_NAME for anonymous lanterns (viewer != author).
           const snapshot = {
-            nickname: d.nickname,
+            nickname: d.anonymous ? ANONYMOUS_NAME : d.nickname,
+            anonymous: d.anonymous,
             date: d.date,
             ref: d.ref,
             verse: d.verse,

@@ -4,6 +4,12 @@ import type { Heightfield } from './Heightfield';
 import { createNameTag, disposeSprite } from './labels';
 
 const CAPACITY = LANTERN_SLOTS.length;
+
+/** Name tag text: anonymous lanterns never show a name in the world. */
+export function lanternLabel(info: LanternInfo): string {
+  const who = info.anonymous ? '익명의 등불' : `${info.nickname}의 등불`;
+  return `${who}${info.group ? ` · ${info.group}` : ''}`;
+}
 const PUBLIC_COLOR = new THREE.Color(0xffc46b);
 const GROUP_COLOR = new THREE.Color(0xf5b3c8);
 const MINE_COLOR = new THREE.Color(0xffe39a);
@@ -197,7 +203,7 @@ export class LanternField {
       this.clearTag();
       const l = nearId !== null ? this.lanterns.get(nearId) : undefined;
       if (l) {
-        this.tag = createNameTag(`${l.info.nickname}의 등불${l.info.group ? ` · ${l.info.group}` : ''}`, false, true);
+        this.tag = createNameTag(lanternLabel(l.info), false, true);
         this.tag.position.set(l.x, l.y + 1.65, l.z);
         this.group.add(this.tag);
         this.tagId = nearId!;
@@ -222,6 +228,8 @@ export class LanternField {
       z: +l.z.toFixed(2),
       group: l.info.group,
       nickname: l.info.nickname,
+      anonymous: l.info.anonymous,
+      label: lanternLabel(l.info),
       mine: l.info.mine,
       counts: l.info.counts,
     }));

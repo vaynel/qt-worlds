@@ -133,6 +133,8 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (group_id, user_id)
   );
   `,
+  // v4: anonymous public lanterns (author kept internally, never sent to others)
+  `ALTER TABLE lanterns ADD COLUMN anonymous INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

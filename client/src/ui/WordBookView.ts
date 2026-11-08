@@ -273,6 +273,16 @@ export class WordBookView {
     pubInput.id = 'share-public';
     pub.append(pubInput, el('span', '', '공개 · 누구나 볼 수 있어요'));
     form.append(pub);
+    // 익명 (public only): others see "익명의 성도".
+    const anon = el('label', 'share-option share-anon');
+    anon.id = 'share-anon-row';
+    const anonInput = el('input');
+    anonInput.type = 'checkbox';
+    anonInput.id = 'share-anon';
+    const anonText = el('span', 'share-anon-text');
+    anonText.append(el('span', '', '익명으로 나누기'), el('small', 'share-hint', "이름 대신 '익명의 성도'로 보여요"));
+    anon.append(anonInput, anonText);
+    form.append(anon);
     const priv = el('label', 'share-option');
     const privInput = el('input');
     privInput.type = 'radio';
@@ -288,7 +298,18 @@ export class WordBookView {
       select.append(o);
     }
     select.disabled = groups.length === 0;
-    select.addEventListener('change', () => (privInput.checked = true));
+    select.addEventListener('change', () => {
+      privInput.checked = true;
+      syncAnon();
+    });
+    const syncAnon = () => {
+      const isPublic = pubInput.checked;
+      anon.hidden = !isPublic;
+      anonInput.disabled = !isPublic;
+      if (!isPublic) anonInput.checked = false;
+    };
+    pubInput.addEventListener('change', syncAnon);
+    privInput.addEventListener('change', syncAnon);
     priv.append(privInput, el('span', '', groups.length ? '비공개 · 모임 사람만' : '비공개 · 먼저 모임에 함께해 주세요'), select);
     form.append(priv);
     const actions = el('div', 'note-actions');
@@ -305,7 +326,7 @@ export class WordBookView {
         await api('POST', '/api/lanterns', {
           meditationId: Number(m.id),
           visibility,
-          ...(visibility === 'group' ? { groupId: Number(select.value) } : {}),
+          ...(visibility === 'group' ? { groupId: Number(select.value) } : { anonymous: anonInput.checked }),
         });
         this.hooks.lanternsChanged();
         await this.reload();
