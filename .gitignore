@@ -33,3 +33,5 @@ coverage/
 # keep committed templates
 !**/.env.example
 !**/.env.*.example
+deploy/turn_key.txt
+*key*.txt

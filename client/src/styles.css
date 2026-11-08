@@ -2386,3 +2386,205 @@ body.touch #tools {
   flex-wrap: nowrap;
   max-width: none;
 }
+
+/* =================== M4.2: 펼침 / 작게 / 접기 =================== */
+
+@keyframes worship-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 작게: just the video (no header, no list) and a pull-handle on its left. */
+#worship.mini {
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  animation: worship-slide-in 0.28s ease-out;
+}
+
+#worship.mini .worship-head,
+#worship.mini .worship-side {
+  display: none;
+}
+
+#worship.mini .worship-frame {
+  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
+}
+
+.worship-handle {
+  display: none;
+  position: absolute;
+  left: -28px;
+  top: 0;
+  width: 24px;
+  height: 64px;
+  padding: 0;
+  border-radius: 12px 0 0 12px;
+  border: 1px solid var(--paper-line);
+  border-right: none;
+  background: #fffaf0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  box-shadow: -3px 4px 12px rgba(74, 52, 38, 0.18);
+  touch-action: none;
+}
+
+#worship.mini .worship-handle {
+  display: grid;
+  place-items: center;
+}
+
+/* Desktop 작게: 356x200 bottom-right. */
+#worship.dock.mini {
+  right: var(--safe-right);
+  bottom: var(--safe-bottom);
+  top: auto;
+  left: auto;
+  width: 356px;
+  transform: none;
+}
+
+/* Phone 작게: 200x200 at the top-right, under the HUD tool row. */
+body.touch #worship.dock.mini {
+  top: calc(var(--safe-top) + 124px);
+  bottom: auto;
+  right: var(--safe-right);
+  left: auto;
+  width: 200px;
+}
+
+body.touch #worship.dock.mini .worship-frame {
+  width: 200px;
+  height: 200px;
+}
+
+/* ...so the campfire chat reflows below it, and stays above the joystick. */
+body.touch.worship-mini #chat {
+  top: calc(var(--safe-top) + 334px);
+}
+
+body.touch.worship-mini #chat-log {
+  max-height: clamp(20px, calc(100vh - 470px - min(42vh, 260px)), 96px);
+}
+
+body.touch.worship-mini #letter-btn {
+  left: var(--safe-left);
+  transform: none;
+}
+
+/* 접기: the iframe stays (paused) but is not shown; a small tab remains. */
+#worship.folded {
+  padding: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.worship-tab {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: calc(var(--safe-top) + 124px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(60vw, 280px);
+  padding: 9px 14px 9px 12px;
+  border-radius: 999px 0 0 999px;
+  border: 1px solid var(--paper-line);
+  border-right: none;
+  background: #fffaf0;
+  box-shadow: -3px 4px 14px rgba(74, 52, 38, 0.2);
+  font-size: 0.86rem;
+  font-weight: 600;
+  animation: worship-slide-in 0.28s ease-out;
+}
+
+.worship-tab[hidden] {
+  display: none;
+}
+
+.worship-tab-label {
+  flex: none;
+}
+
+.worship-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+body:not(.touch) .worship-tab {
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 60px);
+}
+
+/* 🎧 YouTube에서 듣기 */
+.worship-yt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px;
+  font-size: 0.82rem;
+}
+
+.worship-yt-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.worship-yt-alt {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+}
+
+.worship-yt a[hidden] {
+  display: none;
+}
+
+/* Phone 펼침 (drawer view): a wider card so header controls fit. */
+body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
+  width: min(320px, calc(100vw - 28px));
+}
+
+body.touch #worship.dock.size-small:not(.mini):not(.folded) .worship-frame {
+  width: 100%;
+}
+
+body.touch #worship.dock.size-small:not(.mini) .worship-label {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #worship.mini,
+  .worship-tab {
+    animation: none;
+  }
+}
+
+/* Phone 펼침: hang from just under the HUD tool row (so the HUD stays
+   tappable) and keep the list short enough to fit the screen. */
+body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
+  top: calc(var(--safe-top) + 124px);
+  bottom: auto;
+}
+
+body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) .worship-list {
+  max-height: clamp(84px, calc(var(--vvh, 100vh) - 470px), 200px);
+}

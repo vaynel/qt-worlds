@@ -1,4 +1,4 @@
-import { WORSHIP_VIDEOS, type WorshipVideo } from '../config/worship';
+import { WORSHIP_PLAYLIST_URL, WORSHIP_VIDEOS, type WorshipVideo } from '../config/worship';
 import { button, el, Modal } from './dom';
 
 /** Minimal typing for the parts of the YouTube IFrame API we use. */
@@ -12,6 +12,7 @@ interface YTPlayer {
   mute(): void;
   unMute(): void;
   getVideoData?(): { video_id?: string };
+  cueVideoById(id: string): void;
 }
 interface YTNamespace {
   Player: new (
@@ -72,6 +73,11 @@ export function preloadYouTubeApi(): Promise<YTNamespace> {
 
 export type WorshipMode = 'hidden' | 'dock' | 'room';
 export type WorshipSize = 'small' | 'large';
+/** 펼침 (controls + list), 작게 (video only, keeps playing), 접기 (tab, paused). */
+export type WorshipFold = 'open' | 'mini' | 'folded';
+const IS_TOUCH = typeof window !== 'undefined' && (window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
+const FOLD_KEY = `worlds.worship.fold.${IS_TOUCH ? 'touch' : 'desktop'}`;
+const SWIPE_PX = 28;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICONS: Record<string, string> = {
@@ -82,6 +88,8 @@ const ICONS: Record<string, string> = {
   list: 'M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z',
   large: 'M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 4v-4h2v6h-6v-2z',
   small: 'M8 4h2v6H4V8h4zm6 0h2v4h4v2h-6zM4 14h6v6H8v-4H4zm10 0h6v2h-4v4h-2z',
+  mini: 'M3 5h18v14H3zm2 2v10h14V7zm6 4h6v5h-6z',
+  fold: 'M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z',
   close: 'M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4L12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z',
 };
 
@@ -146,6 +154,15 @@ export class WorshipPlayer {
   private volumeHandler: (v: number) => void = () => undefined;
   private muteHandler: (m: boolean) => void = () => undefined;
   private noticeHandler: (text: string) => void = () => undefined;
+  private fold: WorshipFold;
+  private effective: WorshipFold = 'open';
+  private readonly handle: HTMLButtonElement;
+  private readonly tab: HTMLButtonElement;
+  private readonly tabTitle: HTMLSpanElement;
+  private readonly ytLink: HTMLAnchorElement;
+  private readonly ytAlt: HTMLAnchorElement;
+  /** Safety record for tests: playback must never run while folded. */
+  private playedWhileFolded = false;
 
   constructor(private readonly videos: WorshipVideo[] = WORSHIP_VIDEOS) {
     let saved: string | null = null;
@@ -155,6 +172,14 @@ export class WorshipPlayer {
       /* ignore */
     }
     this.size = saved === 'large' ? 'large' : 'small';
+    let savedFold: string | null = null;
+    try {
+      savedFold = localStorage.getItem(FOLD_KEY);
+    } catch {
+      /* ignore */
+    }
+    // Phones start small (video only); desktop keeps the full player.
+    this.fold = savedFold === 'open' || savedFold === 'mini' || savedFold === 'folded' ? savedFold : IS_TOUCH ? 'mini' : 'open';
 
     this.root = el('section', 'worship card size-small');
     this.root.id = 'worship';
@@ -177,7 +202,25 @@ export class WorshipPlayer {
     this.sizeBtn = iconButton('large', '크게 보기', () => this.setSize(this.size === 'small' ? 'large' : 'small'), 'worship-size');
     const close = iconButton('close', '찬양 닫기', () => this.close(), 'worship-close');
     close.classList.add('worship-close');
-    head.append(label, this.listen, nav, this.muteBtn, this.listBtn, this.sizeBtn, close);
+    const miniBtn = iconButton('mini', '작게 (영상만)', () => this.setFold('mini'), 'worship-mini');
+    const foldBtn = iconButton('fold', '접기 (일시정지)', () => this.setFold('folded'), 'worship-fold');
+    if (IS_TOUCH) this.sizeBtn.hidden = true; // 크게 is a desktop option
+    head.append(label, this.listen, nav, this.muteBtn, this.listBtn, this.sizeBtn, miniBtn, foldBtn, close);
+
+    // 작게: a slim pull-handle beside the video (never on top of it).
+    this.handle = button('◂', 'worship-handle');
+    this.handle.id = 'worship-handle';
+    this.handle.setAttribute('aria-label', '찬양 펼치기 (오른쪽으로 밀면 접기)');
+    this.bindHandle();
+
+    // 접기: a small tab at the screen edge; the iframe stays alive but paused.
+    this.tab = button('', 'worship-tab', () => this.unfoldFromTab());
+    this.tab.id = 'worship-tab';
+    this.tab.setAttribute('aria-label', '찬양 다시 듣기');
+    this.tabTitle = el('span', 'worship-tab-title');
+    this.tab.append(el('span', 'worship-tab-label', '🎵 찬양 ▶'), this.tabTitle);
+    this.tab.hidden = true;
+    this.tab.addEventListener('pointerdown', (e) => e.stopPropagation());
 
     this.frame = el('div', 'worship-frame');
     const volumeRow = this.volumeRow('worship-volume');
@@ -189,13 +232,24 @@ export class WorshipPlayer {
     drawerVolume.classList.add('worship-volume-drawer');
     this.listEl = el('ol', 'worship-list');
     this.listEl.id = 'worship-list';
-    this.drawer.append(drawerVolume, this.listEl);
+    // 🎧 Listen on YouTube (Music): opens the current song (or the configured playlist) and pauses ours.
+    const yt = el('div', 'worship-yt');
+    this.ytLink = el('a', 'worship-yt-link', '🎧 YouTube에서 듣기');
+    this.ytLink.id = 'worship-yt';
+    this.ytAlt = el('a', 'worship-yt-alt', 'youtube.com');
+    for (const a of [this.ytLink, this.ytAlt]) {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.addEventListener('click', () => this.pauseForOutside());
+    }
+    yt.append(this.ytLink, this.ytAlt);
+    this.drawer.append(yt, drawerVolume, this.listEl);
 
     const body = el('div', 'worship-body');
     const side = el('div', 'worship-side');
     side.append(volumeRow, this.drawer);
     body.append(this.frame, side);
-    this.root.append(head, body);
+    this.root.append(head, body, this.handle);
     this.renderList();
     this.applySize();
     // Taps on the player chrome must not turn into camera drags.
@@ -203,7 +257,8 @@ export class WorshipPlayer {
     // While a sheet is open the player always uses its compact layout, so the
     // sheet and the video never overlap.
     window.addEventListener('worlds-modal', () => this.applySize());
-    document.getElementById('app')!.append(this.root);
+    document.getElementById('app')!.append(this.root, this.tab);
+    this.updateLinks();
   }
 
   private volumeRow(id: string): HTMLElement {
@@ -302,14 +357,143 @@ export class WorshipPlayer {
   }
 
   private applySize() {
-    const effective = Modal.anyOpen ? 'small' : this.size;
-    this.root.classList.toggle('size-large', effective === 'large');
-    this.root.classList.toggle('size-small', effective === 'small');
-    document.body.classList.toggle('worship-large', effective === 'large' && this.mode !== 'hidden');
+    const modal = Modal.anyOpen;
+    const visible = this.mode !== 'hidden';
+    // The 골방 keeps the player on the wall; while a sheet is open the player uses
+    // the compact dock (or stays folded) so nothing overlaps.
+    let eff: WorshipFold = this.mode === 'room' ? 'open' : this.fold;
+    if (modal && eff !== 'folded') eff = 'open';
+    this.effective = eff;
+    const large = eff === 'open' && !modal && this.size === 'large' && !IS_TOUCH;
+    this.root.classList.toggle('mini', eff === 'mini');
+    this.root.classList.toggle('folded', eff === 'folded');
+    this.root.classList.toggle('size-large', large);
+    this.root.classList.toggle('size-small', !large);
+    // Phones: 펼침 is the drawer view (list + volume).
+    this.root.classList.toggle('list-open', this.listOpen || (IS_TOUCH && eff === 'open' && !modal));
+    const body = document.body.classList;
+    body.toggle('worship-large', large && visible);
+    body.toggle('worship-on', visible && eff !== 'folded');
+    body.toggle('worship-mini', visible && eff === 'mini');
+    body.toggle('worship-folded', visible && eff === 'folded');
+    this.tab.hidden = !(visible && eff === 'folded' && !modal);
+    if (eff === 'folded') this.pauseForFold();
     this.sizeBtn.replaceChildren(icon(this.size === 'large' ? 'small' : 'large'));
     const label = this.size === 'large' ? '작게 보기' : '크게 보기';
     this.sizeBtn.setAttribute('aria-label', label);
     this.sizeBtn.title = label;
+  }
+
+  // ---------------------------------------------------------------- fold states
+
+  get foldState(): WorshipFold {
+    return this.fold;
+  }
+
+  setFold(fold: WorshipFold) {
+    const wasFolded = this.effective === 'folded';
+    this.fold = fold;
+    try {
+      localStorage.setItem(FOLD_KEY, fold);
+    } catch {
+      /* ignore */
+    }
+    this.applySize();
+    // Coming back from 접기: resume only once the video is on screen again.
+    if (wasFolded && this.effective !== 'folded') requestAnimationFrame(() => requestAnimationFrame(() => this.resumeVisible()));
+  }
+
+  private unfoldFromTab() {
+    this.setFold(IS_TOUCH ? 'mini' : 'open');
+  }
+
+  private resumeVisible() {
+    if (this.effective === 'folded' || this.mode === 'hidden') return;
+    if (!this.player) {
+      if (this.videos.length) void this.create(this.index, true);
+      return;
+    }
+    if (this.ready) {
+      this.player.playVideo();
+      this.armPrompt();
+    }
+  }
+
+  /** Folded: pause (never play hidden). The iframe stays, keeping the position. */
+  private pauseForFold() {
+    window.clearTimeout(this.graceTimer);
+    this.listen.hidden = true;
+    this.root.classList.remove('prompting');
+    if (this.player && this.ready) {
+      try {
+        this.player.pauseVideo();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** Opening YouTube elsewhere: pause ours so two never play at once. */
+  private pauseForOutside() {
+    if (this.player && this.ready) {
+      try {
+        this.player.pauseVideo();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private updateLinks() {
+    const v = this.videos[this.index];
+    const id = v ? encodeURIComponent(v.id) : '';
+    if (WORSHIP_PLAYLIST_URL) {
+      this.ytLink.href = WORSHIP_PLAYLIST_URL;
+      this.ytAlt.hidden = true;
+    } else {
+      this.ytLink.href = `https://music.youtube.com/watch?v=${id}`;
+      this.ytAlt.href = `https://www.youtube.com/watch?v=${id}`;
+      this.ytAlt.hidden = !v;
+    }
+    this.ytLink.hidden = !v && !WORSHIP_PLAYLIST_URL;
+    this.tabTitle.textContent = v?.title ?? '';
+  }
+
+  /** Tap = 펼침; swipe right = 접기; swipe left = 펼침. */
+  private bindHandle() {
+    let startX: number | null = null;
+    let swiped = false;
+    this.handle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      startX = e.clientX;
+      swiped = false;
+      try {
+        this.handle.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    });
+    this.handle.addEventListener('pointerup', (e) => {
+      if (startX === null) return;
+      const dx = e.clientX - startX;
+      startX = null;
+      if (dx > SWIPE_PX) {
+        swiped = true;
+        this.setFold('folded');
+      } else if (dx < -SWIPE_PX) {
+        swiped = true;
+        this.setFold('open');
+      }
+    });
+    this.handle.addEventListener('pointercancel', () => (startX = null));
+    this.handle.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (swiped) {
+        swiped = false;
+        return;
+      }
+      this.setFold('open');
+    });
   }
 
   private toggleList(open = !this.listOpen) {
@@ -340,8 +524,11 @@ export class WorshipPlayer {
    * (the 입장 tap, the HUD 찬양 button) so browsers are most likely to allow
    * playback with sound; if they don't, the "찬양 듣기" prompt appears.
    */
-  open(asRoom = false) {
+  open(asRoom = false, unfold = false) {
     this.setClosedPref(false);
+    // The HUD 찬양 button brings a folded player back into view; entering the
+    // world keeps a remembered 접기 (paused, cued only).
+    if (unfold && this.fold === 'folded') this.setFold(IS_TOUCH ? 'mini' : 'open');
     this.show(asRoom ? 'room' : 'dock');
     if (this.videos.length === 0) return this.renderPlaceholder();
     if (this.player) {
@@ -426,9 +613,14 @@ export class WorshipPlayer {
     this.renderList();
     const v = this.videos[i];
     this.title.textContent = v.title ?? '';
+    this.updateLinks();
     if (this.player && this.ready) {
-      this.player.loadVideoById(v.id);
-      this.armPrompt();
+      // Folded: only cue (never start playback while hidden).
+      if (this.effective === 'folded') this.player.cueVideoById(v.id);
+      else {
+        this.player.loadVideoById(v.id);
+        this.armPrompt();
+      }
     } else {
       void this.create(i, true);
     }
@@ -455,7 +647,10 @@ export class WorshipPlayer {
     const video = this.videos[index];
     this.title.textContent = video.title ?? '';
     this.renderList();
+    this.updateLinks();
     this.lastError = null;
+    // Never autoplay into a folded (hidden) player.
+    if (this.effective === 'folded') autoplay = false;
     if (!/^[A-Za-z0-9_-]{6,20}$/.test(video.id)) {
       this.renderMessage('영상 주소를 확인해 주세요', '설정된 영상 ID가 올바르지 않아요.');
       this.skipBroken(video, 'bad_id');
@@ -486,7 +681,7 @@ export class WorshipPlayer {
         onReady: () => {
           this.ready = true;
           this.setVolume(this.volume, this.muted, this.globalMuted);
-          if (autoplay) {
+          if (autoplay && this.effective !== 'folded') {
             this.player?.playVideo();
             this.armPrompt();
           } else {
@@ -516,6 +711,7 @@ export class WorshipPlayer {
   }
 
   private playFromGesture() {
+    if (this.effective === 'folded') return this.unfoldFromTab();
     if (!this.player || !this.ready) {
       if (!this.player && this.videos.length) void this.create(this.index, true);
       return;
@@ -525,6 +721,11 @@ export class WorshipPlayer {
   }
 
   private onState(state: number) {
+    if (state === STATE.PLAYING && this.effective === 'folded') {
+      // Defensive: should never happen; record it and stop at once.
+      this.playedWhileFolded = true;
+      this.player?.pauseVideo();
+    }
     this.setState(state);
     if (state === STATE.PLAYING) {
       this.failures = 0;
@@ -570,6 +771,10 @@ export class WorshipPlayer {
     return {
       mode: this.mode,
       size: this.size,
+      fold: this.fold,
+      effective: this.effective,
+      playedWhileFolded: this.playedWhileFolded,
+      tabVisible: !this.tab.hidden,
       state: names[this.state] ?? String(this.state),
       ready: this.ready,
       index: this.index,

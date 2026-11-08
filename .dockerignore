@@ -13,3 +13,5 @@ deploy/.env.live
 .git
 deploy/.env.tunnel
 deploy/tunnel_token.txt
+deploy/turn_key.txt
+*key*.txt

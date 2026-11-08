@@ -220,8 +220,9 @@ export class Game {
     this.hud.bind('word', () => void this.devotion.openWord());
     this.hud.bind('book', () => void this.devotion.openBook());
     this.hud.bind('worship', () => {
-      if (this.worship.isOpen && !this.inCloset) this.worship.close();
-      else this.worship.open(this.inCloset);
+      // Folded (paused tab) → bring it back; open → close; closed → open.
+      if (this.worship.isOpen && !this.inCloset && this.worship.foldState !== 'folded') this.worship.close();
+      else this.worship.open(this.inCloset, true);
     });
     this.hud.bind('settings', () => this.settings.open());
     this.hud.bind('groups', () => {

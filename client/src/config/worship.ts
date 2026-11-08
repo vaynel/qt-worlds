@@ -20,3 +20,9 @@ export const WORSHIP_VIDEOS: WorshipVideo[] = [
   { id: 'K5dhCef_04s', title: '어떤 모습입니까 (Band Live Clip)', channel: 'GIFTED' },
   { id: 'IPZpHi4X-0w', title: '나의 만족과 유익을 위해 (Room Live Worship)', channel: 'GIFTED' },
 ];
+
+/**
+ * Optional: a YouTube / YouTube Music playlist URL for "🎧 YouTube에서 듣기".
+ * When empty, the link opens the current song on music.youtube.com.
+ */
+export const WORSHIP_PLAYLIST_URL = '';

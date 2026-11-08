@@ -216,21 +216,19 @@ try {
   await sleep(800);
   check('mobile small: clear of the campfire chat', !overlaps(await box(G, '#worship'), await box(G, '#chat')));
   await G.screenshot({ path: resolve(shotDir, 'm41-worship-small-mobile.png') });
-  await G.tap('#worship-list-toggle');
+  // Phones start 작게 (video only); the handle opens the 펼침 drawer in one tap.
+  await G.tap('#worship-handle');
   await G.waitForSelector('#worship-list .worship-track', { state: 'visible' });
   check('mobile: the song list is one tap away (drawer, with volume)', await G.isVisible('#worship-volume-2'));
   await G.tap('.worship-track[data-index="4"]');
   await until(G, () => window.__WORLDS_DEBUG__.m3.worship.index === 4);
-  await G.tap('#worship-list-toggle');
-  await G.tap('#worship-size');
-  await until(G, () => window.__WORLDS_DEBUG__.m3.worship.size === 'large');
   await sleep(800);
-  const pLarge = await box(G, '.worship-frame');
-  check('mobile 크게: video >= 200x200, list below', pLarge.width >= 200 && pLarge.height >= 200 && !overlaps(pLarge, await box(G, '#worship-list')), `${Math.round(pLarge.width)}x${Math.round(pLarge.height)}`);
+  const pOpen = await box(G, '.worship-frame');
+  check('mobile 펼침: video >= 200x200, list below it', pOpen.width >= 200 && pOpen.height >= 200 && !overlaps(pOpen, await box(G, '#worship-list')), `${Math.round(pOpen.width)}x${Math.round(pOpen.height)}`);
   check('mobile: still exactly one iframe', (await w(G)).iframes === 1);
   await G.screenshot({ path: resolve(shotDir, 'm41-worship-large-mobile.png') });
-  await G.tap('#worship-size');
-  await until(G, () => window.__WORLDS_DEBUG__.m3.worship.size === 'small');
+  await G.tap('#worship-mini');
+  await until(G, () => window.__WORLDS_DEBUG__.m3.worship.fold === 'mini');
 
   // ---------------------------------------------------------------- unplayable video skip
   step('skip');
