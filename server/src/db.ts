@@ -135,6 +135,28 @@ const MIGRATIONS: string[] = [
   `,
   // v4: anonymous public lanterns (author kept internally, never sent to others)
   `ALTER TABLE lanterns ADD COLUMN anonymous INTEGER NOT NULL DEFAULT 0;`,
+  // v5: Web Push (M6): device subscriptions and per-user notification preferences
+  `
+  CREATE TABLE push_subscriptions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    last_ok_at INTEGER
+  );
+  CREATE INDEX push_subscriptions_user ON push_subscriptions(user_id);
+  CREATE TABLE push_prefs (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    daily INTEGER NOT NULL DEFAULT 1,
+    daily_time INTEGER NOT NULL DEFAULT 360,
+    prayer INTEGER NOT NULL DEFAULT 1,
+    last_daily_date TEXT,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

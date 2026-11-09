@@ -7,6 +7,7 @@ import { googleProvider, MockProvider, OidcFlow, Sessions, Users, type AuthConfi
 import { DailyWord } from './dailyWord.js';
 import { defaultDbPath, openDb, serverRoot } from './db.js';
 import { originAllowed, requestInfo, StaticClient } from './http.js';
+import { PushService } from './push.js';
 import { Room } from './Room.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
@@ -27,8 +28,9 @@ const log = (msg: string) => {
 // Test-only switches. Refused outright in production.
 const TEST_MODE = process.env.WORLDS_TEST_MODE === '1' || process.env.WORLDS_ALLOW_TEST_DATES === '1';
 const AUTH_MOCK = process.env.WORLDS_AUTH_MOCK === '1';
-if (PRODUCTION && (TEST_MODE || AUTH_MOCK)) {
-  console.error('FATAL: WORLDS_TEST_MODE / WORLDS_ALLOW_TEST_DATES / WORLDS_AUTH_MOCK cannot be used with NODE_ENV=production');
+const PUSH_MOCK = process.env.WORLDS_PUSH_MOCK === '1';
+if (PRODUCTION && (TEST_MODE || AUTH_MOCK || PUSH_MOCK)) {
+  console.error('FATAL: WORLDS_TEST_MODE / WORLDS_ALLOW_TEST_DATES / WORLDS_AUTH_MOCK / WORLDS_PUSH_MOCK cannot be used with NODE_ENV=production');
   process.exit(1);
 }
 
@@ -51,6 +53,15 @@ const groups = new GroupService(db);
 const lanterns = new LanternService(db, groups);
 const wordbook = new WordBookService(db, dailyWord, TEST_MODE);
 const chat = new GroupChatService(db, groups);
+const push = new PushService(db, dailyWord, {
+  publicKey: process.env.VAPID_PUBLIC_KEY,
+  privateKey: process.env.VAPID_PRIVATE_KEY,
+  subject: process.env.VAPID_SUBJECT,
+  mock: PUSH_MOCK,
+  testMode: TEST_MODE,
+});
+if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
+else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
 const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, '') || null;
 const mock = AUTH_MOCK ? await MockProvider.create(`http://127.0.0.1:${PORT}/api/auth/mock`) : null;
@@ -77,9 +88,10 @@ const room = new Room({
 });
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, testMode: TEST_MODE });
 
-const clientDist = resolve(serverRoot(), '../client/dist');
+// WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
+const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
 const staticClient = SERVE_CLIENT && StaticClient.available(clientDist) ? new StaticClient(clientDist) : null;
 if (SERVE_CLIENT) log(staticClient ? `serving client from ${clientDist}` : `WARNING: SERVE_CLIENT set but ${clientDist} has no build`);
 
@@ -146,12 +158,16 @@ const sweeper = setInterval(() => {
   chat.purge();
 }, 3_600_000);
 chat.purge();
+// Every minute: daily words that are due (Asia/Seoul) and batched prayer notices.
+// Mock push (tests) is driven by /api/test/push/tick with a fake clock instead.
+const pushTimer = push.enabled && !push.mock ? setInterval(() => void push.tick().catch((e) => console.error('push tick', e)), 60_000) : null;
 
 http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /ws, api /api) seed=${SEED} max=${MAX}`));
 
 const shutdown = () => {
   clearInterval(heartbeat);
   clearInterval(sweeper);
+  if (pushTimer) clearInterval(pushTimer);
   room.close();
   wss.close();
   http.close(() => {

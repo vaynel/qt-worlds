@@ -18,6 +18,7 @@ import { VoiceClient } from '../voice/VoiceClient';
 import { VoicePanel } from '../ui/VoicePanel';
 import { MicHelp } from '../ui/MicHelp';
 import { Guide } from '../ui/Guide';
+import { InstallGuide } from '../ui/InstallGuide';
 import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
 import { Modal } from '../ui/dom';
@@ -44,6 +45,8 @@ export interface GameSession {
   account: AccountInfo | null;
   /** Show the first-time guide when the world opens. */
   guideDue: boolean;
+  /** The server can send Web Push (VAPID configured). */
+  pushEnabled: boolean;
 }
 
 const GUIDE_KEY = 'worlds.guide.seen';
@@ -93,6 +96,7 @@ export class Game {
   private nearLantern: number | null = null;
   private localTag: NameTag | null = null;
   private readonly guide: Guide;
+  private readonly installGuide = new InstallGuide();
   private voice: VoiceClient | null = null;
   private voicePanel: VoicePanel | null = null;
   private readonly micHelp = new MicHelp();
@@ -249,7 +253,13 @@ export class Game {
         this.setLocalName(name, false);
       },
       () => this.guide.open((started) => started && this.showPaths()),
+      this.installGuide,
+      session.pushEnabled,
     );
+    // Tapping a 🕊️ notification while the app is open: show today's word.
+    window.addEventListener('worlds-notification-click', () => {
+      if (!Modal.anyOpen) void this.devotion.openWord();
+    });
 
     this.hud.onAction(() => this.primaryAction());
     this.hud.bind('meditate', () => this.devotion.meditate());
@@ -605,6 +615,8 @@ export class Game {
           this.markGuideSeen();
           if (started) this.showPaths();
           next();
+          // Once, gently: "📲 앱으로 설치하기" (only where it applies).
+          setTimeout(() => this.installGuide.offerOnce(), 1500);
         });
       }
     }

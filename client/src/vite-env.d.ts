@@ -28,3 +28,4 @@ interface WorldsDebug {
 interface Window {
   __WORLDS_DEBUG__?: WorldsDebug;
 }
+declare const __BUILD_TAG__: string;

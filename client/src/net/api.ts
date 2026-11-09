@@ -42,6 +42,8 @@ export interface Me {
 export interface AuthConfig {
   ready: boolean;
   provider: 'google' | 'mock' | null;
+  /** Web Push configured on the server (VAPID keys set). */
+  push?: boolean;
 }
 
 export const getMe = () => api<Me>('GET', '/api/me').catch(() => ({ user: null, needsNickname: false }) as Me);

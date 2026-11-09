@@ -322,9 +322,11 @@ export class StaticClient {
     let file = resolve(this.root, '.' + (rel.startsWith('/') ? rel : `/${rel}`));
     if (!file.startsWith(this.root + sep) && file !== this.root) return false;
     let isIndex = false;
+    // The service worker must always be revalidated, and never be the SPA page.
+    const isWorker = pathname === '/sw.js';
     if (!existsSync(file) || statSync(file).isDirectory()) {
-      // Unknown asset files are real 404s; everything else falls back to the SPA.
-      if (pathname.startsWith('/assets/') || extname(pathname)) return false;
+      // Unknown asset files (and a missing sw.js) are real 404s; everything else falls back to the SPA.
+      if (isWorker || pathname.startsWith('/assets/') || extname(pathname)) return false;
       file = join(this.root, 'index.html');
       isIndex = true;
     }
@@ -335,7 +337,7 @@ export class StaticClient {
       'content-type': entry.type,
       etag: entry.etag,
       'x-content-type-options': 'nosniff',
-      'cache-control': isIndex ? 'no-cache' : pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+      'cache-control': isIndex || isWorker ? 'no-cache' : pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
       vary: 'accept-encoding',
       ...(isIndex ? securityHeaders(info) : {}),
     };
@@ -370,6 +372,8 @@ export function securityHeaders(info: RequestInfo): Record<string, string> {
     "font-src 'self' data:",
     `connect-src 'self' ws://${host} wss://${host}`,
     "media-src 'self' blob:",
+    "worker-src 'self'",
+    "manifest-src 'self'",
     "form-action 'self' https://accounts.google.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",

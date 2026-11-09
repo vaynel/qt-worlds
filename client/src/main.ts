@@ -7,6 +7,10 @@ import { getAuthConfig, getMe } from './net/api';
 import { GuestWordBookStore, LocalWordBookStore, ServerWordBookStore, type WordBookStore } from './storage/WordBook';
 import { EntryScreen } from './ui/EntryScreen';
 import { preloadYouTubeApi, WorshipPlayer } from './ui/WorshipPlayer';
+import { initPwa } from './pwa/pwa';
+
+// Service worker (production builds only), install prompt capture.
+initPwa();
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world-canvas');
 if (!canvas) throw new Error('#world-canvas 를 찾을 수 없어요');
@@ -121,6 +125,7 @@ async function enter(): Promise<void> {
       store,
       account: choice.mode === 'account' ? { id: choice.userId, nickname: choice.nickname } : null,
       guideDue,
+      pushEnabled: authConfig.push === true,
     });
     game.start();
     return;

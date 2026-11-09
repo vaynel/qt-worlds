@@ -1,7 +1,10 @@
 import type { AccountInfo } from '../../../shared/protocol';
 import type { AudioEngine, AudioSettings } from '../audio/AudioEngine';
 import { api, ApiError, logout, startGoogleLogin } from '../net/api';
+import { installMode, isStandalone, onInstallChange } from '../pwa/pwa';
 import { button, el, Modal } from './dom';
+import type { InstallGuide } from './InstallGuide';
+import { NotifySettings } from './NotifySettings';
 
 type SliderKey = 'master' | 'ambience' | 'worship' | 'ui' | 'voice';
 
@@ -22,7 +25,13 @@ export class SettingsView {
     private readonly account: () => AccountInfo | null,
     private readonly onNickname: (name: string) => void,
     private readonly openGuide: () => void = () => undefined,
+    private readonly install: InstallGuide | null = null,
+    private readonly pushEnabled = false,
   ) {
+    // beforeinstallprompt may arrive late: refresh the button if settings are open.
+    onInstallChange(() => {
+      if (this.modal.isOpen) this.render(this.audio.settings);
+    });
     // Keep the sliders in sync when something else (the player) changes a level.
     audio.onSettingsChange((s) => {
       if (!this.modal.isOpen) return;
@@ -89,6 +98,24 @@ export class SettingsView {
     return box;
   }
 
+  /** 📲 앱으로 설치하기: hidden when already installed or not installable here. */
+  private installSection(): HTMLElement | null {
+    const install = this.install;
+    if (!install || isStandalone()) return null;
+    const mode = installMode();
+    if (!mode) return null;
+    const box = el('div', 'settings-account');
+    box.id = 'settings-install';
+    const b = button('📲 앱으로 설치하기', '', () => void install.install());
+    b.id = 'settings-install-btn';
+    box.append(
+      el('p', 'settings-section', '앱'),
+      b,
+      el('p', 'settings-note', mode === 'ios' ? '공유 버튼 → "홈 화면에 추가"로 앱처럼 쓸 수 있어요.' : '홈 화면이나 바탕화면에서 바로 열 수 있어요.'),
+    );
+    return box;
+  }
+
   private render(s: AudioSettings) {
     const sheet = this.modal.sheet;
     sheet.className = 'sheet settings';
@@ -140,6 +167,9 @@ export class SettingsView {
     const help = el('div', 'settings-account');
     help.append(el('p', 'settings-section', '사용 안내'), guide);
     body.append(help);
+    const app = this.installSection();
+    if (app) body.append(app);
+    if (this.pushEnabled) body.append(new NotifySettings(!!this.account(), this.install!).root);
     body.append(this.accountSection());
     sheet.append(body);
   }

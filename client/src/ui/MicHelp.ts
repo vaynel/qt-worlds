@@ -1,8 +1,8 @@
 import { button, el, Modal } from './dom';
 
-type Platform = 'ios-safari' | 'ios-standalone' | 'android' | 'desktop-safari' | 'desktop-chromium' | 'desktop-firefox' | 'other';
+export type Platform = 'ios-safari' | 'ios-standalone' | 'android' | 'desktop-safari' | 'desktop-chromium' | 'desktop-firefox' | 'other';
 
-function platform(): Platform {
+export function platform(): Platform {
   const ua = navigator.userAgent;
   const iOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
   const standalone =

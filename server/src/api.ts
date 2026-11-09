@@ -4,6 +4,7 @@ import { HttpError, originAllowed, RateLimiter, readJson, redirect, requestInfo,
 import type { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 import type { GroupMessage } from '../../shared/protocol.js';
 import { TokenBucket } from './rateLimit.js';
+import type { PushService } from './push.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -89,6 +90,7 @@ export interface ApiDeps {
   room: RoomEvents;
   ice: IceServers;
   chat: GroupChatService;
+  push: PushService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -116,6 +118,7 @@ export class Api {
   private readonly nicknameLimit = new RateLimiter(10, 3_600_000);
   private readonly joinLimit = new RateLimiter(10, 60_000);
   private readonly iceLimit = new RateLimiter(10, 60_000);
+  private readonly pushLimit = new RateLimiter(30, 3_600_000);
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
 
@@ -135,7 +138,7 @@ export class Api {
 
     // ---------------- auth
     r('GET', '/api/auth/config', ({ res }) =>
-      sendJson(res, 200, { ready: d.oidc.enabled, provider: d.oidc.providerName }),
+      sendJson(res, 200, { ready: d.oidc.enabled, provider: d.oidc.providerName, push: d.push.enabled }),
     );
     r('GET', '/api/auth/google/start', ({ res, info, query }) => {
       this.limit(this.authLimit, `ip:${info.ip}`);
@@ -274,6 +277,57 @@ export class Api {
       });
     }
 
+    // ---------------- web push (signed-in accounts only; guests can't subscribe)
+    const pushOn = () => {
+      if (!d.push.enabled) throw new HttpError(404, 'push_disabled', '알림을 쓸 수 없어요.');
+    };
+    r('GET', '/api/push/key', ({ res, user }) => {
+      this.signedIn(user);
+      pushOn();
+      sendJson(res, 200, { publicKey: d.push.publicKey });
+    });
+    r('POST', '/api/push/subscribe', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      pushOn();
+      this.limit(this.pushLimit, `user:${u.id}`);
+      const body = await readJson(req);
+      sendJson(res, 200, d.push.subscribe(u.id, body, String(req.headers['user-agent'] ?? '')));
+    });
+    r('POST', '/api/push/unsubscribe', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      pushOn();
+      sendJson(res, 200, d.push.unsubscribe(u.id, await readJson(req)));
+    });
+    r('GET', '/api/push/prefs', ({ res, user }) => {
+      const u = this.signedIn(user);
+      pushOn();
+      sendJson(res, 200, d.push.prefs(u.id));
+    });
+    r('PUT', '/api/push/prefs', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      pushOn();
+      sendJson(res, 200, d.push.setPrefs(u.id, await readJson(req)));
+    });
+    if (d.testMode && d.push.mock) {
+      // Test-only: drive the scheduler with a fake clock and inspect mock deliveries.
+      r('POST', '/api/test/push/clock', async ({ req, res }) => {
+        const now = (await readJson(req)).now;
+        d.push.now = typeof now === 'number' ? () => now : () => Date.now();
+        sendJson(res, 200, { now: d.push.now() });
+      });
+      r('POST', '/api/test/push/tick', async ({ res }) => sendJson(res, 200, await d.push.tick()));
+      r('GET', '/api/test/push/sent', ({ res }) => sendJson(res, 200, { deliveries: d.push.deliveries }));
+      r('POST', '/api/test/push/reset', ({ res }) => {
+        d.push.deliveries.length = 0;
+        sendJson(res, 200, { ok: true });
+      });
+      r('POST', '/api/test/push/status', async ({ req, res }) => {
+        const b = await readJson(req);
+        d.push.mockStatus.set(String(b.endpoint), Number(b.status));
+        sendJson(res, 200, { ok: true });
+      });
+    }
+
     // ---------------- voice (ICE servers for group members only)
     r('GET', '/api/voice/ice', async ({ res, user, query }) => {
       const u = this.signedIn(user);
@@ -325,8 +379,11 @@ export class Api {
     r('POST', '/api/lanterns/:id/reactions', async ({ req, res, user, params }) => {
       const u = this.signedIn(user);
       const lid = id(params[0]);
-      const detail = d.lanterns.toggle(u.id, lid, (await readJson(req)).type);
+      const type = (await readJson(req)).type;
+      const detail = d.lanterns.toggle(u.id, lid, type);
       d.room.lanternChanged(lid);
+      // 🤲 to the lantern's author (never who prayed; throttled and batched in PushService).
+      if (type === 'pray' && detail.myReactions.includes('pray')) void d.push.prayed(lid, u.id).catch((e) => console.error('push prayed', e));
       sendJson(res, 200, detail);
     });
   }

@@ -3144,3 +3144,111 @@ body.touch.chatting.worship-mini:not(.tablet) #chat-log {
     display: none;
   }
 }
+
+/* =================== M6: PWA (update toast, install, notifications) =================== */
+
+.sw-update {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 12px);
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 18px;
+  border-radius: 999px;
+  max-width: calc(100vw - 32px);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sw-update button {
+  padding: 8px 16px;
+  border-radius: 999px;
+}
+
+.install-offer {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe-top) + 84px);
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+}
+
+.install-offer-text {
+  flex: 1 1 100%;
+  text-align: center;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+.ios-share-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border: 1px solid var(--paper-line);
+  border-radius: 6px;
+  font-weight: 700;
+  color: #2f6fd6;
+}
+
+.ios-share-icon::before {
+  content: '';
+  width: 10px;
+  height: 12px;
+  border: 1.6px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+  box-shadow: inset 0 -1px 0 transparent;
+  background: linear-gradient(currentColor, currentColor) 50% 0 / 1.6px 9px no-repeat;
+}
+
+.notify-settings .primary,
+.notify-settings > button {
+  margin: 4px 0;
+}
+
+.notify-preprompt,
+.notify-denied {
+  margin: 4px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 196, 107, 0.16);
+  border: 1px solid var(--paper-line);
+}
+
+.notify-preprompt p,
+.notify-denied p {
+  margin: 0 0 6px;
+}
+
+.notify-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 6px 32px;
+}
+
+.notify-time {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--paper-line);
+  background: #fffaf0;
+  color: var(--ink);
+  min-height: 36px;
+}
+
+.notify-time:disabled {
+  opacity: 0.5;
+}

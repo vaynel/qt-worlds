@@ -107,6 +107,8 @@ docker compose logs -f qt-worlds     # json-file driver, 3 x 10 MB rotation
 | `MAX_PLAYERS`, `MAX_CONN_PER_IP` | 50, 12 | |
 | `NEW_ACCOUNTS_PER_HOUR` | 60 | Global brake on sign-ups |
 | `AUTH_RATE_LIMIT` | 30 | Login starts/callbacks per IP per minute |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | from `npx web-push generate-vapid-keys` | Web Push; notifications are off (UI hidden) if missing. See §8 |
+| `VAPID_SUBJECT` | `mailto:you@example.com` | Contact for push services (`mailto:` or `https:` URL). Required with the keys |
 
 ## 7. Without Docker (production mode on the host)
 
@@ -115,6 +117,66 @@ cd client && npm ci && npm run build
 cd ../server && npm ci && npm run build
 PUBLIC_BASE_URL=https://qt.log2u.me GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... npm run start:prod   # :5181, serves client/dist
 ```
+
+## 8. PWA: service worker, install, Web Push
+
+### Web Push keys (one time)
+
+```bash
+cd server && npx web-push generate-vapid-keys      # prints a public and a private key
+```
+
+Put them in `deploy/.env.live` (gitignored, never commit them):
+
+```
+VAPID_PUBLIC_KEY=<public key>
+VAPID_PRIVATE_KEY=<private key>
+VAPID_SUBJECT=mailto:<an address you read>
+```
+
+Then rebuild and recreate the container (§3). The log says
+`Web Push not configured …` when any of the three is missing; then ⚙ 설정 has no 🔔 알림 section and
+`/api/push/*` answers 404. **Keep the keys stable**: a new key pair makes every existing browser
+subscription useless (users have to turn 알림 on again).
+
+What is sent (the server checks every minute, Asia/Seoul time):
+
+- 🕊️ daily word at each user's chosen time (default 06:00, 30-minute steps), at most once per day per
+  user (`push_prefs.last_daily_date`). If the server was down at that minute it still sends up to 2 hours late.
+- 🤲 "누군가 당신의 묵상을 위해 기도하고 있어요" when someone taps 기도하기 on my lantern. Never who prayed or
+  which lantern; at most one per 15 minutes per person, the rest batched into the next one.
+- Push services answering 404/410 make the server delete that subscription. Each account keeps at most
+  10 devices. Only subscriptions to the real push services (FCM, Mozilla, Apple, WNS) are accepted.
+
+iPhone/iPad: push works only from the home-screen app (iOS 16.4+); the app explains this.
+
+### How service-worker updates reach users
+
+- `npm run build` (client) writes `dist/sw.js`: the hand-written `client/sw/sw.js` plus the precache list
+  (index.html, hashed `/assets/*`, small icons, manifest) and `SW_VERSION`, a hash of all of them. Any
+  change to the client gives a new `sw.js`.
+- The server sends `/sw.js` with `Cache-Control: no-cache`, and the page registers it with
+  `updateViaCache: 'none'`, so browsers re-check it on every visit (and every 30 minutes / when the app comes
+  back to the foreground). Do **not** add a Cloudflare cache rule for `/sw.js`.
+- The new worker installs in the background and **waits**; open pages show "새 버전이 있어요 [새로고침]".
+  Tapping it activates the new worker and reloads once. Old `qt-worlds-*` caches are deleted on activate.
+  Users who ignore the toast get the new version the next time all tabs are closed.
+- Pages are network-first, so a deploy is visible right away even before the toast; the cache is only
+  used when the server can't be reached (cached shell, or the "연결이 끊겼어요" page).
+- `/api/*`, `/ws`, `/health`, `/sw.js`, YouTube, Google and anything cross-origin never go through the cache.
+- The dev server (`npm run dev`, 5180) never registers a worker. `?nosw=1` skips registration in a build.
+
+### Kill switch (if a broken worker ever ships)
+
+```bash
+cd client && WORLDS_SW_KILL=1 npm run build    # dist/sw.js = client/sw/sw-killswitch.js
+# (or in Docker: add `ENV WORLDS_SW_KILL=1` before the client build in the Dockerfile, rebuild, deploy)
+```
+
+That `sw.js` deletes every `qt-worlds-*` cache, unregisters itself and reloads open tabs from the
+network. Browsers pick it up on their next visit (the normal update check). Leave it deployed for a few
+weeks, then deploy a normal build again. One user can also clear it by hand: browser site settings →
+clear site data (Chrome: DevTools → Application → Service workers → Unregister).
 
 ## Dev (unchanged)
 
