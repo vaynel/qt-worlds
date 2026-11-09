@@ -29,7 +29,7 @@ import { LANDMARKS, SPAWN } from '../world/config';
 import { parseTimeOverride } from '../world/DayNight';
 import { Interior } from '../world/Interior';
 import { World } from '../world/World';
-import { CAMPFIRE, type AccountInfo } from '../../../shared/protocol';
+import { CAMPFIRE, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
 import { Devotion } from './Devotion';
 import { Social } from './Social';
 
@@ -380,7 +380,7 @@ export class Game {
 
   private meditationPlace(): MeditationPlace | null {
     if (this.inCloset) return '골방';
-    if (this.player.seat >= 0) return '기도의 뜰';
+    if (this.player.seat >= 0 && this.player.seatKind === 'mat') return '기도의 뜰';
     return null;
   }
 
@@ -527,6 +527,17 @@ export class Game {
       voiceStats: () => this.voice?.stats(),
       voiceReleaseMic: () => this.voice?.releaseMic(),
       dropSocket: () => this.session.net?.debugDrop(),
+      /** Campfire log seats and chat radius (shared protocol numbers). */
+      logSeats: () => ({ campfire: CAMPFIRE, seats: LOG_SEATS.map((s) => ({ ...s })) }),
+      /** Worship player fold state in the world dock (layout tests). */
+      worshipFold: (fold: 'open' | 'mini' | 'folded') => this.worship.setFold(fold),
+      /** Point the orbit camera (for screenshots). */
+      view: (yaw: number, pitch?: number, zoom?: number) => {
+        this.rig.yaw = yaw;
+        if (pitch !== undefined) this.rig.pitch = pitch;
+        if (zoom) this.rig.applyZoom(zoom);
+        this.rig.snap(this.player.position);
+      },
       closetDoor: () => {
         const d = this.world.landmarks.closetDoor;
         return { x: d.x, z: d.z };

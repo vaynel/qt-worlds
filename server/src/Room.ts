@@ -2,8 +2,10 @@ import { randomBytes } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import {
   CAMPFIRE,
-  MATS,
+  LOG_SEAT_COUNT,
   MAT_COUNT,
+  seatSpot,
+  type SeatKind,
   PROTOCOL_VERSION,
   VOICE_KICK_BLOCK_MS,
   VOICE_MAX,
@@ -39,6 +41,8 @@ interface Client {
   baseName: string;
   state: StatePayload;
   seat: number;
+  /** What `seat` indexes (meaningful only while seat >= 0). */
+  seatKind: SeatKind;
   buckets: { state: TokenBucket; chat: TokenBucket; seat: TokenBucket; voice: TokenBucket; signal: TokenBucket; voiceState: TokenBucket };
   /** Voice prayer room this connection is in (group id), or null. */
   voiceGroup: number | null;
@@ -62,6 +66,8 @@ interface Client {
 /** Fastest legit movement (run speed 7.5 m/s) with headroom for lag. */
 const MAX_SPEED = 11;
 const MOVE_SLACK = 2;
+/** A state this far from your seat means you got up and walked off. */
+const SEAT_LEAVE_DISTANCE = 1.2;
 
 export interface RoomOptions {
   seed: string;
@@ -88,6 +94,8 @@ const round = (v: number) => Math.round(v * 100) / 100;
 export class Room implements RoomEvents {
   private readonly clients = new Map<string, Client>();
   private readonly mats: (string | null)[] = Array(MAT_COUNT).fill(null);
+  /** Campfire log seats (LOG_SEATS order). */
+  private readonly logs: (string | null)[] = Array(LOG_SEAT_COUNT).fill(null);
   private readonly timer: NodeJS.Timeout;
   private readonly log: (msg: string) => void;
   private currentDate = seoulDate();
@@ -115,6 +123,7 @@ export class Room implements RoomEvents {
       baseName: '',
       state: { ...SPAWN },
       seat: -1,
+      seatKind: 'mat',
       buckets: {
         state: new TokenBucket(30, 25),
         chat: new TokenBucket(3, 0.5),
@@ -193,7 +202,13 @@ export class Room implements RoomEvents {
         return this.strike(client, 'bad_message');
       case 'state': {
         if (!client.buckets.state.take()) return this.strike(client, 'rate_limited');
-        if (client.seat >= 0) return; // seated players stay on their mat
+        if (client.seat >= 0) {
+          // Seated players stay put; walking away (a client that skipped
+          // 'stand') stands them up and frees the seat.
+          const spot = seatSpot(client.seatKind, client.seat)!;
+          if (Math.hypot(msg.x - spot.x, msg.z - spot.z) <= SEAT_LEAVE_DISTANCE) return;
+          this.freeSeat(client);
+        }
         const now = Date.now();
         if (client.lastStateAt && !client.testClient) {
           // Speed check: reject teleports and tell the client where it really is.
@@ -228,17 +243,23 @@ export class Room implements RoomEvents {
       }
       case 'sit': {
         if (!client.buckets.seat.take()) return this.strike(client, 'rate_limited');
-        const mat = MATS[msg.mat];
-        const owner = this.mats[msg.mat];
-        if (owner && owner !== client.id) return this.error(client, 'mat_taken', '이미 다른 분이 앉아 있어요.');
-        if (Math.hypot(client.state.x - mat.x, client.state.z - mat.z) > SIT_REACH) {
+        const spot = seatSpot(msg.kind, msg.seat)!;
+        const list = this.seats(msg.kind);
+        const owner = list[msg.seat];
+        if (owner && owner !== client.id) {
+          return msg.kind === 'log'
+            ? this.error(client, 'seat_taken', '이미 다른 분이 앉아 있어요.')
+            : this.error(client, 'mat_taken', '이미 다른 분이 앉아 있어요.');
+        }
+        if (client.state.inside || Math.hypot(client.state.x - spot.x, client.state.z - spot.z) > SIT_REACH) {
           return this.error(client, 'not_near', '자리에 조금 더 가까이 가 주세요.');
         }
-        if (client.seat >= 0) this.mats[client.seat] = null;
-        this.mats[msg.mat] = client.id;
-        client.seat = msg.mat;
-        client.state = { ...client.state, x: mat.x, z: mat.z, yaw: mat.yaw, speed: 0 };
-        this.broadcast({ t: 'mats', mats: [...this.mats] });
+        if (client.seat >= 0 && (client.seatKind !== msg.kind || client.seat !== msg.seat)) this.freeSeat(client);
+        list[msg.seat] = client.id;
+        client.seat = msg.seat;
+        client.seatKind = msg.kind;
+        client.state = { ...client.state, x: spot.x, z: spot.z, yaw: spot.yaw, speed: 0 };
+        this.broadcastSeats(msg.kind);
         return;
       }
       case 'stand': {
@@ -416,6 +437,7 @@ export class Room implements RoomEvents {
       seed: this.options.seed,
       players,
       mats: [...this.mats],
+      logs: [...this.logs],
       snapshotHz: SNAPSHOT_HZ,
       word: this.wordFor(client),
       account: client.userId !== null && client.accountName ? { id: client.userId, nickname: client.accountName } : null,
@@ -515,11 +537,21 @@ export class Room implements RoomEvents {
     return Math.hypot(c.state.x - CAMPFIRE.x, c.state.z - CAMPFIRE.z) <= CAMPFIRE.chatRadius;
   }
 
+  private seats(kind: SeatKind): (string | null)[] {
+    return kind === 'log' ? this.logs : this.mats;
+  }
+
+  private broadcastSeats(kind: SeatKind): void {
+    this.broadcast(kind === 'log' ? { t: 'logs', logs: [...this.logs] } : { t: 'mats', mats: [...this.mats] });
+  }
+
+  /** Stand up (stand message, disconnect): the seat is free again for everyone. */
   private freeSeat(client: Client): void {
     if (client.seat < 0) return;
-    if (this.mats[client.seat] === client.id) this.mats[client.seat] = null;
+    const list = this.seats(client.seatKind);
+    if (list[client.seat] === client.id) list[client.seat] = null;
     client.seat = -1;
-    this.broadcast({ t: 'mats', mats: [...this.mats] });
+    this.broadcastSeats(client.seatKind);
   }
 
   private detach(client: Client): void {
@@ -529,11 +561,7 @@ export class Room implements RoomEvents {
     this.voiceLeave(client, 'left');
     client.joined = false;
     this.broadcast({ t: 'leave', id: client.id });
-    if (client.seat >= 0) {
-      this.mats[client.seat] = null;
-      client.seat = -1;
-      this.broadcast({ t: 'mats', mats: [...this.mats] });
-    }
+    this.freeSeat(client);
     this.log(`leave ${client.name} (${client.id}), players=${this.playerCount}`);
   }
 
@@ -551,6 +579,7 @@ export class Room implements RoomEvents {
         yaw: round(s.yaw),
         speed: round(s.speed),
         seat: c.seat,
+        ...(c.seat >= 0 && c.seatKind === 'log' ? { seatKind: 'log' as const } : {}),
         ...(s.inside ? { inside: true } : {}),
       });
     }

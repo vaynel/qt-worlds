@@ -43,6 +43,8 @@ export class MeditationView {
   private draft: Draft = { date: '', meditation: '', feeling: '', application: '' };
   private word: WordPassage | null = null;
   private place: MeditationPlace = '골방';
+  /** Today's already-saved meditation being edited (same DB from any place). */
+  private editing: { id: string; place: MeditationPlace } | null = null;
   private savedHandler: (place: MeditationPlace) => void = () => undefined;
 
   constructor(
@@ -63,8 +65,37 @@ export class MeditationView {
     this.place = place;
     this.step = 0;
     this.draft = this.loadDraft(word.date);
+    this.editing = null;
     this.render();
     this.modal.open(() => this.saveDraft());
+    // One QT per day, wherever it was written: if today's meditation already
+    // exists (e.g. written on a 기도의 뜰 mat), open it here for editing.
+    const typed = this.draft.meditation || this.draft.feeling || this.draft.application;
+    if (!typed) void this.loadToday(word.date);
+  }
+
+  private async loadToday(date: string) {
+    try {
+      const page = await this.store.getPage(date);
+      const list = page?.meditations ?? [];
+      const latest = list[list.length - 1];
+      if (!latest || !this.modal.isOpen || this.word?.date !== date) return;
+      const typed = this.draft.meditation || this.draft.feeling || this.draft.application;
+      if (typed) return;
+      this.editing = { id: latest.id, place: latest.place };
+      this.draft = { date, meditation: latest.meditation, feeling: latest.feeling, application: latest.application };
+      this.render();
+    } catch {
+      /* guests or offline: start blank */
+    }
+  }
+
+  private startNew() {
+    this.editing = null;
+    this.draft = { date: this.word!.date, meditation: '', feeling: '', application: '' };
+    this.clearDraft();
+    this.step = 1;
+    this.render();
   }
 
   private loadDraft(date: string): Draft {
@@ -109,6 +140,14 @@ export class MeditationView {
     });
     top.append(el('p', 'med-place', `${this.place}에서 묵상`), dots, button('닫기', 'ghost med-close', () => this.modal.close()));
     sheet.append(top);
+    if (this.editing) {
+      const note = el('div', 'med-done');
+      note.append(
+        el('span', '', `✓ 오늘 ${this.editing.place}에서 묵상했어요 · 고쳐서 다시 담을 수 있어요`),
+        button('새 묵상 쓰기', 'ghost med-new', () => this.startNew()),
+      );
+      sheet.append(note);
+    }
 
     const body = el('div', 'med-body');
     const verse = el('blockquote', this.step === 0 ? 'med-verse big' : 'med-verse');
@@ -143,7 +182,7 @@ export class MeditationView {
     if (this.step < STEPS.length - 1) {
       foot.append(button('다음', 'primary', () => this.go(1)));
     } else {
-      const save = button('말씀 책에 담기', 'primary med-save', () => void this.save(save));
+      const save = button(this.editing ? '고친 묵상 담기' : '말씀 책에 담기', 'primary med-save', () => void this.save(save));
       foot.append(save);
     }
     const status = el('p', 'med-status');
@@ -166,12 +205,9 @@ export class MeditationView {
     }
     btn.disabled = true;
     try {
-      await this.store.addMeditation(this.word!, {
-        place: this.place,
-        meditation: meditation.trim(),
-        feeling: feeling.trim(),
-        application: application.trim(),
-      });
+      const fields = { meditation: meditation.trim(), feeling: feeling.trim(), application: application.trim() };
+      if (this.editing) await this.store.updateMeditation(this.editing.id, fields);
+      else await this.store.addMeditation(this.word!, { place: this.place, ...fields });
     } catch (err) {
       btn.disabled = false;
       if (err instanceof GuestRestricted) {
@@ -185,6 +221,7 @@ export class MeditationView {
       return;
     }
     this.clearDraft();
+    this.editing = null;
     this.draft = { date: this.word!.date, meditation: '', feeling: '', application: '' };
     this.modal.close();
     this.savedHandler(this.place);

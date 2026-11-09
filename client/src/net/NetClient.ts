@@ -12,6 +12,7 @@ import {
   type VoicePeerInfo,
   type VoiceSignal,
   type GroupMessage,
+  type SeatKind,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -22,6 +23,8 @@ export interface Welcome {
   seed: string;
   players: PlayerInfo[];
   mats: (string | null)[];
+  /** Campfire log seats (empty from servers older than M5.3). */
+  logs: (string | null)[];
   /** Today's word (absent on servers older than M3). */
   word: WordPassage | null;
   account: AccountInfo | null;
@@ -35,6 +38,7 @@ export interface NetHandlers {
   snapshot(players: PlayerSnap[]): void;
   chat(id: string, name: string, text: string): void;
   mats(mats: (string | null)[]): void;
+  logs(logs: (string | null)[]): void;
   error(code: ErrorCode, message: string): void;
   status(status: NetStatus): void;
   word(word: WordPassage): void;
@@ -144,6 +148,9 @@ export class NetClient {
         break;
       case 'mats':
         this.handlers.mats?.(msg.mats);
+        break;
+      case 'logs':
+        this.handlers.logs?.(msg.logs);
         break;
       case 'lanterns':
         this.handlers.lanterns?.(msg.lanterns);
@@ -265,6 +272,7 @@ export class NetClient {
             seed: msg.seed,
             players: msg.players ?? [],
             mats: msg.mats ?? [],
+            logs: Array.isArray(msg.logs) ? msg.logs : [],
             word: msg.word ?? null,
             account: msg.account ?? null,
             guest: msg.guest ?? !msg.account,
@@ -289,6 +297,9 @@ export class NetClient {
           break;
         case 'mats':
           if (Array.isArray(msg.mats)) this.dispatch(msg);
+          break;
+        case 'logs':
+          if (Array.isArray(msg.logs)) this.dispatch(msg);
           break;
         case 'lanterns':
           if (Array.isArray(msg.lanterns)) this.dispatch(msg);
@@ -378,8 +389,9 @@ export class NetClient {
     this.raw({ t: 'chat', text });
   }
 
-  sit(mat: number): void {
-    this.raw({ t: 'sit', mat });
+  sit(kind: SeatKind, seat: number): void {
+    // Mats keep the legacy shape so an older server still understands them.
+    this.raw(kind === 'mat' ? ({ t: 'sit', mat: seat } as unknown as ClientMessage) : { t: 'sit', kind, seat });
   }
 
   stand(): void {

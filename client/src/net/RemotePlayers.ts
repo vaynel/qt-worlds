@@ -19,6 +19,7 @@ interface Sample {
   yaw: number;
   speed: number;
   seat: number;
+  log: boolean;
   inside: boolean;
 }
 
@@ -29,6 +30,8 @@ interface Remote {
   tag: NameTag;
   samples: Sample[];
   seat: number;
+  /** Seated on a campfire log (not a prayer mat). */
+  log: boolean;
   inside: boolean;
   bubbleSlot: BubbleSlot;
 }
@@ -44,6 +47,10 @@ export class BubbleSlot {
     private readonly parent: THREE.Object3D,
     private readonly height = 2.45,
   ) {}
+
+  get showing(): boolean {
+    return this.sprite !== null;
+  }
 
   show(text: string, now: number): void {
     this.clear();
@@ -98,6 +105,7 @@ export class RemotePlayers {
       tag,
       samples: [],
       seat: -1,
+      log: false,
       inside: false,
       bubbleSlot: new BubbleSlot(avatar.root),
     });
@@ -147,7 +155,7 @@ export class RemotePlayers {
       if (s.id === localId) continue;
       const p = this.players.get(s.id);
       if (!p) continue;
-      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, inside: s.inside === true });
+      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, log: s.seatKind === 'log', inside: s.inside === true });
       if (p.samples.length > MAX_SAMPLES) p.samples.shift();
     }
   }
@@ -168,14 +176,14 @@ export class RemotePlayers {
       // Drop samples we've fully passed, keeping one before renderTime.
       while (s.length > 2 && s[1].t <= renderTime) s.shift();
 
-      let x: number, y: number, z: number, yaw: number, speed: number, seat: number;
+      let x: number, y: number, z: number, yaw: number, speed: number, seat: number, log: boolean;
       const a = s[0];
       const b = s[1];
       const latest = s[s.length - 1];
       if (!b || renderTime <= a.t) {
-        ({ x, y, z, yaw, speed, seat } = renderTime <= a.t || !b ? a : b);
+        ({ x, y, z, yaw, speed, seat, log } = renderTime <= a.t || !b ? a : b);
       } else if (Math.hypot(b.x - a.x, b.z - a.z) > SNAP_DISTANCE) {
-        ({ x, y, z, yaw, speed, seat } = renderTime >= b.t ? b : a);
+        ({ x, y, z, yaw, speed, seat, log } = renderTime >= b.t ? b : a);
       } else {
         const t = Math.min(1, (renderTime - a.t) / Math.max(1e-3, b.t - a.t));
         x = a.x + (b.x - a.x) * t;
@@ -184,6 +192,7 @@ export class RemotePlayers {
         yaw = lerpAngle(a.yaw, b.yaw, t);
         speed = a.speed + (b.speed - a.speed) * t;
         seat = t < 0.5 ? a.seat : b.seat;
+        log = t < 0.5 ? a.log : b.log;
       }
 
       p.avatar.root.position.set(x, y, z);
@@ -192,7 +201,8 @@ export class RemotePlayers {
       p.avatar.root.visible = !latest.inside;
       p.inside = latest.inside;
       p.seat = seat;
-      p.avatar.setSeated(seat >= 0);
+      p.log = seat >= 0 && log;
+      p.avatar.setSeated(seat >= 0, log ? 'sit' : 'pray');
       p.avatar.animate(dt, speed, elapsed);
       p.bubbleSlot.update(now);
       if (view && p.avatar.root.visible) p.tag.update(view);
@@ -206,6 +216,9 @@ export class RemotePlayers {
     x: number;
     z: number;
     seat: number;
+    seatKind: 'mat' | 'log' | null;
+    pose: 'pray' | 'sit' | 'stand';
+    bubble: boolean;
     visible: boolean;
     inside: boolean;
     tag: string;
@@ -219,6 +232,9 @@ export class RemotePlayers {
       x: +p.avatar.root.position.x.toFixed(2),
       z: +p.avatar.root.position.z.toFixed(2),
       seat: p.seat,
+      seatKind: p.seat < 0 ? null : p.log ? 'log' : 'mat',
+      pose: p.avatar.pose,
+      bubble: p.bubbleSlot.showing,
       visible: p.avatar.root.visible,
       inside: p.inside,
       tag: p.tag.text,

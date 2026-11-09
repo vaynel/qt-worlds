@@ -3,7 +3,11 @@ import { MAX_WADE_DEPTH, WATER_LEVEL } from '../world/config';
 import type { World } from '../world/World';
 import type { MoveIntent } from '../systems/Input';
 import type { AvatarState } from '../game/types';
+import type { SeatKind } from '../../../shared/protocol';
 import { Avatar } from './Avatar';
+
+/** Standing up from a log: step this far toward the fire, clear of the log. */
+const LOG_STEP_OFF = 0.85;
 
 const WALK_SPEED = 4.2;
 const RUN_SPEED = 7.5;
@@ -22,8 +26,9 @@ export class PlayerController {
   readonly velocity = new THREE.Vector3();
   readonly avatar = new Avatar();
   yaw = 0;
-  /** Prayer mat index while seated, else -1. */
+  /** Seat index (prayer mat or campfire log, see seatKind) while seated, else -1. */
   seat = -1;
+  seatKind: SeatKind = 'mat';
   private readonly wish = new THREE.Vector3();
 
   constructor(private readonly world: World, x: number, z: number, yaw: number) {
@@ -36,25 +41,39 @@ export class PlayerController {
     return Math.hypot(this.velocity.x, this.velocity.z);
   }
 
-  /** Sit on a mat: snap onto it, face the garden centre, take the prayer pose. */
-  sitAt(seat: number, x: number, z: number, yaw: number) {
+  /**
+   * Sit down: snap onto the seat and face its centre. On a mat that's the
+   * kneeling prayer pose; on a campfire log a relaxed sitting pose (the avatar
+   * root stays on the ground, the pose lifts the body onto the log).
+   */
+  sitAt(seat: number, x: number, z: number, yaw: number, kind: SeatKind = 'mat') {
     this.seat = seat;
+    this.seatKind = kind;
     this.position.set(x, this.world.groundHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
-    this.avatar.setSeated(true);
+    this.avatar.setSeated(true, kind === 'log' ? 'sit' : 'pray');
     this.syncAvatar();
   }
 
   standUp() {
     if (this.seat < 0) return;
+    const fromLog = this.seatKind === 'log';
     this.seat = -1;
     this.avatar.setSeated(false);
+    if (fromLog) {
+      // Step off toward the fire so the log's collider doesn't shove us sideways.
+      const x = this.position.x + Math.sin(this.yaw) * LOG_STEP_OFF;
+      const z = this.position.z + Math.cos(this.yaw) * LOG_STEP_OFF;
+      this.position.set(x, this.world.groundHeight(x, z), z);
+      this.syncAvatar();
+    }
   }
 
   /** Instant move (QA hook / respawn). */
   teleport(x: number, z: number) {
-    this.standUp();
+    this.seat = -1;
+    this.avatar.setSeated(false);
     this.position.set(x, this.world.groundHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.syncAvatar();

@@ -92,6 +92,49 @@ export const MATS: readonly MatSpot[] = Array.from({ length: MAT_COUNT }, (_, in
   return { index, x, z, yaw: Math.atan2(PRAYER_GARDEN.x - x, PRAYER_GARDEN.z - z) };
 });
 
+/** What a player sits on: a prayer mat (기도의 뜰) or a campfire log bench. */
+export type SeatKind = 'mat' | 'log';
+
+/**
+ * 모닥불 log benches (Landmarks.buildCampfire builds the logs from these
+ * numbers): LOG_COUNT logs, each LOG_LENGTH long, lying tangent to a circle of
+ * LOG_RING_RADIUS around the fire, centres at angle i/LOG_COUNT*2π + LOG_ANGLE0.
+ */
+export const LOG_COUNT = 5;
+export const LOG_RING_RADIUS = 4.2;
+export const LOG_ANGLE0 = 0.3;
+export const LOG_LENGTH = 2.0;
+export const LOG_RADIUS = 0.32;
+/** Seats per log, this far either side of the log's middle. */
+export const LOG_SEATS_PER_LOG = 2;
+export const LOG_SEAT_SPREAD = 0.5;
+/** Seat sits a touch behind the log's axis (away from the fire), so the
+ *  knees land on the log's front edge and the shins hang clear of it. */
+export const LOG_SEAT_BACK = 0.02;
+export const LOG_SEAT_COUNT = LOG_COUNT * LOG_SEATS_PER_LOG;
+
+export interface LogSeat extends MatSpot {
+  /** Which log (0..LOG_COUNT-1). */
+  log: number;
+}
+
+export const LOG_SEATS: readonly LogSeat[] = Array.from({ length: LOG_SEAT_COUNT }, (_, index) => {
+  const log = Math.floor(index / LOG_SEATS_PER_LOG);
+  const side = (index % LOG_SEATS_PER_LOG) - (LOG_SEATS_PER_LOG - 1) / 2; // -0.5, +0.5
+  const a = (log / LOG_COUNT) * Math.PI * 2 + LOG_ANGLE0;
+  const r = LOG_RING_RADIUS + LOG_SEAT_BACK;
+  // Tangent direction (perpendicular to the radius).
+  const tx = -Math.sin(a);
+  const tz = Math.cos(a);
+  const x = CAMPFIRE.x + Math.cos(a) * r + tx * side * 2 * LOG_SEAT_SPREAD;
+  const z = CAMPFIRE.z + Math.sin(a) * r + tz * side * 2 * LOG_SEAT_SPREAD;
+  return { index, log, x, z, yaw: Math.atan2(CAMPFIRE.x - x, CAMPFIRE.z - z) };
+});
+
+export function seatSpot(kind: SeatKind, index: number): MatSpot | undefined {
+  return kind === 'log' ? LOG_SEATS[index] : MATS[index];
+}
+
 // ------------------------------------------------------------------ messages
 
 export interface StatePayload {
@@ -137,7 +180,8 @@ export type ClientMessage =
   | { t: 'hello'; v: number; nickname: string; testDate?: string; test?: boolean }
   | ({ t: 'state' } & StatePayload)
   | { t: 'chat'; text: string }
-  | { t: 'sit'; mat: number }
+  /** Sit on a mat (legacy shape: { t: 'sit', mat }) or a log seat ({ t: 'sit', kind: 'log', seat }). */
+  | { t: 'sit'; kind: SeatKind; seat: number }
   | { t: 'stand' }
   | { t: 'voiceJoin'; groupId: number }
   | { t: 'voiceLeave' }
@@ -156,8 +200,10 @@ export interface PlayerInfo {
 
 export interface PlayerSnap extends StatePayload {
   id: string;
-  /** Mat index while seated, else -1. */
+  /** Seat index while seated (mat or log, see seatKind), else -1. */
   seat: number;
+  /** Present when seated on a campfire log ('mat' is implied otherwise). */
+  seatKind?: 'log';
 }
 
 export type ErrorCode =
@@ -169,6 +215,7 @@ export type ErrorCode =
   | 'rate_limited'
   | 'not_near'
   | 'mat_taken'
+  | 'seat_taken'
   | 'too_many'
   | 'voice_not_member'
   | 'voice_full'
@@ -222,6 +269,8 @@ export type ServerMessage =
       seed: string;
       players: PlayerInfo[];
       mats: (string | null)[];
+      /** Campfire log seat occupancy (LOG_SEATS order). */
+      logs?: (string | null)[];
       snapshotHz: number;
       word?: WordPassage | null;
       /** The signed-in account, or null for a guest. */
@@ -256,6 +305,7 @@ export type ServerMessage =
   | { t: 'snap'; players: PlayerSnap[] }
   | { t: 'chat'; id: string; name: string; text: string }
   | { t: 'mats'; mats: (string | null)[] }
+  | { t: 'logs'; logs: (string | null)[] }
   | { t: 'error'; code: ErrorCode; message: string };
 
 // ------------------------------------------------------------------ validation
@@ -346,8 +396,14 @@ export function parseClientMessage(data: string): ClientMessage | null {
     }
     case 'chat':
       return typeof m.text === 'string' ? { t: 'chat', text: m.text } : null;
-    case 'sit':
-      return Number.isInteger(m.mat) && (m.mat as number) >= 0 && (m.mat as number) < MAT_COUNT ? { t: 'sit', mat: m.mat as number } : null;
+    case 'sit': {
+      if (m.kind === 'log') {
+        return Number.isInteger(m.seat) && (m.seat as number) >= 0 && (m.seat as number) < LOG_SEAT_COUNT ? { t: 'sit', kind: 'log', seat: m.seat as number } : null;
+      }
+      if (m.kind !== undefined && m.kind !== 'mat') return null;
+      const idx = m.seat ?? m.mat;
+      return Number.isInteger(idx) && (idx as number) >= 0 && (idx as number) < MAT_COUNT ? { t: 'sit', kind: 'mat', seat: idx as number } : null;
+    }
     case 'stand':
       return { t: 'stand' };
     case 'voiceJoin':

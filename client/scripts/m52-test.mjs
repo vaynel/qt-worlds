@@ -27,8 +27,8 @@ import {
 } from './lib/harness.mjs';
 import { TABLETS, layoutBoxes, overlaps } from './lib/tablet.mjs';
 
-const CLIENT_PORT = 5182;
-const SERVER_PORT = 5183;
+const CLIENT_PORT = Number(process.env.TEST_CLIENT_PORT ?? 5182);
+const SERVER_PORT = Number(process.env.TEST_SERVER_PORT ?? 5183);
 const BASE = `http://127.0.0.1:${CLIENT_PORT}/`;
 const WS = `ws://127.0.0.1:${CLIENT_PORT}/ws`;
 const Q = '?test=1&shadows=0&time=14:00&noguide=1';

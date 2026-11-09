@@ -43,9 +43,15 @@ export class Avatar {
   private readonly legR: THREE.Object3D;
   private readonly armL: THREE.Object3D;
   private readonly armR: THREE.Object3D;
+  /** Lower legs, only shown while sitting on a log (knees bent over its front). */
+  private readonly shinL: THREE.Object3D;
+  private readonly shinR: THREE.Object3D;
   private phase = 0;
   private seatedTarget = 0;
   private seated = 0;
+  /** Relaxed sitting on a campfire log (separate from the prayer pose). */
+  private sitTarget = 0;
+  private sit = 0;
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
 
@@ -92,34 +98,67 @@ export class Avatar {
     this.armR = limb(0.33, 1.12, 0.55, 0.075, robe);
     this.legL = limb(-0.13, 0.32, 0.32, 0.08, dark);
     this.legR = limb(0.13, 0.32, 0.32, 0.08, dark);
+    const shin = (leg: THREE.Object3D) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(0, -0.32, 0);
+      part(new THREE.CylinderGeometry(0.075, 0.07, 0.5, 5), dark, 0, -0.25, 0, pivot);
+      part(new THREE.BoxGeometry(0.15, 0.08, 0.22), dark, 0, -0.5, 0.05, pivot);
+      pivot.visible = false;
+      leg.add(pivot);
+      return pivot;
+    };
+    this.shinL = shin(this.legL);
+    this.shinR = shin(this.legR);
   }
 
-  /** Seated praying pose (on a mat); blends in smoothly. */
-  setSeated(seated: boolean): void {
-    this.seatedTarget = seated ? 1 : 0;
+  /**
+   * Seated pose, blended in smoothly: 'pray' kneels with hands joined (mats),
+   * 'sit' sits relaxed on a log about 0.6 m high, hands on the knees.
+   */
+  setSeated(seated: boolean, pose: 'pray' | 'sit' = 'pray'): void {
+    this.seatedTarget = seated && pose === 'pray' ? 1 : 0;
+    this.sitTarget = seated && pose === 'sit' ? 1 : 0;
+  }
+
+  /** Current pose for tests: 'pray', 'sit' or 'stand'. */
+  get pose(): 'pray' | 'sit' | 'stand' {
+    return this.sitTarget ? 'sit' : this.seatedTarget ? 'pray' : 'stand';
   }
 
   /** speed in m/s; drives walk cycle, idle breathing and the prayer pose. */
   animate(dt: number, speed: number, elapsed: number): void {
-    this.seated += (this.seatedTarget - this.seated) * (1 - Math.exp(-6 * dt));
+    const k = 1 - Math.exp(-6 * dt);
+    this.seated += (this.seatedTarget - this.seated) * k;
+    this.sit += (this.sitTarget - this.sit) * k;
     const s = this.seated;
-    const moving = Math.min(1, speed / 4) * (1 - s);
+    const q = this.sit;
+    const moving = Math.min(1, speed / 4) * (1 - s) * (1 - q);
     this.phase += dt * (3 + speed * 1.9);
     const swing = Math.sin(this.phase) * 0.7 * moving;
     const breathe = Math.sin(elapsed * 1.6) * 0.012 * (1 - moving);
 
-    // Walk swing, blended toward folded legs and hands joined in prayer.
-    this.legL.rotation.x = swing * (1 - s) - 1.45 * s;
-    this.legR.rotation.x = -swing * (1 - s) - 1.45 * s;
-    this.armL.rotation.x = -swing * 0.8 * (1 - s) - 1.05 * s;
-    this.armR.rotation.x = swing * 0.8 * (1 - s) - 1.05 * s;
-    this.armL.rotation.z = -0.12 * (1 - s) + 0.5 * s;
-    this.armR.rotation.z = 0.12 * (1 - s) - 0.5 * s;
-    this.head.rotation.x = 0.38 * s + breathe * 2 * s;
+    // Walk swing, blended toward folded legs and hands joined in prayer, or
+    // toward thighs forward over the log with hands resting on the knees.
+    const free = 1 - s - q;
+    this.legL.rotation.x = swing * free - 1.45 * s - 1.45 * q;
+    this.legR.rotation.x = -swing * free - 1.45 * s - 1.4 * q;
+    // Shins hang down over the front of the log, a little forward.
+    this.shinL.visible = this.shinR.visible = q > 0.05;
+    this.shinL.rotation.x = 1.25 * q;
+    this.shinR.rotation.x = 1.15 * q;
+    this.legL.rotation.z = 0.08 * q;
+    this.legR.rotation.z = -0.08 * q;
+    this.armL.rotation.x = -swing * 0.8 * free - 1.05 * s - 0.62 * q;
+    this.armR.rotation.x = swing * 0.8 * free - 1.05 * s - 0.55 * q;
+    this.armL.rotation.z = -0.12 * free + 0.5 * s - 0.05 * q;
+    this.armR.rotation.z = 0.12 * free - 0.5 * s + 0.05 * q;
+    // Looking a little down at the fire, nodding gently while listening.
+    this.head.rotation.x = 0.38 * s + breathe * 2 * s + (0.12 + Math.sin(elapsed * 0.7) * 0.03) * q;
 
     const bob = Math.abs(Math.sin(this.phase)) * 0.06 * moving;
-    this.body.position.y = bob + breathe - 0.4 * s;
-    this.body.rotation.x = 0.06 * moving + 0.08 * s;
+    // Log top is ~0.6 m: lift the hips (leg pivots, 0.32 m) up onto it.
+    this.body.position.y = bob + breathe - 0.4 * s + 0.29 * q;
+    this.body.rotation.x = 0.06 * moving + 0.08 * s + 0.1 * q;
   }
 
   dispose(): void {

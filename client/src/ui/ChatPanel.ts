@@ -2,6 +2,8 @@ import { CHAT_MAX, textLength } from '../../../shared/protocol';
 
 const MAX_LOG = 40;
 const CHAT_COLLAPSED_KEY = 'worlds.chat.collapsed';
+/** Folded away to a small "💬 모닥불 이야기" pill (remembered like 작게/크게). */
+const CHAT_FOLDED_KEY = 'worlds.chat.folded';
 
 /**
  * Campfire chat: visible only inside the campfire circle. All text goes in
@@ -12,7 +14,11 @@ export class ChatPanel {
   private readonly log = document.getElementById('chat-log') as HTMLOListElement;
   private readonly form = document.getElementById('chat-form') as HTMLFormElement;
   private readonly input = document.getElementById('chat-input') as HTMLInputElement;
+  private readonly pill = document.getElementById('chat-pill') as HTMLButtonElement;
+  private readonly badge = document.getElementById('chat-unread') as HTMLSpanElement;
   private visible = false;
+  private folded = false;
+  private unread = 0;
   private sendHandler: (text: string) => void = () => undefined;
   private focusHandler: (focused: boolean) => void = () => undefined;
 
@@ -41,30 +47,54 @@ export class ChatPanel {
     });
     // Don't let taps on the panel start camera drags.
     this.root.addEventListener('pointerdown', (e) => e.stopPropagation());
-    // 작게: only the input and the latest lines; 닫기: put the keyboard away.
+    // 작게/크게: size of the open panel. 접기: fold it away to the pill; the
+    // pill unfolds it again at the size it had.
     const collapse = document.getElementById('chat-collapse') as HTMLButtonElement | null;
     collapse?.addEventListener('click', () => this.setCollapsed(!this.root.classList.contains('collapsed')));
-    document.getElementById('chat-close')?.addEventListener('click', () => {
-      this.input.blur();
-      this.setCollapsed(true);
-    });
-    // Remember 작게/크게 across visits.
-    let saved = false;
-    try {
-      saved = localStorage.getItem(CHAT_COLLAPSED_KEY) === '1';
-    } catch {
-      /* ignore */
+    document.getElementById('chat-fold')?.addEventListener('click', () => this.setFolded(true));
+    // While typing, a header tap must not blur the input first: the panel
+    // would jump (keyboard layout) before the click lands.
+    for (const id of ['chat-fold', 'chat-collapse']) {
+      document.getElementById(id)?.addEventListener('mousedown', (e) => e.preventDefault());
     }
-    if (saved) this.setCollapsed(true);
+    this.pill.addEventListener('click', () => this.setFolded(false));
+    // Remember 작게/크게 and 접기 across visits.
+    if (load(CHAT_COLLAPSED_KEY) === '1') this.setCollapsed(true);
+    if (load(CHAT_FOLDED_KEY) === '1') this.setFolded(true);
+  }
+
+  get isFolded(): boolean {
+    return this.folded;
+  }
+
+  get unreadCount(): number {
+    return this.unread;
+  }
+
+  /** Fold the whole panel away (only the pill stays) or bring it back. */
+  setFolded(folded: boolean) {
+    if (folded && this.focused) this.input.blur();
+    this.folded = folded;
+    this.root.classList.toggle('folded', folded);
+    document.body.classList.toggle('chat-folded', folded);
+    this.pill.setAttribute('aria-expanded', folded ? 'false' : 'true');
+    save(CHAT_FOLDED_KEY, folded ? '1' : '0');
+    if (!folded) {
+      this.unread = 0;
+      this.log.scrollTop = this.log.scrollHeight;
+    }
+    this.renderBadge();
+  }
+
+  private renderBadge() {
+    this.badge.hidden = this.unread === 0;
+    this.badge.textContent = this.unread > 99 ? '99+' : String(this.unread);
+    this.pill.setAttribute('aria-label', this.unread ? `모닥불 이야기 펼치기, 새 이야기 ${this.unread}개` : '모닥불 이야기 펼치기');
   }
 
   setCollapsed(collapsed: boolean) {
     this.root.classList.toggle('collapsed', collapsed);
-    try {
-      localStorage.setItem(CHAT_COLLAPSED_KEY, collapsed ? '1' : '0');
-    } catch {
-      /* storage blocked: still works for this visit */
-    }
+    save(CHAT_COLLAPSED_KEY, collapsed ? '1' : '0');
     const b = document.getElementById('chat-collapse');
     if (b) {
       b.textContent = collapsed ? '크게' : '작게';
@@ -102,8 +132,11 @@ export class ChatPanel {
     if (!visible && this.focused) this.input.blur();
   }
 
+  /** Enter key: open the chat to type (unfolding it if it was folded). */
   focus() {
-    if (this.visible) this.input.focus();
+    if (!this.visible) return;
+    if (this.folded) this.setFolded(false);
+    this.input.focus();
   }
 
   append(name: string, text: string, mine: boolean) {
@@ -118,6 +151,10 @@ export class ChatPanel {
     this.log.append(li);
     while (this.log.children.length > MAX_LOG) this.log.firstElementChild?.remove();
     this.log.scrollTop = this.log.scrollHeight;
+    if (this.folded && !mine) {
+      this.unread++;
+      this.renderBadge();
+    }
   }
 
   /** Text of the visible log, for tests. */
@@ -127,5 +164,21 @@ export class ChatPanel {
 
   clear() {
     this.log.replaceChildren();
+  }
+}
+
+function load(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function save(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage blocked: still works for this visit */
   }
 }

@@ -313,6 +313,43 @@ try {
   const mFrame = await M.locator('.worship-frame').boundingBox();
   check('mobile 골방 worship screen >= 200x200', mFrame.width >= 200 && mFrame.height >= 200, `${Math.round(mFrame.width)}x${Math.round(mFrame.height)}`);
 
+  step('same-day edit');
+  // ---- M5.3: one QT per day: 묵상하기 in the 골방 opens today's mat meditation for editing
+  await M.tap('#closet-meditate');
+  await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '묵상하기');
+  await until(M, () => !!document.querySelector('.med-done'), null, 15000);
+  const doneText = await M.textContent('.med-done');
+  check('골방 묵상하기 shows the ✓ bar for today’s mat meditation', doneText.includes('오늘 기도의 뜰에서 묵상했어요') && (await M.isVisible('.med-new')), doneText);
+  await M.tap('.med-foot .primary'); // 말씀 -> 묵상
+  check('the saved meditation is prefilled', (await M.inputValue('#med-meditation')) === '목자 되신 주님');
+  await M.tap('.med-foot .primary');
+  await M.tap('.med-foot .primary');
+  check('prefilled application too', (await M.inputValue('#med-application')) === '오늘 하루 조급해하지 않기');
+  await M.fill('#med-application', '오늘 하루 조급해하지 않고 기다리기');
+  check('save button reads 고친 묵상 담기 while editing', (await M.textContent('.med-save')).includes('고친 묵상 담기'));
+  await M.tap('.med-save');
+  await until(M, () => window.__WORLDS_DEBUG__.m3.lastSaved === '골방');
+  const bookAfterEdit = await M.evaluate(async () => (await (await fetch('/api/wordbook')).json()).pages);
+  const todayMeds = (pages) => pages.flatMap((pg) => pg.meditations ?? []);
+  const medsEdit = todayMeds(bookAfterEdit);
+  check('editing updates the one entry (no second entry)', medsEdit.length === 1 && medsEdit[0].application === '오늘 하루 조급해하지 않고 기다리기', `${medsEdit.length} entries`);
+  // [새 묵상 쓰기] still adds a second entry.
+  await M.tap('#closet-meditate');
+  await until(M, () => !!document.querySelector('.med-new'), null, 15000);
+  await M.tap('.med-new');
+  await until(M, () => !document.querySelector('.med-done'));
+  check('새 묵상 쓰기 starts blank', (await M.inputValue('#med-meditation')) === '');
+  await M.fill('#med-meditation', '두 번째 묵상');
+  await M.tap('.med-foot .primary');
+  await M.fill('#med-feeling', '감사');
+  await M.tap('.med-foot .primary');
+  await M.fill('#med-application', '저녁에 다시 기도하기');
+  check('new entry uses 말씀 책에 담기', (await M.textContent('.med-save')).includes('말씀 책에 담기'));
+  await M.tap('.med-save');
+  await until(M, () => window.__WORLDS_DEBUG__.m3.modal === null);
+  const medsNew = todayMeds(await M.evaluate(async () => (await (await fetch('/api/wordbook')).json()).pages));
+  check('새 묵상 쓰기 adds a second entry', medsNew.length === 2 && medsNew.some((m) => m.meditation === '두 번째 묵상'), `${medsNew.length} entries`);
+
   step('audio');
   // ---- audio: running after gestures, mute toggles
   const audioBefore = (await debug(A)).m3.audio;

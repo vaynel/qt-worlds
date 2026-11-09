@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { CAMPFIRE, MATS, MAT_COUNT, SIT_REACH, STATE_SEND_HZ, type PlayerSnap } from '../../../shared/protocol';
+import { CAMPFIRE, LOG_SEATS, LOG_SEAT_COUNT, MATS, MAT_COUNT, SIT_REACH, STATE_SEND_HZ, seatSpot, type PlayerSnap, type SeatKind } from '../../../shared/protocol';
 import type { PlayerController } from '../entities/PlayerController';
 import type { NetClient, NetStatus, Welcome } from '../net/NetClient';
 import { BubbleSlot, RemotePlayers } from '../net/RemotePlayers';
@@ -38,6 +38,8 @@ export class Social {
   readonly remotes: RemotePlayers;
   private readonly o: SocialOptions;
   private mats: (string | null)[] = Array(MAT_COUNT).fill(null);
+  /** Campfire log seats (LOG_SEATS order). */
+  private logs: (string | null)[] = Array(LOG_SEAT_COUNT).fill(null);
   private readonly localBubble: BubbleSlot;
   private sendTimer = 0;
   private lastSent = { x: NaN, z: NaN, yaw: NaN, t: 0 };
@@ -74,6 +76,7 @@ export class Social {
         snapshot: (players: PlayerSnap[]) => this.remotes.applySnapshot(players, this.localId, nowSeconds()),
         chat: (id, name, text) => this.receiveChat(id, name, text),
         mats: (mats) => this.applyMats(mats),
+        logs: (logs) => this.applyLogs(logs),
         error: (_code, message) => this.o.hud.toast(message, nowSeconds()),
         status: (status) => this.onStatus(status),
         word: (word) => this.o.onWord?.(word),
@@ -99,6 +102,7 @@ export class Social {
     this.localGuest = w.guest;
     this.o.onLocalName?.(w.name, w.guest);
     this.applyMats(w.mats);
+    this.applyLogs(w.logs);
     if (w.word) this.o.onWord?.(w.word);
     // Force a fresh state send so others see us where we really are.
     this.lastSent.t = 0;
@@ -136,58 +140,80 @@ export class Social {
   private applyMats(mats: (string | null)[]) {
     this.mats = Array.from({ length: MAT_COUNT }, (_, i) => (typeof mats[i] === 'string' ? mats[i] : null));
     this.o.world.landmarks.setMatsOccupied(this.mats.map((m) => m !== null));
+    this.syncLocalSeat('mat');
+  }
+
+  private applyLogs(logs: (string | null)[]) {
+    this.logs = Array.from({ length: LOG_SEAT_COUNT }, (_, i) => (typeof logs[i] === 'string' ? logs[i] : null));
+    this.syncLocalSeat('log');
+  }
+
+  /** Follow the server's word on where we sit (one list of seats changed). */
+  private syncLocalSeat(kind: SeatKind) {
     const p = this.o.player;
-    const mine = this.mats.indexOf(this.localId);
-    if (mine >= 0 && p.seat !== mine) {
-      const spot = MATS[mine];
-      p.sitAt(mine, spot.x, spot.z, spot.yaw);
-    } else if (mine < 0 && p.seat >= 0) {
+    const mine = (kind === 'log' ? this.logs : this.mats).indexOf(this.localId);
+    if (mine >= 0 && (p.seat !== mine || p.seatKind !== kind)) {
+      const spot = seatSpot(kind, mine)!;
+      p.sitAt(mine, spot.x, spot.z, spot.yaw, kind);
+    } else if (mine < 0 && p.seat >= 0 && p.seatKind === kind) {
       p.standUp();
     }
   }
 
-  private nearestFreeMat(): number {
+  /** Nearest free mat or log seat within reach (a little inside the server's). */
+  private nearestFreeSeat(): { kind: SeatKind; index: number } | null {
     const p = this.o.player.position;
-    let best = -1;
+    let best: { kind: SeatKind; index: number } | null = null;
     let bestD = SIT_REACH * 0.92;
-    for (const spot of MATS) {
-      if (this.mats[spot.index] !== null) continue;
-      const d = Math.hypot(p.x - spot.x, p.z - spot.z);
-      if (d < bestD) {
-        best = spot.index;
-        bestD = d;
+    const scan = (kind: SeatKind, spots: readonly { index: number; x: number; z: number }[], taken: (string | null)[]) => {
+      for (const spot of spots) {
+        if (taken[spot.index] !== null) continue;
+        const d = Math.hypot(p.x - spot.x, p.z - spot.z);
+        if (d < bestD) {
+          best = { kind, index: spot.index };
+          bestD = d;
+        }
       }
-    }
+    };
+    scan('mat', MATS, this.mats);
+    scan('log', LOG_SEATS, this.logs);
     return best;
   }
 
   /** Label for the sit/stand action here, or null when there is none. */
   seatAction(touch: boolean): string | null {
     if (this.o.player.seat >= 0) return touch ? '일어나기' : '일어나기 (E)';
-    if (this.nearestFreeMat() >= 0) return touch ? '자리에 앉기' : '자리에 앉기 (E)';
-    return null;
+    const seat = this.nearestFreeSeat();
+    if (!seat) return null;
+    const label = seat.kind === 'log' ? '통나무에 앉기' : '자리에 앉기';
+    return touch ? label : `${label} (E)`;
   }
 
-  /** E key / action button: sit on the nearest free mat, or stand up. */
+  /** E key / action button: sit on the nearest free mat or log seat, or stand up. */
   toggleSeat() {
     const p = this.o.player;
     if (p.seat >= 0) {
       const seat = p.seat;
+      const kind = p.seatKind;
       p.standUp();
       if (this.online) this.o.net!.stand();
-      if (this.mats[seat] === this.localId) this.mats[seat] = null;
-      this.o.world.landmarks.setMatsOccupied(this.mats.map((m) => m !== null));
+      const list = kind === 'log' ? this.logs : this.mats;
+      if (list[seat] === this.localId) list[seat] = null;
+      if (kind === 'mat') this.o.world.landmarks.setMatsOccupied(this.mats.map((m) => m !== null));
+      // Tell the server where we stepped to right away.
+      this.lastSent.t = 0;
       return;
     }
-    const mat = this.nearestFreeMat();
-    if (mat < 0) return;
+    const seat = this.nearestFreeSeat();
+    if (!seat) return;
     if (this.online) {
-      this.sendStateNow(); // make sure the server knows we're next to the mat
-      this.o.net!.sit(mat);
+      this.sendStateNow(); // make sure the server knows we're next to the seat
+      this.o.net!.sit(seat.kind, seat.index);
     } else if (!this.o.net) {
-      const next = [...this.mats];
-      next[mat] = this.localId;
-      this.applyMats(next);
+      const next = [...(seat.kind === 'log' ? this.logs : this.mats)];
+      next[seat.index] = this.localId;
+      if (seat.kind === 'log') this.applyLogs(next);
+      else this.applyMats(next);
     } else {
       this.o.hud.toast('연결이 돌아오면 앉을 수 있어요.', nowSeconds());
     }
@@ -236,7 +262,8 @@ export class Social {
     // Campfire zone (a little inside the server's radius so both agree).
     const d = Math.hypot(p.position.x - CAMPFIRE.x, p.position.z - CAMPFIRE.z);
     const inside = this.o.isInside();
-    this.nearFire = !inside && d <= CAMPFIRE.chatRadius - 0.4;
+    // Sitting on a campfire log always counts (every seat is well inside).
+    this.nearFire = !inside && (d <= CAMPFIRE.chatRadius - 0.4 || (p.seat >= 0 && p.seatKind === 'log'));
     this.o.chat.setVisible(this.nearFire && !!this.o.net);
 
     // State to the server at STATE_SEND_HZ, only when something changed
@@ -264,9 +291,14 @@ export class Social {
       name: this.localName,
       remotes: this.remotes.describe(),
       mats: [...this.mats],
+      logs: [...this.logs],
       seat: this.o.player.seat,
+      seatKind: this.o.player.seat >= 0 ? this.o.player.seatKind : null,
+      pose: this.o.player.avatar.pose,
       nearCampfire: this.nearFire,
       chatVisible: this.o.chat.isVisible,
+      chatFolded: this.o.chat.isFolded,
+      chatUnread: this.o.chat.unreadCount,
       chatLog: [...this.chatLog],
     };
   }

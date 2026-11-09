@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MATS } from '../../../shared/protocol';
+import { LOG_ANGLE0, LOG_COUNT, LOG_LENGTH, LOG_RADIUS, LOG_RING_RADIUS, MATS } from '../../../shared/protocol';
 import { LANDMARKS, PALETTE, type LandmarkDef, type LandmarkId } from './config';
 import type { CircleCollider } from './ChunkManager';
 import type { Heightfield } from './Heightfield';
@@ -262,16 +262,19 @@ export class Landmarks {
     this.fireLight = this.pointLight(0xffa056, l.x, h + 1.4, l.z, 18, 2, 18);
     this.colliders.push({ x: l.x, z: l.z, r: 1.5 });
 
-    // Five log benches around the fire.
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2 + 0.3;
-      const x = l.x + Math.cos(a) * 4.2;
-      const z = l.z + Math.sin(a) * 4.2;
-      this.add(new THREE.CylinderGeometry(0.32, 0.32, 2.0, 7), lambert(PALETTE.wood), x, h + 0.3, z, {
+    // Log benches around the fire. Geometry comes from the shared protocol so
+    // the server-validated seats (LOG_SEATS, two per log) sit right on them.
+    for (let i = 0; i < LOG_COUNT; i++) {
+      const a = (i / LOG_COUNT) * Math.PI * 2 + LOG_ANGLE0;
+      const x = l.x + Math.cos(a) * LOG_RING_RADIUS;
+      const z = l.z + Math.sin(a) * LOG_RING_RADIUS;
+      this.add(new THREE.CylinderGeometry(LOG_RADIUS, LOG_RADIUS, LOG_LENGTH, 7), lambert(PALETTE.wood), x, h + 0.3, z, {
         rz: Math.PI / 2,
         ry: -a - Math.PI / 2, // lie tangent to the circle, facing the fire
       });
-      this.colliders.push({ x, z, r: 0.9 });
+      // Three small colliders along the log (a single big circle used to
+      // shove people sideways when they got up from a seat).
+      for (const t of [-0.6, 0, 0.6]) this.colliders.push({ x: x - Math.sin(a) * t, z: z + Math.cos(a) * t, r: 0.4 });
     }
 
     this.label(l, l.name, '둘러앉아 이야기해요', h + 3.6);
