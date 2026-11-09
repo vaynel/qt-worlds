@@ -1,5 +1,5 @@
 // M5.2 mic test: ask at most once per page session, check permission first,
-// pre-prompt for "prompt", device help for "denied", listen-only never asks.
+// 🎤 calls the browser prompt directly; device help only after a refusal; listen-only never asks.
 // Ports: 5182 preview, 5183 server.
 import { resolve } from 'node:path';
 import {
@@ -34,6 +34,7 @@ async function contextWith(browser, state) {
     const orig = md.getUserMedia.bind(md);
     md.getUserMedia = (c) => {
       window.__gum++;
+      if (st === 'denied') return Promise.reject(new DOMException('denied', 'NotAllowedError'));
       return orig(c);
     };
     const q = navigator.permissions.query.bind(navigator.permissions);
@@ -91,12 +92,8 @@ try {
   const P = await (await contextWith(browser, 'prompt')).newPage();
   await setup(P, 'mic-prompt', '물어봄');
   await P.click('#voice-mic');
-  await until(P, () => window.__WORLDS_DEBUG__.m3.modal === '마이크');
-  check('prompt state: our Korean pre-prompt first (no browser prompt yet)', (await P.isVisible('#mic-allow')) && (await gum(P)) === 0 && (await P.textContent('.mic-sheet')).includes('허용'));
-  await P.screenshot({ path: resolve(shotDir, 'm52-mic-preprompt-desktop.png') });
-  await P.click('#mic-allow');
   await until(P, () => window.__WORLDS_DEBUG__.m4.voice.muted === false);
-  check('[마이크 켜기] triggers the single browser request and unmutes', (await gum(P)) === 1);
+  check('prompt state: 🎤 goes straight to the browser prompt (no pre-prompt), 1 request, unmuted', (await gum(P)) === 1 && !(await P.isVisible('#mic-allow')));
 
   step('denied');
   const D = await (await contextWith(browser, 'denied')).newPage();
@@ -104,7 +101,7 @@ try {
   await D.click('#voice-mic');
   await until(D, () => window.__WORLDS_DEBUG__.m3.modal === '마이크');
   const help = await D.textContent('.mic-sheet');
-  check('denied state: device-specific help with 다시 시도, no prompt attempted', (await D.isVisible('#mic-retry')) && help.includes('PC (Chrome · Edge)') && (await gum(D)) === 0, help.slice(0, 80));
+  check('denied: browser refused → device-specific help with 다시 시도', (await D.isVisible('#mic-retry')) && help.includes('PC (Chrome · Edge)') && (await gum(D)) === 1, help.slice(0, 80));
   await D.screenshot({ path: resolve(shotDir, 'm52-mic-denied-desktop.png') });
   await D.keyboard.press('Escape');
   check('still in the room, listening, muted', (await voice(D)).state === 'in' && (await voice(D)).muted);

@@ -384,6 +384,7 @@ export function securityHeaders(info: RequestInfo): Record<string, string> {
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
     'x-frame-options': 'DENY',
-    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    // microphone=(self): the group voice rooms need the mic on our own origin.
+    'permissions-policy': 'camera=(), microphone=(self), geolocation=()',
   };
 }

@@ -384,15 +384,14 @@ export class VoiceClient {
     this.hooks.onChange();
   }
 
-  /** Permission-aware single request: granted → silent; prompt → our pre-prompt; denied → help. */
+  /**
+   * Single mic request. getUserMedia is called immediately, with no await
+   * before it, so it stays inside the 🎤 tap and the browser's own
+   * 허용/차단 prompt appears directly (no pre-prompt of ours). Only when the
+   * browser refuses do we show device-specific help with 다시 시도.
+   */
   private async acquireMic(): Promise<boolean> {
     for (;;) {
-      const perm = await micPermission();
-      if (perm === 'denied') {
-        if (!(await this.hooks.micHelp())) return false;
-        continue; // 다시 시도
-      }
-      if (perm === 'prompt' && !(await this.hooks.micPrePrompt())) return false;
       try {
         this.counters.micRequests++;
         this.mic = await navigator.mediaDevices.getUserMedia({
