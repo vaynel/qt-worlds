@@ -3252,3 +3252,38 @@ body.touch.chatting.worship-mini:not(.tablet) #chat-log {
 .notify-time:disabled {
   opacity: 0.5;
 }
+
+
+/* =================== 모닥불 채팅 작게/크게 on every device =================== */
+/* Phones used to have no way to shrink the chat. 작게 keeps the header, the
+   latest line and the input; the choice is remembered. */
+.chat-head-btn {
+  display: inline-block;
+}
+
+.chat-head strong {
+  flex: 1;
+  text-align: left;
+}
+
+/* The long hint doesn't fit next to the buttons on phones. */
+body.touch:not(.tablet) .chat-head span {
+  display: none;
+}
+
+/* Collapsed: only the latest message stays (no half-clipped lines). */
+#chat.collapsed #chat-log,
+body.touch #chat.collapsed #chat-log,
+body.touch.tablet #chat.collapsed #chat-log {
+  max-height: none;
+  overflow: hidden;
+}
+
+#chat.collapsed #chat-log > li:not(:last-child) {
+  display: none;
+}
+
+/* The campfire blurb card sat behind the open chat on phones too. */
+body.touch.chat-open #prompt {
+  display: none;
+}

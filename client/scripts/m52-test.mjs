@@ -150,7 +150,17 @@ try {
     const b = await layoutBoxes(p);
     const hits = collisions(b, ['worship', 'handle', 'voice', 'joystick', 'tools', 'place', 'clock']);
     check(`${name}: chat overlaps nothing`, hits.length === 0, hits.join(',') || 'ok');
-    check(`${name}: tablet-only chat buttons stay hidden`, !(await p.isVisible('#chat-collapse')));
+    // 작게/크게 now exists on every device (it used to be tablet-only).
+    check(`${name}: 작게 button is available`, await p.isVisible('#chat-collapse'));
+    await p.click('#chat-collapse');
+    await sleep(300);
+    const small = await layoutBoxes(p);
+    check(`${name}: 작게 shrinks the log to one line and keeps the input`, small.log.height <= 40 && small.input !== null && small.chat.height <= b.chat.height + 8, `log ${Math.round(small.log.height)} chat ${Math.round(b.chat.height)}→${Math.round(small.chat.height)}`);
+    if (touch) check(`${name}: campfire blurb hidden while chat is open`, !(await p.isVisible('#prompt')));
+    await p.screenshot({ path: resolve(shotDir, `m53-chat-small-${name}.png`) });
+    check(`${name}: 작게 is remembered (saved for the next visit)`, (await p.evaluate(() => localStorage.getItem('worlds.chat.collapsed'))) === '1');
+    await p.click('#chat-collapse');
+    await sleep(300);
     if (touch) {
       await p.tap('#chat-input');
       const kbH = Math.round(h * 0.6);

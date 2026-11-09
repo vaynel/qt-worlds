@@ -1,6 +1,7 @@
 import { CHAT_MAX, textLength } from '../../../shared/protocol';
 
 const MAX_LOG = 40;
+const CHAT_COLLAPSED_KEY = 'worlds.chat.collapsed';
 
 /**
  * Campfire chat: visible only inside the campfire circle. All text goes in
@@ -47,10 +48,23 @@ export class ChatPanel {
       this.input.blur();
       this.setCollapsed(true);
     });
+    // Remember 작게/크게 across visits.
+    let saved = false;
+    try {
+      saved = localStorage.getItem(CHAT_COLLAPSED_KEY) === '1';
+    } catch {
+      /* ignore */
+    }
+    if (saved) this.setCollapsed(true);
   }
 
   setCollapsed(collapsed: boolean) {
     this.root.classList.toggle('collapsed', collapsed);
+    try {
+      localStorage.setItem(CHAT_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      /* storage blocked: still works for this visit */
+    }
     const b = document.getElementById('chat-collapse');
     if (b) {
       b.textContent = collapsed ? '크게' : '작게';
