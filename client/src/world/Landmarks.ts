@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LOG_ANGLE0, LOG_COUNT, LOG_LENGTH, LOG_RADIUS, LOG_RING_RADIUS, MATS } from '../../../shared/protocol';
+import { BENCHES, BENCH_DEPTH, BENCH_LENGTH, BENCH_SEAT_HEIGHT, LOG_ANGLE0, LOG_COUNT, LOG_LENGTH, LOG_RADIUS, LOG_RING_RADIUS, MATS } from '../../../shared/protocol';
 import { LANDMARKS, PALETTE, type LandmarkDef, type LandmarkId } from './config';
 import type { CircleCollider } from './ChunkManager';
 import type { Heightfield } from './Heightfield';
@@ -108,17 +108,23 @@ export class Landmarks {
     this.colliders.push({ x, z, r: 0.25 });
   }
 
+  /** A plaza bench (shared BENCH_* numbers, so server-validated seats sit on it). */
   private bench(x: number, z: number, ground: number, facing: number) {
     const g = new THREE.Group();
     g.position.set(x, ground, z);
     g.rotation.y = facing;
-    this.add(new THREE.BoxGeometry(1.8, 0.12, 0.5), lambert(PALETTE.wood), 0, 0.45, 0, { parent: g });
-    this.add(new THREE.BoxGeometry(1.8, 0.4, 0.1), lambert(PALETTE.wood), 0, 0.75, -0.22, { parent: g, rx: -0.12 });
+    const board = 0.12;
+    this.add(new THREE.BoxGeometry(BENCH_LENGTH, board, BENCH_DEPTH), lambert(PALETTE.wood), 0, BENCH_SEAT_HEIGHT - board / 2, 0, { parent: g });
+    this.add(new THREE.BoxGeometry(BENCH_LENGTH, 0.4, 0.1), lambert(PALETTE.wood), 0, 0.75, -0.22, { parent: g, rx: -0.12 });
     for (const sx of [-0.75, 0.75]) {
       this.add(new THREE.BoxGeometry(0.1, 0.45, 0.45), lambert(PALETTE.woodDark), sx, 0.22, 0, { parent: g });
     }
     this.group.add(g);
-    this.colliders.push({ x, z, r: 0.8 });
+    // Three small colliders along the bench (one big circle used to shove
+    // people sideways when they got up); standing up steps forward past them.
+    const rx = Math.cos(facing);
+    const rz = -Math.sin(facing);
+    for (const t of [-0.6, 0, 0.6]) this.colliders.push({ x: x + rx * t, z: z + rz * t, r: 0.35 });
   }
 
   // ---------------------------------------------------------------- landmarks
@@ -143,12 +149,7 @@ export class Landmarks {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
       this.lampPost(l.x + Math.cos(a) * 10.8, l.z + Math.sin(a) * 10.8, h);
     }
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const x = l.x + Math.cos(a) * 5;
-      const z = l.z + Math.sin(a) * 5;
-      this.bench(x, z, h, Math.atan2(l.x - x, l.z - z));
-    }
+    for (const b of BENCHES) this.bench(b.x, b.z, h, b.yaw);
 
     // Signpost pointing toward each landmark (arrows only; names float above them).
     const post = new THREE.Group();

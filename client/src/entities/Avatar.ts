@@ -1,4 +1,19 @@
 import * as THREE from 'three';
+import { BENCH_SEAT_HEIGHT, type SeatKind } from '../../../shared/protocol';
+
+/** Hip pivot height when standing (top of the leg pivots). */
+const HIP = 0.32;
+/** Robe (torso + skirt) cylinder: centre and height, body-local. */
+const ROBE_MID = 0.72;
+const ROBE_H = 0.95;
+const ROBE_TOP = ROBE_MID + ROBE_H / 2;
+/** Sitting folds the skirt away: the robe keeps its top and loses a quarter of its height. */
+const SIT_ROBE = 0.75;
+const SIT_ROBE_BOTTOM = ROBE_TOP - ROBE_H * SIT_ROBE;
+/** Where the hips rest for each seat (m above the ground); 0 = kneel on a mat. */
+export function seatHeight(kind: SeatKind): number {
+  return kind === 'log' ? 0.61 : kind === 'bench' ? BENCH_SEAT_HEIGHT + 0.02 : 0;
+}
 
 export interface AvatarColors {
   robe: number;
@@ -44,6 +59,7 @@ export class Avatar {
   private readonly armL: THREE.Object3D;
   private readonly armR: THREE.Object3D;
   /** Lower legs, only shown while sitting on a log (knees bent over its front). */
+  private readonly robe: THREE.Mesh;
   private readonly shinL: THREE.Object3D;
   private readonly shinR: THREE.Object3D;
   private phase = 0;
@@ -52,6 +68,8 @@ export class Avatar {
   /** Relaxed sitting on a campfire log (separate from the prayer pose). */
   private sitTarget = 0;
   private sit = 0;
+  /** Hip height of the current sitting seat (log ~0.61, bench ~0.53). */
+  private sitHeight = 0.61;
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
 
@@ -74,7 +92,7 @@ export class Avatar {
     const dark = mat(0x6b4a33);
 
     this.root.add(this.body);
-    part(new THREE.CylinderGeometry(0.26, 0.44, 0.95, 7), robe, 0, 0.72, 0, this.body);
+    this.robe = part(new THREE.CylinderGeometry(0.26, 0.44, 0.95, 7), robe, 0, ROBE_MID, 0, this.body);
     part(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 7), mat(colors.scarf), 0, 1.2, 0, this.body);
 
     // Head pivots at the neck so it can bow in prayer.
@@ -113,9 +131,11 @@ export class Avatar {
 
   /**
    * Seated pose, blended in smoothly: 'pray' kneels with hands joined (mats),
-   * 'sit' sits relaxed on a log about 0.6 m high, hands on the knees.
+   * 'sit' sits relaxed on a seat whose top is `height` m up (a campfire log
+   * ~0.6 m, a plaza bench ~0.5 m), hands on the knees, shins hanging down.
    */
-  setSeated(seated: boolean, pose: 'pray' | 'sit' = 'pray'): void {
+  setSeated(seated: boolean, pose: 'pray' | 'sit' = 'pray', height = 0.61): void {
+    if (seated && pose === 'sit') this.sitHeight = height;
     this.seatedTarget = seated && pose === 'pray' ? 1 : 0;
     this.sitTarget = seated && pose === 'sit' ? 1 : 0;
   }
@@ -142,10 +162,12 @@ export class Avatar {
     const free = 1 - s - q;
     this.legL.rotation.x = swing * free - 1.45 * s - 1.45 * q;
     this.legR.rotation.x = -swing * free - 1.45 * s - 1.4 * q;
-    // Shins hang down over the front of the log, a little forward.
+    // Shins hang down over the front of the seat: a little forward on a log;
+    // on the lower bench straight down so the feet rest on the ground.
+    const low = this.sitHeight < 0.58;
     this.shinL.visible = this.shinR.visible = q > 0.05;
-    this.shinL.rotation.x = 1.25 * q;
-    this.shinR.rotation.x = 1.15 * q;
+    this.shinL.rotation.x = (low ? 1.42 : 1.25) * q;
+    this.shinR.rotation.x = (low ? 1.34 : 1.15) * q;
     this.legL.rotation.z = 0.08 * q;
     this.legR.rotation.z = -0.08 * q;
     this.armL.rotation.x = -swing * 0.8 * free - 1.05 * s - 0.62 * q;
@@ -153,12 +175,19 @@ export class Avatar {
     this.armL.rotation.z = -0.12 * free + 0.5 * s - 0.05 * q;
     this.armR.rotation.z = 0.12 * free - 0.5 * s + 0.05 * q;
     // Looking a little down at the fire, nodding gently while listening.
-    this.head.rotation.x = 0.38 * s + breathe * 2 * s + (0.12 + Math.sin(elapsed * 0.7) * 0.03) * q;
+    this.head.rotation.x = 0.38 * s + breathe * 2 * s + ((low ? 0.04 : 0.12) + Math.sin(elapsed * 0.7) * 0.03) * q;
 
     const bob = Math.abs(Math.sin(this.phase)) * 0.06 * moving;
-    // Log top is ~0.6 m: lift the hips (leg pivots, 0.32 m) up onto it.
-    this.body.position.y = bob + breathe - 0.4 * s + 0.29 * q;
-    this.body.rotation.x = 0.06 * moving + 0.08 * s + 0.1 * q;
+    // Sitting: fold the skirt (shorter robe, same top), move the hips (leg
+    // pivots) to the robe's new bottom and put that on the seat, so a seated
+    // person is clearly lower than a standing one. Lean back less on a bench.
+    const f = 1 - (1 - SIT_ROBE) * q;
+    this.robe.scale.y = f;
+    this.robe.position.y = ROBE_TOP - (ROBE_H * f) / 2;
+    const hipY = HIP + (SIT_ROBE_BOTTOM - HIP) * q;
+    this.legL.position.y = this.legR.position.y = hipY;
+    this.body.position.y = bob + breathe - 0.4 * s + (this.sitHeight - SIT_ROBE_BOTTOM) * q;
+    this.body.rotation.x = 0.06 * moving + 0.08 * s + (low ? 0.02 : 0.1) * q;
   }
 
   dispose(): void {

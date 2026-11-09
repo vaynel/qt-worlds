@@ -29,7 +29,7 @@ import { LANDMARKS, SPAWN } from '../world/config';
 import { parseTimeOverride } from '../world/DayNight';
 import { Interior } from '../world/Interior';
 import { World } from '../world/World';
-import { CAMPFIRE, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
+import { BENCHES, BENCH_SEATS, CAMPFIRE, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
 import { Devotion } from './Devotion';
 import { Social } from './Social';
 
@@ -529,6 +529,8 @@ export class Game {
       dropSocket: () => this.session.net?.debugDrop(),
       /** Campfire log seats and chat radius (shared protocol numbers). */
       logSeats: () => ({ campfire: CAMPFIRE, seats: LOG_SEATS.map((s) => ({ ...s })) }),
+      /** Plaza bench seats (shared protocol numbers). */
+      benchSeats: () => ({ benches: BENCHES.map((b) => ({ ...b })), seats: BENCH_SEATS.map((s) => ({ ...s })) }),
       /** Worship player fold state in the world dock (layout tests). */
       worshipFold: (fold: 'open' | 'mini' | 'folded') => this.worship.setFold(fold),
       /** Point the orbit camera (for screenshots). */

@@ -25,6 +25,8 @@ export interface Welcome {
   mats: (string | null)[];
   /** Campfire log seats (empty from servers older than M5.3). */
   logs: (string | null)[];
+  /** Plaza bench seats (empty from servers older than M5.4). */
+  benches: (string | null)[];
   /** Today's word (absent on servers older than M3). */
   word: WordPassage | null;
   account: AccountInfo | null;
@@ -39,6 +41,7 @@ export interface NetHandlers {
   chat(id: string, name: string, text: string): void;
   mats(mats: (string | null)[]): void;
   logs(logs: (string | null)[]): void;
+  benches(benches: (string | null)[]): void;
   error(code: ErrorCode, message: string): void;
   status(status: NetStatus): void;
   word(word: WordPassage): void;
@@ -151,6 +154,9 @@ export class NetClient {
         break;
       case 'logs':
         this.handlers.logs?.(msg.logs);
+        break;
+      case 'benches':
+        this.handlers.benches?.(msg.benches);
         break;
       case 'lanterns':
         this.handlers.lanterns?.(msg.lanterns);
@@ -273,6 +279,7 @@ export class NetClient {
             players: msg.players ?? [],
             mats: msg.mats ?? [],
             logs: Array.isArray(msg.logs) ? msg.logs : [],
+            benches: Array.isArray(msg.benches) ? msg.benches : [],
             word: msg.word ?? null,
             account: msg.account ?? null,
             guest: msg.guest ?? !msg.account,
@@ -300,6 +307,9 @@ export class NetClient {
           break;
         case 'logs':
           if (Array.isArray(msg.logs)) this.dispatch(msg);
+          break;
+        case 'benches':
+          if (Array.isArray(msg.benches)) this.dispatch(msg);
           break;
         case 'lanterns':
           if (Array.isArray(msg.lanterns)) this.dispatch(msg);

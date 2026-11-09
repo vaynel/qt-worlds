@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { CAMPFIRE, LOG_SEATS, LOG_SEAT_COUNT, MATS, MAT_COUNT, SIT_REACH, STATE_SEND_HZ, seatSpot, type PlayerSnap, type SeatKind } from '../../../shared/protocol';
+import { BENCH_SEATS, BENCH_SEAT_COUNT, CAMPFIRE, LOG_SEATS, LOG_SEAT_COUNT, MATS, MAT_COUNT, SIT_REACH, STATE_SEND_HZ, seatSpot, type PlayerSnap, type SeatKind } from '../../../shared/protocol';
 import type { PlayerController } from '../entities/PlayerController';
 import type { NetClient, NetStatus, Welcome } from '../net/NetClient';
 import { BubbleSlot, RemotePlayers } from '../net/RemotePlayers';
@@ -40,6 +40,8 @@ export class Social {
   private mats: (string | null)[] = Array(MAT_COUNT).fill(null);
   /** Campfire log seats (LOG_SEATS order). */
   private logs: (string | null)[] = Array(LOG_SEAT_COUNT).fill(null);
+  /** 중앙 광장 bench seats (BENCH_SEATS order). */
+  private benches: (string | null)[] = Array(BENCH_SEAT_COUNT).fill(null);
   private readonly localBubble: BubbleSlot;
   private sendTimer = 0;
   private lastSent = { x: NaN, z: NaN, yaw: NaN, t: 0 };
@@ -77,6 +79,7 @@ export class Social {
         chat: (id, name, text) => this.receiveChat(id, name, text),
         mats: (mats) => this.applyMats(mats),
         logs: (logs) => this.applyLogs(logs),
+        benches: (benches) => this.applyBenches(benches),
         error: (_code, message) => this.o.hud.toast(message, nowSeconds()),
         status: (status) => this.onStatus(status),
         word: (word) => this.o.onWord?.(word),
@@ -103,6 +106,7 @@ export class Social {
     this.o.onLocalName?.(w.name, w.guest);
     this.applyMats(w.mats);
     this.applyLogs(w.logs);
+    this.applyBenches(w.benches);
     if (w.word) this.o.onWord?.(w.word);
     // Force a fresh state send so others see us where we really are.
     this.lastSent.t = 0;
@@ -148,10 +152,19 @@ export class Social {
     this.syncLocalSeat('log');
   }
 
+  private applyBenches(benches: (string | null)[]) {
+    this.benches = Array.from({ length: BENCH_SEAT_COUNT }, (_, i) => (typeof benches[i] === 'string' ? benches[i] : null));
+    this.syncLocalSeat('bench');
+  }
+
+  private seatList(kind: SeatKind): (string | null)[] {
+    return kind === 'log' ? this.logs : kind === 'bench' ? this.benches : this.mats;
+  }
+
   /** Follow the server's word on where we sit (one list of seats changed). */
   private syncLocalSeat(kind: SeatKind) {
     const p = this.o.player;
-    const mine = (kind === 'log' ? this.logs : this.mats).indexOf(this.localId);
+    const mine = this.seatList(kind).indexOf(this.localId);
     if (mine >= 0 && (p.seat !== mine || p.seatKind !== kind)) {
       const spot = seatSpot(kind, mine)!;
       p.sitAt(mine, spot.x, spot.z, spot.yaw, kind);
@@ -160,7 +173,7 @@ export class Social {
     }
   }
 
-  /** Nearest free mat or log seat within reach (a little inside the server's). */
+  /** Nearest free mat, log or bench seat within reach (a little inside the server's). */
   private nearestFreeSeat(): { kind: SeatKind; index: number } | null {
     const p = this.o.player.position;
     let best: { kind: SeatKind; index: number } | null = null;
@@ -177,6 +190,7 @@ export class Social {
     };
     scan('mat', MATS, this.mats);
     scan('log', LOG_SEATS, this.logs);
+    scan('bench', BENCH_SEATS, this.benches);
     return best;
   }
 
@@ -185,11 +199,11 @@ export class Social {
     if (this.o.player.seat >= 0) return touch ? '일어나기' : '일어나기 (E)';
     const seat = this.nearestFreeSeat();
     if (!seat) return null;
-    const label = seat.kind === 'log' ? '통나무에 앉기' : '자리에 앉기';
+    const label = seat.kind === 'log' ? '통나무에 앉기' : seat.kind === 'bench' ? '벤치에 앉기' : '자리에 앉기';
     return touch ? label : `${label} (E)`;
   }
 
-  /** E key / action button: sit on the nearest free mat or log seat, or stand up. */
+  /** E key / action button: sit on the nearest free mat, log or bench seat, or stand up. */
   toggleSeat() {
     const p = this.o.player;
     if (p.seat >= 0) {
@@ -197,7 +211,7 @@ export class Social {
       const kind = p.seatKind;
       p.standUp();
       if (this.online) this.o.net!.stand();
-      const list = kind === 'log' ? this.logs : this.mats;
+      const list = this.seatList(kind);
       if (list[seat] === this.localId) list[seat] = null;
       if (kind === 'mat') this.o.world.landmarks.setMatsOccupied(this.mats.map((m) => m !== null));
       // Tell the server where we stepped to right away.
@@ -210,9 +224,10 @@ export class Social {
       this.sendStateNow(); // make sure the server knows we're next to the seat
       this.o.net!.sit(seat.kind, seat.index);
     } else if (!this.o.net) {
-      const next = [...(seat.kind === 'log' ? this.logs : this.mats)];
+      const next = [...this.seatList(seat.kind)];
       next[seat.index] = this.localId;
       if (seat.kind === 'log') this.applyLogs(next);
+      else if (seat.kind === 'bench') this.applyBenches(next);
       else this.applyMats(next);
     } else {
       this.o.hud.toast('연결이 돌아오면 앉을 수 있어요.', nowSeconds());
@@ -292,6 +307,7 @@ export class Social {
       remotes: this.remotes.describe(),
       mats: [...this.mats],
       logs: [...this.logs],
+      benches: [...this.benches],
       seat: this.o.player.seat,
       seatKind: this.o.player.seat >= 0 ? this.o.player.seatKind : null,
       pose: this.o.player.avatar.pose,

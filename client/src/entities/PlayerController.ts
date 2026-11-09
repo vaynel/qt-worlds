@@ -4,10 +4,10 @@ import type { World } from '../world/World';
 import type { MoveIntent } from '../systems/Input';
 import type { AvatarState } from '../game/types';
 import type { SeatKind } from '../../../shared/protocol';
-import { Avatar } from './Avatar';
+import { Avatar, seatHeight } from './Avatar';
 
-/** Standing up from a log: step this far toward the fire, clear of the log. */
-const LOG_STEP_OFF = 0.85;
+/** Standing up from a log or bench: step this far forward, clear of its colliders. */
+const STEP_OFF: Record<SeatKind, number> = { mat: 0, log: 0.85, bench: 0.8 };
 
 const WALK_SPEED = 4.2;
 const RUN_SPEED = 7.5;
@@ -26,7 +26,7 @@ export class PlayerController {
   readonly velocity = new THREE.Vector3();
   readonly avatar = new Avatar();
   yaw = 0;
-  /** Seat index (prayer mat or campfire log, see seatKind) while seated, else -1. */
+  /** Seat index (prayer mat, campfire log or plaza bench, see seatKind) while seated, else -1. */
   seat = -1;
   seatKind: SeatKind = 'mat';
   private readonly wish = new THREE.Vector3();
@@ -52,19 +52,19 @@ export class PlayerController {
     this.position.set(x, this.world.groundHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
-    this.avatar.setSeated(true, kind === 'log' ? 'sit' : 'pray');
+    this.avatar.setSeated(true, kind === 'mat' ? 'pray' : 'sit', seatHeight(kind));
     this.syncAvatar();
   }
 
   standUp() {
     if (this.seat < 0) return;
-    const fromLog = this.seatKind === 'log';
+    const step = STEP_OFF[this.seatKind];
     this.seat = -1;
     this.avatar.setSeated(false);
-    if (fromLog) {
-      // Step off toward the fire so the log's collider doesn't shove us sideways.
-      const x = this.position.x + Math.sin(this.yaw) * LOG_STEP_OFF;
-      const z = this.position.z + Math.cos(this.yaw) * LOG_STEP_OFF;
+    if (step > 0) {
+      // Step off forward so the seat's colliders don't shove us sideways.
+      const x = this.position.x + Math.sin(this.yaw) * step;
+      const z = this.position.z + Math.cos(this.yaw) * step;
       this.position.set(x, this.world.groundHeight(x, z), z);
       this.syncAvatar();
     }

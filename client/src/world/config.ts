@@ -3,7 +3,7 @@
  * everything between them is procedural from the seed.
  */
 
-import { CAMPFIRE, LANTERN_HILL, PRAYER_GARDEN } from '../../../shared/protocol';
+import { CAMPFIRE, LANTERN_HILL, PLAZA as PLAZA_CENTRE, PRAYER_GARDEN } from '../../../shared/protocol';
 
 export const DEFAULT_SEED = 'worlds-v1';
 
@@ -40,8 +40,8 @@ export const LANDMARKS: readonly LandmarkDef[] = [
     id: 'plaza',
     name: '중앙 광장',
     blurb: '오늘의 말씀이 내려앉는 곳이에요.',
-    x: 0,
-    z: 0,
+    x: PLAZA_CENTRE.x,
+    z: PLAZA_CENTRE.z,
     radius: 14,
     falloff: 14,
     height: 2.5,

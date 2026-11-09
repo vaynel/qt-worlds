@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import {
   CAMPFIRE,
+  BENCH_SEAT_COUNT,
   LOG_SEAT_COUNT,
   MAT_COUNT,
   seatSpot,
@@ -96,6 +97,8 @@ export class Room implements RoomEvents {
   private readonly mats: (string | null)[] = Array(MAT_COUNT).fill(null);
   /** Campfire log seats (LOG_SEATS order). */
   private readonly logs: (string | null)[] = Array(LOG_SEAT_COUNT).fill(null);
+  /** 중앙 광장 bench seats (BENCH_SEATS order). */
+  private readonly benches: (string | null)[] = Array(BENCH_SEAT_COUNT).fill(null);
   private readonly timer: NodeJS.Timeout;
   private readonly log: (msg: string) => void;
   private currentDate = seoulDate();
@@ -247,9 +250,9 @@ export class Room implements RoomEvents {
         const list = this.seats(msg.kind);
         const owner = list[msg.seat];
         if (owner && owner !== client.id) {
-          return msg.kind === 'log'
-            ? this.error(client, 'seat_taken', '이미 다른 분이 앉아 있어요.')
-            : this.error(client, 'mat_taken', '이미 다른 분이 앉아 있어요.');
+          return msg.kind === 'mat'
+            ? this.error(client, 'mat_taken', '이미 다른 분이 앉아 있어요.')
+            : this.error(client, 'seat_taken', '이미 다른 분이 앉아 있어요.');
         }
         if (client.state.inside || Math.hypot(client.state.x - spot.x, client.state.z - spot.z) > SIT_REACH) {
           return this.error(client, 'not_near', '자리에 조금 더 가까이 가 주세요.');
@@ -438,6 +441,7 @@ export class Room implements RoomEvents {
       players,
       mats: [...this.mats],
       logs: [...this.logs],
+      benches: [...this.benches],
       snapshotHz: SNAPSHOT_HZ,
       word: this.wordFor(client),
       account: client.userId !== null && client.accountName ? { id: client.userId, nickname: client.accountName } : null,
@@ -538,11 +542,13 @@ export class Room implements RoomEvents {
   }
 
   private seats(kind: SeatKind): (string | null)[] {
-    return kind === 'log' ? this.logs : this.mats;
+    return kind === 'log' ? this.logs : kind === 'bench' ? this.benches : this.mats;
   }
 
   private broadcastSeats(kind: SeatKind): void {
-    this.broadcast(kind === 'log' ? { t: 'logs', logs: [...this.logs] } : { t: 'mats', mats: [...this.mats] });
+    if (kind === 'log') this.broadcast({ t: 'logs', logs: [...this.logs] });
+    else if (kind === 'bench') this.broadcast({ t: 'benches', benches: [...this.benches] });
+    else this.broadcast({ t: 'mats', mats: [...this.mats] });
   }
 
   /** Stand up (stand message, disconnect): the seat is free again for everyone. */
@@ -579,7 +585,7 @@ export class Room implements RoomEvents {
         yaw: round(s.yaw),
         speed: round(s.speed),
         seat: c.seat,
-        ...(c.seat >= 0 && c.seatKind === 'log' ? { seatKind: 'log' as const } : {}),
+        ...(c.seat >= 0 && c.seatKind !== 'mat' ? { seatKind: c.seatKind } : {}),
         ...(s.inside ? { inside: true } : {}),
       });
     }

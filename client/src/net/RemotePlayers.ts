@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { PlayerSnap } from '../../../shared/protocol';
-import { Avatar, colorsForId } from '../entities/Avatar';
+import type { PlayerSnap, SeatKind } from '../../../shared/protocol';
+import { Avatar, colorsForId, seatHeight } from '../entities/Avatar';
 import { createBubble, disposeSprite } from '../world/labels';
 import { NameTag, type TagView } from '../world/NameTag';
 
@@ -19,7 +19,7 @@ interface Sample {
   yaw: number;
   speed: number;
   seat: number;
-  log: boolean;
+  kind: SeatKind;
   inside: boolean;
 }
 
@@ -30,8 +30,8 @@ interface Remote {
   tag: NameTag;
   samples: Sample[];
   seat: number;
-  /** Seated on a campfire log (not a prayer mat). */
-  log: boolean;
+  /** What the seat is (meaningful while seat >= 0). */
+  kind: SeatKind;
   inside: boolean;
   bubbleSlot: BubbleSlot;
 }
@@ -105,7 +105,7 @@ export class RemotePlayers {
       tag,
       samples: [],
       seat: -1,
-      log: false,
+      kind: 'mat',
       inside: false,
       bubbleSlot: new BubbleSlot(avatar.root),
     });
@@ -155,7 +155,7 @@ export class RemotePlayers {
       if (s.id === localId) continue;
       const p = this.players.get(s.id);
       if (!p) continue;
-      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, log: s.seatKind === 'log', inside: s.inside === true });
+      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, kind: s.seatKind ?? 'mat', inside: s.inside === true });
       if (p.samples.length > MAX_SAMPLES) p.samples.shift();
     }
   }
@@ -176,14 +176,14 @@ export class RemotePlayers {
       // Drop samples we've fully passed, keeping one before renderTime.
       while (s.length > 2 && s[1].t <= renderTime) s.shift();
 
-      let x: number, y: number, z: number, yaw: number, speed: number, seat: number, log: boolean;
+      let x: number, y: number, z: number, yaw: number, speed: number, seat: number, kind: SeatKind;
       const a = s[0];
       const b = s[1];
       const latest = s[s.length - 1];
       if (!b || renderTime <= a.t) {
-        ({ x, y, z, yaw, speed, seat, log } = renderTime <= a.t || !b ? a : b);
+        ({ x, y, z, yaw, speed, seat, kind } = renderTime <= a.t || !b ? a : b);
       } else if (Math.hypot(b.x - a.x, b.z - a.z) > SNAP_DISTANCE) {
-        ({ x, y, z, yaw, speed, seat, log } = renderTime >= b.t ? b : a);
+        ({ x, y, z, yaw, speed, seat, kind } = renderTime >= b.t ? b : a);
       } else {
         const t = Math.min(1, (renderTime - a.t) / Math.max(1e-3, b.t - a.t));
         x = a.x + (b.x - a.x) * t;
@@ -192,7 +192,7 @@ export class RemotePlayers {
         yaw = lerpAngle(a.yaw, b.yaw, t);
         speed = a.speed + (b.speed - a.speed) * t;
         seat = t < 0.5 ? a.seat : b.seat;
-        log = t < 0.5 ? a.log : b.log;
+        kind = t < 0.5 ? a.kind : b.kind;
       }
 
       p.avatar.root.position.set(x, y, z);
@@ -201,8 +201,8 @@ export class RemotePlayers {
       p.avatar.root.visible = !latest.inside;
       p.inside = latest.inside;
       p.seat = seat;
-      p.log = seat >= 0 && log;
-      p.avatar.setSeated(seat >= 0, log ? 'sit' : 'pray');
+      p.kind = kind;
+      p.avatar.setSeated(seat >= 0, kind === 'mat' ? 'pray' : 'sit', seatHeight(kind));
       p.avatar.animate(dt, speed, elapsed);
       p.bubbleSlot.update(now);
       if (view && p.avatar.root.visible) p.tag.update(view);
@@ -216,7 +216,7 @@ export class RemotePlayers {
     x: number;
     z: number;
     seat: number;
-    seatKind: 'mat' | 'log' | null;
+    seatKind: SeatKind | null;
     pose: 'pray' | 'sit' | 'stand';
     bubble: boolean;
     visible: boolean;
@@ -232,7 +232,7 @@ export class RemotePlayers {
       x: +p.avatar.root.position.x.toFixed(2),
       z: +p.avatar.root.position.z.toFixed(2),
       seat: p.seat,
-      seatKind: p.seat < 0 ? null : p.log ? 'log' : 'mat',
+      seatKind: p.seat < 0 ? null : p.kind,
       pose: p.avatar.pose,
       bubble: p.bubbleSlot.showing,
       visible: p.avatar.root.visible,

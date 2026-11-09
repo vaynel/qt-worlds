@@ -92,8 +92,8 @@ export const MATS: readonly MatSpot[] = Array.from({ length: MAT_COUNT }, (_, in
   return { index, x, z, yaw: Math.atan2(PRAYER_GARDEN.x - x, PRAYER_GARDEN.z - z) };
 });
 
-/** What a player sits on: a prayer mat (기도의 뜰) or a campfire log bench. */
-export type SeatKind = 'mat' | 'log';
+/** What a player sits on: a prayer mat (기도의 뜰), a campfire log or a plaza bench. */
+export type SeatKind = 'mat' | 'log' | 'bench';
 
 /**
  * 모닥불 log benches (Landmarks.buildCampfire builds the logs from these
@@ -131,8 +131,63 @@ export const LOG_SEATS: readonly LogSeat[] = Array.from({ length: LOG_SEAT_COUNT
   return { index, log, x, z, yaw: Math.atan2(CAMPFIRE.x - x, CAMPFIRE.z - z) };
 });
 
+/**
+ * 중앙 광장 benches (Landmarks.buildPlaza builds them from these numbers):
+ * BENCH_COUNT benches on a circle of BENCH_RING_RADIUS around the plaza centre,
+ * at angle i/BENCH_COUNT*2π + BENCH_ANGLE0, each facing the central basin with
+ * its backrest on the outer side. Bench-local: x along the bench, +z forward.
+ */
+export const PLAZA = { x: 0, z: 0 } as const;
+export const BENCH_COUNT = 4;
+export const BENCH_RING_RADIUS = 5;
+export const BENCH_ANGLE0 = Math.PI / 4;
+export const BENCH_LENGTH = 1.8;
+export const BENCH_DEPTH = 0.5;
+/** Top of the seat board above the ground. */
+export const BENCH_SEAT_HEIGHT = 0.51;
+/** Seats per bench, this far either side of the bench's middle. */
+export const BENCH_SEATS_PER_BENCH = 2;
+export const BENCH_SEAT_SPREAD = 0.45;
+/** Hips a touch behind the board's middle, toward the backrest. */
+export const BENCH_SEAT_BACK = 0.04;
+export const BENCH_SEAT_COUNT = BENCH_COUNT * BENCH_SEATS_PER_BENCH;
+
+export interface BenchDef {
+  index: number;
+  x: number;
+  z: number;
+  /** Facing angle (0 = +z): toward the plaza centre. */
+  yaw: number;
+}
+
+export const BENCHES: readonly BenchDef[] = Array.from({ length: BENCH_COUNT }, (_, index) => {
+  const a = (index / BENCH_COUNT) * Math.PI * 2 + BENCH_ANGLE0;
+  const x = PLAZA.x + Math.cos(a) * BENCH_RING_RADIUS;
+  const z = PLAZA.z + Math.sin(a) * BENCH_RING_RADIUS;
+  return { index, x, z, yaw: Math.atan2(PLAZA.x - x, PLAZA.z - z) };
+});
+
+export interface BenchSeat extends MatSpot {
+  /** Which bench (0..BENCH_COUNT-1). */
+  bench: number;
+}
+
+export const BENCH_SEATS: readonly BenchSeat[] = Array.from({ length: BENCH_SEAT_COUNT }, (_, index) => {
+  const b = BENCHES[Math.floor(index / BENCH_SEATS_PER_BENCH)];
+  const side = (index % BENCH_SEATS_PER_BENCH) - (BENCH_SEATS_PER_BENCH - 1) / 2; // -0.5, +0.5
+  // Bench-local axes in world space: right (+x) and forward (+z).
+  const rx = Math.cos(b.yaw);
+  const rz = -Math.sin(b.yaw);
+  const fx = Math.sin(b.yaw);
+  const fz = Math.cos(b.yaw);
+  const along = side * 2 * BENCH_SEAT_SPREAD;
+  return { index, bench: b.index, x: b.x + rx * along - fx * BENCH_SEAT_BACK, z: b.z + rz * along - fz * BENCH_SEAT_BACK, yaw: b.yaw };
+});
+
+const SEAT_COUNTS: Record<SeatKind, number> = { mat: MAT_COUNT, log: LOG_SEAT_COUNT, bench: BENCH_SEAT_COUNT };
+
 export function seatSpot(kind: SeatKind, index: number): MatSpot | undefined {
-  return kind === 'log' ? LOG_SEATS[index] : MATS[index];
+  return kind === 'log' ? LOG_SEATS[index] : kind === 'bench' ? BENCH_SEATS[index] : MATS[index];
 }
 
 // ------------------------------------------------------------------ messages
@@ -180,7 +235,7 @@ export type ClientMessage =
   | { t: 'hello'; v: number; nickname: string; testDate?: string; test?: boolean }
   | ({ t: 'state' } & StatePayload)
   | { t: 'chat'; text: string }
-  /** Sit on a mat (legacy shape: { t: 'sit', mat }) or a log seat ({ t: 'sit', kind: 'log', seat }). */
+  /** Sit on a mat (legacy shape: { t: 'sit', mat }), a log or bench seat ({ t: 'sit', kind, seat }). */
   | { t: 'sit'; kind: SeatKind; seat: number }
   | { t: 'stand' }
   | { t: 'voiceJoin'; groupId: number }
@@ -200,10 +255,10 @@ export interface PlayerInfo {
 
 export interface PlayerSnap extends StatePayload {
   id: string;
-  /** Seat index while seated (mat or log, see seatKind), else -1. */
+  /** Seat index while seated (mat, log or bench, see seatKind), else -1. */
   seat: number;
-  /** Present when seated on a campfire log ('mat' is implied otherwise). */
-  seatKind?: 'log';
+  /** Present when seated on a campfire log or plaza bench ('mat' is implied otherwise). */
+  seatKind?: 'log' | 'bench';
 }
 
 export type ErrorCode =
@@ -271,6 +326,8 @@ export type ServerMessage =
       mats: (string | null)[];
       /** Campfire log seat occupancy (LOG_SEATS order). */
       logs?: (string | null)[];
+      /** Plaza bench seat occupancy (BENCH_SEATS order). */
+      benches?: (string | null)[];
       snapshotHz: number;
       word?: WordPassage | null;
       /** The signed-in account, or null for a guest. */
@@ -306,6 +363,7 @@ export type ServerMessage =
   | { t: 'chat'; id: string; name: string; text: string }
   | { t: 'mats'; mats: (string | null)[] }
   | { t: 'logs'; logs: (string | null)[] }
+  | { t: 'benches'; benches: (string | null)[] }
   | { t: 'error'; code: ErrorCode; message: string };
 
 // ------------------------------------------------------------------ validation
@@ -397,8 +455,9 @@ export function parseClientMessage(data: string): ClientMessage | null {
     case 'chat':
       return typeof m.text === 'string' ? { t: 'chat', text: m.text } : null;
     case 'sit': {
-      if (m.kind === 'log') {
-        return Number.isInteger(m.seat) && (m.seat as number) >= 0 && (m.seat as number) < LOG_SEAT_COUNT ? { t: 'sit', kind: 'log', seat: m.seat as number } : null;
+      if (m.kind === 'log' || m.kind === 'bench') {
+        const n = SEAT_COUNTS[m.kind];
+        return Number.isInteger(m.seat) && (m.seat as number) >= 0 && (m.seat as number) < n ? { t: 'sit', kind: m.kind, seat: m.seat as number } : null;
       }
       if (m.kind !== undefined && m.kind !== 'mat') return null;
       const idx = m.seat ?? m.mat;
