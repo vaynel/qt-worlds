@@ -7,7 +7,7 @@ const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) =>
 
 /**
  * 골방: a small private room rendered as its own scene, so nobody else is in
- * it. The player sits on a cushion facing a small wall screen (the worship
+ * it. The player sits on a cushion facing a wooden cross on the wall (the worship
  * panel is the DOM overlay); a candle and the window follow the time of day.
  */
 export class Interior {
@@ -22,6 +22,9 @@ export class Interior {
   private yaw = 0;
   private pitch = 0.32;
   private readonly geometries: THREE.BufferGeometry[] = [];
+  /** Portrait phones: aim higher and a little to the right so the cross sits
+   *  above the avatar's head and left of the docked worship player. */
+  private portrait = false;
 
   constructor() {
     const s = this.scene;
@@ -51,9 +54,21 @@ export class Interior {
     add(new THREE.BoxGeometry(0.04, 0.95, 1.25), this.windowPane, 2.93, 1.75, -0.6);
     add(new THREE.BoxGeometry(0.05, 0.95, 0.05), lam(PALETTE.woodDark), 2.92, 1.75, -0.6);
 
-    // Wall screen (the actual video lives in the DOM panel).
-    add(new THREE.BoxGeometry(2.3, 1.4, 0.08), lam(0x3b2c22), 0, 1.75, -2.93);
-    add(new THREE.BoxGeometry(2.1, 1.2, 0.02), new THREE.MeshBasicMaterial({ color: 0x1f2a33 }), 0, 1.75, -2.88);
+    // Wooden cross on the front wall, with a soft warm halo behind it.
+    // (The worship video itself lives in the DOM panel, not on the wall.)
+    const halo = add(
+      new THREE.CircleGeometry(0.95, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffe2a8, transparent: true, opacity: 0.32, depthWrite: false }),
+      0, 1.95, -2.94,
+    );
+    halo.renderOrder = 1;
+    add(new THREE.CircleGeometry(0.62, 32), new THREE.MeshBasicMaterial({ color: 0xfff1cf, transparent: true, opacity: 0.35, depthWrite: false }), 0, 1.95, -2.935);
+    const crossWood = lam(0x7a4e2c);
+    add(new THREE.BoxGeometry(0.16, 1.7, 0.1), crossWood, 0, 1.75, -2.88); // upright
+    add(new THREE.BoxGeometry(0.95, 0.16, 0.1), crossWood, 0, 2.18, -2.87); // crossbeam
+    const crossLight = new THREE.PointLight(0xffd59a, 1.1, 3.2, 1.6);
+    crossLight.position.set(0, 1.9, -2.4);
+    s.add(crossLight);
 
     // Low table with candle and an open Bible.
     add(new THREE.BoxGeometry(1.2, 0.08, 0.6), lam(PALETTE.wood), 0, 0.42, -1.2);
@@ -82,14 +97,15 @@ export class Interior {
     s.add(this.hemi, this.sunLight);
 
     this.avatar.root.position.set(0, 0.1, 0.2);
-    this.avatar.root.rotation.y = Math.PI; // face the screen (-z)
+    this.avatar.root.rotation.y = Math.PI; // face the cross (-z)
     this.avatar.setSeated(true);
     s.add(this.avatar.root);
   }
 
   setAspect(aspect: number) {
     this.camera.aspect = aspect;
-    this.camera.fov = aspect < 0.8 ? 66 : 50;
+    this.portrait = aspect < 0.8;
+    this.camera.fov = this.portrait ? 66 : 50;
     this.camera.updateProjectionMatrix();
   }
 
@@ -110,7 +126,7 @@ export class Interior {
     this.avatar.animate(dt, 0, elapsed);
 
     const dist = 2.4;
-    const target = new THREE.Vector3(0, 1.1, -1.4);
+    const target = this.portrait ? new THREE.Vector3(0.42, 1.85, -1.4) : new THREE.Vector3(0, 1.1, -1.4);
     this.camera.position.set(
       Math.sin(this.yaw) * Math.cos(this.pitch) * dist,
       1.0 + Math.sin(this.pitch) * dist,
