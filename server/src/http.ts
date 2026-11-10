@@ -244,6 +244,8 @@ export async function readJson(req: IncomingMessage): Promise<Record<string, unk
 /** Fixed-window counter: at most `limit` hits per key per `windowMs`. */
 export class RateLimiter {
   private readonly hits = new Map<string, { count: number; start: number }>();
+  /** Keys hold IPs: drop finished windows regularly, not only when the map is huge. */
+  private lastSweep = Date.now();
 
   constructor(
     private readonly limit: number,
@@ -252,6 +254,10 @@ export class RateLimiter {
 
   hit(key: string): boolean {
     const now = Date.now();
+    if (now - this.lastSweep > this.windowMs) {
+      this.sweep(now);
+      this.lastSweep = now;
+    }
     const h = this.hits.get(key);
     if (!h || now - h.start > this.windowMs) {
       this.hits.set(key, { count: 1, start: now });
@@ -324,6 +330,8 @@ export class StaticClient {
     let isIndex = false;
     // The service worker must always be revalidated, and never be the SPA page.
     const isWorker = pathname === '/sw.js';
+    // Static pages (/privacy, /terms): an extensionless path with a matching .html file.
+    if (!extname(pathname) && pathname !== '/' && existsSync(`${file}.html`) && statSync(`${file}.html`).isFile()) file = `${file}.html`;
     if (!existsSync(file) || statSync(file).isDirectory()) {
       // Unknown asset files (and a missing sw.js) are real 404s; everything else falls back to the SPA.
       if (isWorker || pathname.startsWith('/assets/') || extname(pathname)) return false;
@@ -331,15 +339,16 @@ export class StaticClient {
       isIndex = true;
     }
     isIndex ||= file.endsWith('index.html');
+    const isHtml = file.endsWith('.html');
     const info = requestInfo(req);
     const entry = this.load(file);
     const headers: Record<string, string> = {
       'content-type': entry.type,
       etag: entry.etag,
       'x-content-type-options': 'nosniff',
-      'cache-control': isIndex || isWorker ? 'no-cache' : pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+      'cache-control': isHtml || isWorker ? 'no-cache' : pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
       vary: 'accept-encoding',
-      ...(isIndex ? securityHeaders(info) : {}),
+      ...(isHtml ? securityHeaders(info) : {}),
     };
     if (req.headers['if-none-match'] === entry.etag) {
       res.writeHead(304, headers);

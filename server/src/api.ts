@@ -5,6 +5,8 @@ import type { GroupChatService, GroupService, LanternService, WordBookService } 
 import type { GroupMessage } from '../../shared/protocol.js';
 import { TokenBucket } from './rateLimit.js';
 import type { PushService } from './push.js';
+import type { AccountService } from './account.js';
+import { TERMS_VERSION } from '../../shared/protocol.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -15,6 +17,8 @@ export interface RoomEvents {
   voiceCount(groupId: number): number;
   groupChat(message: GroupMessage, update: boolean): void;
   groupRead(userId: number, groupId: number, lastReadId: number): void;
+  /** 회원 탈퇴: take the lanterns down for everyone and drop that account's connections. */
+  accountDeleted(userId: number, lanternIds: number[]): void;
 }
 
 /** ICE servers for WebRTC: short-lived Cloudflare TURN credentials, minted server-side. */
@@ -77,6 +81,10 @@ export class IceServers {
     if (this.cache.size > 5000) this.cache.clear();
     return servers;
   }
+
+  forget(userId: number) {
+    this.cache.delete(userId);
+  }
 }
 
 export interface ApiDeps {
@@ -91,11 +99,20 @@ export interface ApiDeps {
   ice: IceServers;
   chat: GroupChatService;
   push: PushService;
+  accounts: AccountService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
 
 type Handler = (ctx: Ctx) => Promise<void> | void;
+interface RouteOpts {
+  /**
+   * Allowed before agreeing to the current terms. Writes that create or share
+   * something are blocked until then; leaving, deleting, consenting, logging out
+   * and the 정보주체 rights (export, 탈퇴) are not. DELETE routes are always open.
+   */
+  consentFree?: boolean;
+}
 interface Ctx {
   req: IncomingMessage;
   res: ServerResponse;
@@ -112,13 +129,16 @@ const id = (s: string) => {
 };
 
 export class Api {
-  private readonly routes: { method: string; pattern: RegExp; handler: Handler }[] = [];
+  private readonly routes: { method: string; pattern: RegExp; handler: Handler; opts: RouteOpts }[] = [];
   private readonly ipLimit = new RateLimiter(600, 60_000);
   private readonly authLimit = new RateLimiter(Number(process.env.AUTH_RATE_LIMIT ?? 30), 60_000);
   private readonly nicknameLimit = new RateLimiter(10, 3_600_000);
   private readonly joinLimit = new RateLimiter(10, 60_000);
   private readonly iceLimit = new RateLimiter(10, 60_000);
   private readonly pushLimit = new RateLimiter(30, 3_600_000);
+  private readonly exportLimit = new RateLimiter(Number(process.env.EXPORT_RATE_LIMIT ?? 10), 3_600_000);
+  private readonly deleteLimit = new RateLimiter(5, 3_600_000);
+  private readonly deleteIpLimit = new RateLimiter(20, 3_600_000);
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
 
@@ -133,8 +153,9 @@ export class Api {
   }
 
   constructor(private readonly d: ApiDeps) {
-    const r = (method: string, path: string, handler: Handler) =>
-      this.routes.push({ method, pattern: new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), handler });
+    const r = (method: string, path: string, handler: Handler, opts: RouteOpts = {}) =>
+      this.routes.push({ method, pattern: new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), handler, opts });
+    const open: RouteOpts = { consentFree: true };
 
     // ---------------- auth
     r('GET', '/api/auth/config', ({ res }) =>
@@ -173,28 +194,88 @@ export class Api {
         sendJson(res, out.status, out.body);
       });
     }
-    r('POST', '/api/auth/logout', ({ req, res, info }) => {
-      sendJson(res, 200, { ok: true }, { 'set-cookie': d.sessions.destroy(req, info) });
-    });
+    r(
+      'POST',
+      '/api/auth/logout',
+      ({ req, res, info }) => {
+        sendJson(res, 200, { ok: true }, { 'set-cookie': d.sessions.destroy(req, info) });
+      },
+      open,
+    );
     r('GET', '/api/me', ({ res, user }) => {
       sendJson(res, 200, {
         user: user ? { id: user.id, nickname: user.nickname, onboarded: user.onboarded } : null,
         needsNickname: !!user && !user.nickname,
+        // Accounts from before M7 (or after a terms update) are asked once, gently.
+        needsConsent: !!user && !!user.nickname && !user.consented,
+        termsVersion: TERMS_VERSION,
       });
     });
-    r('POST', '/api/me/onboarded', ({ res, user }) => {
-      const u = this.signedIn(user, false);
-      d.users.markOnboarded(u.id);
-      sendJson(res, 200, { ok: true });
-    });
+    r(
+      'POST',
+      '/api/me/onboarded',
+      ({ res, user }) => {
+        const u = this.signedIn(user, false);
+        d.users.markOnboarded(u.id);
+        sendJson(res, 200, { ok: true });
+      },
+      open,
+    );
     r('POST', '/api/me/nickname', async ({ req, res, user }) => {
       const u = this.signedIn(user, false);
       this.limit(this.nicknameLimit, `user:${u.id}`);
       const body = await readJson(req);
+      // Finishing sign-up needs 만 14세 이상 + 이용약관/개인정보처리방침 consent.
+      const agree = body.agree === true;
+      if (!u.nickname && !agree) throw new HttpError(400, 'consent_required', '만 14세 이상인지 확인하고 이용약관과 개인정보처리방침에 동의해 주세요.');
       const nickname = d.users.setNickname(u.id, body.nickname);
+      if (agree) d.users.recordConsent(u.id);
       d.room.nicknameChanged(u.id, nickname);
       sendJson(res, 200, { user: { id: u.id, nickname } });
     });
+    r(
+      'POST',
+      '/api/me/consent',
+      async ({ req, res, user }) => {
+        const u = this.signedIn(user, false);
+        if ((await readJson(req)).agree !== true) throw new HttpError(400, 'consent_required', '만 14세 이상인지 확인하고 동의해 주세요.');
+        d.users.recordConsent(u.id);
+        sendJson(res, 200, { ok: true, termsVersion: TERMS_VERSION });
+      },
+      open,
+    );
+    // 정보주체 권리: 열람 (내 데이터 내려받기) and 삭제 (회원 탈퇴). No consent needed for either.
+    r('GET', '/api/me/export', ({ res, user, info }) => {
+      const u = this.signedIn(user, false);
+      this.limit(this.exportLimit, `user:${u.id}`);
+      this.limit(this.exportLimit, `ip:${info.ip}`);
+      const day = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10).replace(/-/g, '');
+      sendJson(res, 200, d.accounts.export(u.id), { 'content-disposition': `attachment; filename="qt-world-my-data-${day}.json"` });
+    });
+    r(
+      'POST',
+      '/api/me/delete',
+      async ({ req, res, user, info }) => {
+        const u = this.signedIn(user, false);
+        this.limit(this.deleteLimit, `user:${u.id}`);
+        this.limit(this.deleteIpLimit, `ip:${info.ip}`);
+        const body = await readJson(req);
+        const out = d.accounts.delete(u.id, body.nickname);
+        // Live: lanterns go dark for everyone, counts drop, sockets of this account close.
+        d.room.accountDeleted(u.id, out.lanternIds);
+        for (const lid of out.reactedLanternIds) d.room.lanternChanged(lid);
+        for (const t of out.transferred) {
+          d.room.groupChat(d.chat.system(t.groupId, `모임을 만든 분이 떠나서 ${t.newOwner}님이 모임장이 되었어요`), false);
+          d.room.membershipChanged(t.newOwnerId);
+        }
+        d.push.forget(u.id);
+        d.ice.forget(u.id);
+        this.chatBuckets.delete(u.id);
+        console.log(`account deleted: user ${u.id} (${out.lanternIds.length} lanterns, ${out.transferred.length} groups handed over, ${out.deletedGroups.length} groups removed)`);
+        sendJson(res, 200, { ok: true, deletedGroups: out.deletedGroups.length, transferredGroups: out.transferred.length }, { 'set-cookie': d.sessions.clearCookie(info) });
+      },
+      open,
+    );
 
     // ---------------- word book (owner only)
     r('GET', '/api/wordbook', ({ res, user }) => sendJson(res, 200, d.wordbook.list(this.signedIn(user).id)));
@@ -256,19 +337,29 @@ export class Api {
       d.room.groupChat(m, true);
       sendJson(res, 200, m);
     });
-    r('POST', '/api/groups/:id/messages/:mid/hide', ({ res, user, params }) => {
-      const m = d.chat.hide(this.signedIn(user).id, id(params[0]), id(params[1]));
-      d.room.groupChat(m, true);
-      sendJson(res, 200, m);
-    });
-    r('POST', '/api/groups/:id/read', async ({ req, res, user, params }) => {
-      const u = this.signedIn(user);
-      const gid = id(params[0]);
-      const body = await readJson(req);
-      const last = d.chat.markRead(u.id, gid, Number(body.lastId));
-      d.room.groupRead(u.id, gid, last);
-      sendJson(res, 200, { lastReadId: last, unread: d.chat.unread(u.id, gid) });
-    });
+    r(
+      'POST',
+      '/api/groups/:id/messages/:mid/hide',
+      ({ res, user, params }) => {
+        const m = d.chat.hide(this.signedIn(user).id, id(params[0]), id(params[1]));
+        d.room.groupChat(m, true);
+        sendJson(res, 200, m);
+      },
+      open,
+    );
+    r(
+      'POST',
+      '/api/groups/:id/read',
+      async ({ req, res, user, params }) => {
+        const u = this.signedIn(user);
+        const gid = id(params[0]);
+        const body = await readJson(req);
+        const last = d.chat.markRead(u.id, gid, Number(body.lastId));
+        d.room.groupRead(u.id, gid, last);
+        sendJson(res, 200, { lastReadId: last, unread: d.chat.unread(u.id, gid) });
+      },
+      open,
+    );
     if (d.testMode) {
       // Test-only: purge as if the clock were `days` later.
       r('POST', '/api/test/chat-purge', async ({ req, res }) => {
@@ -293,11 +384,16 @@ export class Api {
       const body = await readJson(req);
       sendJson(res, 200, d.push.subscribe(u.id, body, String(req.headers['user-agent'] ?? '')));
     });
-    r('POST', '/api/push/unsubscribe', async ({ req, res, user }) => {
-      const u = this.signedIn(user);
-      pushOn();
-      sendJson(res, 200, d.push.unsubscribe(u.id, await readJson(req)));
-    });
+    r(
+      'POST',
+      '/api/push/unsubscribe',
+      async ({ req, res, user }) => {
+        const u = this.signedIn(user);
+        pushOn();
+        sendJson(res, 200, d.push.unsubscribe(u.id, await readJson(req)));
+      },
+      open,
+    );
     r('GET', '/api/push/prefs', ({ res, user }) => {
       const u = this.signedIn(user);
       pushOn();
@@ -352,14 +448,19 @@ export class Api {
       if (d.groups.list(u.id).length > before) d.room.groupChat(d.chat.system(g.id, `${u.nickname}님이 모임에 함께했어요`), false);
       sendJson(res, 200, g);
     });
-    r('POST', '/api/groups/:id/leave', ({ res, user, params }) => {
-      const u = this.signedIn(user);
-      const gid = id(params[0]);
-      d.groups.leave(u.id, gid);
-      d.room.membershipChanged(u.id);
-      d.room.groupChat(d.chat.system(gid, `${u.nickname}님이 모임을 떠났어요`), false);
-      sendJson(res, 200, { ok: true });
-    });
+    r(
+      'POST',
+      '/api/groups/:id/leave',
+      ({ res, user, params }) => {
+        const u = this.signedIn(user);
+        const gid = id(params[0]);
+        d.groups.leave(u.id, gid);
+        d.room.membershipChanged(u.id);
+        d.room.groupChat(d.chat.system(gid, `${u.nickname}님이 모임을 떠났어요`), false);
+        sendJson(res, 200, { ok: true });
+      },
+      open,
+    );
 
     // ---------------- lanterns (visibility enforced in LanternService)
     r('GET', '/api/lanterns', ({ res, user }) => sendJson(res, 200, { lanterns: d.lanterns.listFor(user?.id ?? null) }));
@@ -416,13 +517,19 @@ export class Api {
         if (!m) continue;
         matchedPath = true;
         if (route.method !== method) continue;
+        const user = this.d.sessions.user(req);
+        // Saving and sharing wait until the account agrees to the current terms.
+        const writes = method !== 'GET' && method !== 'HEAD' && method !== 'DELETE';
+        if (writes && !route.opts.consentFree && user?.nickname && !user.consented) {
+          throw new HttpError(403, 'needs_consent', '이용약관과 개인정보처리방침에 동의하면 저장하고 나눌 수 있어요. ⚙ 설정 → 계정에서 동의할 수 있어요.');
+        }
         await route.handler({
           req,
           res,
           info,
           params: m.slice(1).map((p) => decodeURIComponent(p)),
           query: url.searchParams,
-          user: this.d.sessions.user(req),
+          user,
         });
         return true;
       }

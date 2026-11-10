@@ -157,6 +157,11 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // v6: consent to 이용약관 / 개인정보처리방침 (만 14세 이상) at sign-up (M7)
+  `
+  ALTER TABLE users ADD COLUMN terms_agreed_at INTEGER;
+  ALTER TABLE users ADD COLUMN terms_version TEXT;
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {
@@ -165,6 +170,8 @@ export function openDb(path = defaultDbPath()): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 3000');
+  // 파기: deleted rows are overwritten in the file, not just unlinked.
+  db.pragma('secure_delete = ON');
   migrate(db);
   return db;
 }

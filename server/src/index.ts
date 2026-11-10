@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { MAX_FRAME_BYTES, MAX_PLAYERS } from '../../shared/protocol.js';
+import { AccountService } from './account.js';
 import { Api, IceServers } from './api.js';
 import { googleProvider, MockProvider, OidcFlow, Sessions, Users, type AuthConfig } from './auth.js';
 import { DailyWord } from './dailyWord.js';
@@ -53,6 +54,7 @@ const groups = new GroupService(db);
 const lanterns = new LanternService(db, groups);
 const wordbook = new WordBookService(db, dailyWord, TEST_MODE);
 const chat = new GroupChatService(db, groups);
+const accounts = new AccountService(db);
 const push = new PushService(db, dailyWord, {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -88,7 +90,7 @@ const room = new Room({
 });
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -152,12 +154,17 @@ const heartbeat = setInterval(() => {
     ws.ping();
   }
 }, HEARTBEAT_MS);
-// Hourly: expired sessions, and group chat older than 7 days.
-const sweeper = setInterval(() => {
+// Hourly 파기: expired sessions, group chat older than 7 days, old lantern
+// copies (내린: after a day; expired: a day after leaving the hill), and
+// sign-ups that never finished (no nickname, no consent) after a day.
+const sweep = () => {
   sessions.sweep();
   chat.purge();
-}, 3_600_000);
-chat.purge();
+  const gone = accounts.sweep();
+  if (gone.lanterns || gone.signups) log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups deleted`);
+};
+const sweeper = setInterval(sweep, 3_600_000);
+sweep();
 // Every minute: daily words that are due (Asia/Seoul) and batched prayer notices.
 // Mock push (tests) is driven by /api/test/push/tick with a fake clock instead.
 const pushTimer = push.enabled && !push.mock ? setInterval(() => void push.tick().catch((e) => console.error('push tick', e)), 60_000) : null;

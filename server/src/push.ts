@@ -134,6 +134,13 @@ export class PushService {
         };
   }
 
+  /** 회원 탈퇴: drop in-memory prayer batching for that account (DB rows cascade). */
+  forget(userId: number) {
+    this.prayerState.delete(userId);
+    // Keys are `${lanternId}:${actorId}`.
+    for (const k of this.prayerSeen.keys()) if (k.endsWith(`:${userId}`)) this.prayerSeen.delete(k);
+  }
+
   // ---------------------------------------------------------------- subscriptions
 
   private validEndpoint(raw: unknown): string {

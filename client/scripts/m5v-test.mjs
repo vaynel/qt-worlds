@@ -105,7 +105,7 @@ class Agent {
       if (!loc || !loc.includes('/api/')) break;
       url = new URL(loc, url).toString();
     }
-    await this.json('POST', '/api/me/nickname', { nickname });
+    await this.json('POST', '/api/me/nickname', { nickname, agree: true });
     return this;
   }
 }

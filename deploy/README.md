@@ -80,6 +80,12 @@ docker cp qt-worlds:/data/backups/. ./deploy/backups/
 # 30 3 * * * docker exec qt-worlds node server/scripts/backup.mjs >/dev/null 2>&1
 ```
 
+**Retention (개인정보 파기).** After each backup the script deletes all but the newest `BACKUP_KEEP` backups (default **14**) in that folder. It only touches files named `worlds-YYYYMMDD-HHMMSS.db`. With one backup a day, deleted accounts and content are gone from backups within about 14 days. The 개인정보처리방침 (`/privacy`, section 3) promises exactly this, so:
+
+- run the backup **once a day**: more often shortens the window, less often lengthens it;
+- if you change `BACKUP_KEEP` (`docker exec -e BACKUP_KEEP=7 qt-worlds node server/scripts/backup.mjs`), update the policy text in `client/src/legal/pages.ts` too;
+- copies you take out of the volume (`./deploy/backups/` above) are not pruned. Delete them yourself after 14 days, or don't keep them.
+
 To restore (this stops the service briefly):
 
 ```bash
@@ -94,6 +100,16 @@ docker compose start qt-worlds
 ```bash
 docker compose logs -f qt-worlds     # json-file driver, 3 x 10 MB rotation
 ```
+
+The app logs nicknames on join/leave and voice-room join, campfire chat *lengths* (never the text), account deletions (numeric id only) and errors. It does not log IP addresses. The 개인정보처리방침 describes this, so keep it in mind when adding log lines.
+
+## 5a. 개인정보처리방침 / 이용약관 (M7)
+
+- Pages: `/privacy` and `/terms`, static HTML generated at build time from `client/src/legal/pages.ts`.
+- **Operator details live in `client/src/config/legal.ts`**: `OPERATOR_NAME`, `PRIVACY_OFFICER_NAME`, `PRIVACY_CONTACT` (email) and `EFFECTIVE_DATE`. Until the placeholders are replaced, every `npm run build` prints a loud `WARNING: LEGAL PLACEHOLDERS` (the build still succeeds). Rebuild the image after editing.
+- Consent: sign-up records `users.terms_agreed_at` and `users.terms_version` (migration v6). When the texts change materially, bump `TERMS_VERSION` in `shared/protocol.ts` and `EFFECTIVE_DATE`. Every account then sees the consent sheet once, and saving or sharing waits until they agree.
+- Hourly 파기 sweep (server): expired sessions, group chat older than 7 days, lantern copies (taken down: after 1 day; expired: 1 day after leaving the hill), and sign-ups that never chose a nickname (after 1 day). SQLite runs with `secure_delete=ON`.
+- 내 데이터 내려받기: `GET /api/me/export`; 회원 탈퇴: `POST /api/me/delete` (`{ nickname }`). Both are rate-limited. The export limit can be set with `EXPORT_RATE_LIMIT` (default 10 per hour per user/IP).
 
 ## 6. Environment reference
 

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { createLocalJWKSet, createRemoteJWKSet, exportJWK, generateKeyPair, jwtVerify, SignJWT, type JWK, type JWTVerifyGetKey } from 'jose';
-import { cleanText, nicknameKey, validateNickname, type AccountInfo } from '../../shared/protocol.js';
+import { cleanText, nicknameKey, TERMS_VERSION, validateNickname, type AccountInfo } from '../../shared/protocol.js';
 import type { DB } from './db.js';
 import { cookie, HttpError, parseCookies, type RequestInfo } from './http.js';
 
@@ -28,6 +28,8 @@ export interface SessionUser {
   nickname: string | null;
   email: string | null;
   onboarded: boolean;
+  /** Agreed to the current TERMS_VERSION (이용약관 + 개인정보처리방침, 만 14세 이상). */
+  consented: boolean;
 }
 
 // =============================================================================
@@ -53,17 +55,37 @@ export class Sessions {
     if (!token || token.length > 100) return null;
     const row = this.db
       .prepare(
-        `SELECT u.id, u.nickname, u.email, u.onboarded_at, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
+        `SELECT u.id, u.nickname, u.email, u.onboarded_at, u.terms_agreed_at, u.terms_version, s.expires_at
+         FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
       )
       .get(sha256(token)) as
-      | { id: number; nickname: string | null; email: string | null; onboarded_at: number | null; expires_at: number }
+      | {
+          id: number;
+          nickname: string | null;
+          email: string | null;
+          onboarded_at: number | null;
+          terms_agreed_at: number | null;
+          terms_version: string | null;
+          expires_at: number;
+        }
       | undefined;
     if (!row) return null;
     if (row.expires_at < Date.now()) {
       this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
       return null;
     }
-    return { id: row.id, nickname: row.nickname, email: row.email, onboarded: row.onboarded_at !== null };
+    return {
+      id: row.id,
+      nickname: row.nickname,
+      email: row.email,
+      onboarded: row.onboarded_at !== null,
+      consented: row.terms_agreed_at !== null && row.terms_version === TERMS_VERSION,
+    };
+  }
+
+  /** Set-Cookie that removes the session cookie (after 회원 탈퇴 the rows are already gone). */
+  clearCookie(info: RequestInfo): string {
+    return cookie(SESSION_COOKIE, '', { secure: info.secure, maxAge: 0 });
   }
 
   destroy(req: IncomingMessage, info: RequestInfo): string {
@@ -112,6 +134,11 @@ export class Users {
     if (taken) throw new HttpError(409, 'name_taken', '이미 다른 분이 쓰고 있는 닉네임이에요.');
     this.db.prepare('UPDATE users SET nickname = ?, nickname_key = ? WHERE id = ?').run(name, key, userId);
     return name;
+  }
+
+  /** Record consent to the current 이용약관 / 개인정보처리방침 (and 만 14세 이상). */
+  recordConsent(userId: number) {
+    this.db.prepare('UPDATE users SET terms_agreed_at = ?, terms_version = ? WHERE id = ?').run(Date.now(), TERMS_VERSION, userId);
   }
 
   markOnboarded(userId: number) {

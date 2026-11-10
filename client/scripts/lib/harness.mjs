@@ -142,6 +142,7 @@ export async function loginJoin(page, base, hint, nickname, query) {
   await page.waitForSelector('#entry-signed-in:not([hidden]), #entry-nick:not([hidden])');
   if (await page.isVisible('#entry-nick')) {
     await page.fill('#account-nickname', nickname);
+    await page.check('#nick-agree'); // M7: 만 14세 이상 + 약관 동의
     await page.click('#nick-submit');
   } else {
     await page.click('#entry-continue');

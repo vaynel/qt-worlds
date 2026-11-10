@@ -114,7 +114,7 @@ async function account(hint, nickname) {
   const a = new Agent();
   const landed = await a.login(hint);
   if (nickname) {
-    const r = await a.json('POST', '/api/me/nickname', { nickname });
+    const r = await a.json('POST', '/api/me/nickname', { nickname, agree: true }); // M7: sign-up needs consent
     if (r.status !== 200) throw new Error(`nickname ${nickname}: ${JSON.stringify(r.data)}`);
   }
   a.landed = landed;
@@ -165,13 +165,13 @@ try {
   check('session cookie is HttpOnly + SameSite=Lax (not Secure on plain http)', /HttpOnly/.test(cookieFlags) && /SameSite=Lax/.test(cookieFlags) && !/Secure/.test(cookieFlags), cookieFlags);
   const guestWrite = await alice.json('POST', '/api/wordbook/meditations', { date: DAY, place: '골방', meditation: 'x' });
   check('no saving before a nickname is chosen', guestWrite.status === 403);
-  check('alice picks 은혜', (await alice.json('POST', '/api/me/nickname', { nickname: '은혜' })).status === 200);
+  check('alice picks 은혜', (await alice.json('POST', '/api/me/nickname', { nickname: '은혜', agree: true })).status === 200);
   const bob = await account('bob');
-  const dupe = await bob.json('POST', '/api/me/nickname', { nickname: '은혜' });
-  const nfd = await bob.json('POST', '/api/me/nickname', { nickname: '은혜'.normalize('NFD') });
+  const dupe = await bob.json('POST', '/api/me/nickname', { nickname: '은혜', agree: true });
+  const nfd = await bob.json('POST', '/api/me/nickname', { nickname: '은혜'.normalize('NFD'), agree: true });
   check('duplicate nickname refused (also NFD form)', dupe.status === 409 && nfd.status === 409, dupe.data?.message);
-  await bob.json('POST', '/api/me/nickname', { nickname: 'Grace' });
-  const carolDupe = await (await account('carol0')).json('POST', '/api/me/nickname', { nickname: ' grace ' });
+  await bob.json('POST', '/api/me/nickname', { nickname: 'Grace', agree: true });
+  const carolDupe = await (await account('carol0')).json('POST', '/api/me/nickname', { nickname: ' grace ', agree: true });
   check('nickname comparison is case-insensitive and trimmed', carolDupe.status === 409);
   const second = await account('alice');
   check('same Google sub logs into the same account', (await second.json('GET', '/api/me')).data.user.nickname === '은혜' && second.landed.includes('login=ok'));
@@ -311,6 +311,7 @@ try {
   await A.waitForSelector('#entry-nick:not([hidden])');
   check('login returns to the same page (query kept, login flag cleaned up)', !A.url().includes('login=') && A.url().includes('noworship=1'), A.url());
   await A.fill('#account-nickname', 'grace');
+  await A.check('#nick-agree'); // M7: 만 14세 이상 + 약관 동의 checkbox
   await A.click('#nick-submit');
   await A.waitForSelector('#entry-status:has-text("이미")');
   check('UI: duplicate nickname refused on the 닉네임 정하기 step', true, await A.textContent('#entry-status'));

@@ -35,6 +35,7 @@ export class EntryScreen {
   private readonly googleBtn = $<HTMLButtonElement>('btn-google');
   private readonly remember = $<HTMLInputElement>('remember');
   private readonly accountInput = $<HTMLInputElement>('account-nickname');
+  private readonly agree = $<HTMLInputElement>('nick-agree');
   private readonly status = $('entry-status');
   private readonly fallback = $('entry-fallback');
   private me: Me = { user: null, needsNickname: false };
@@ -63,6 +64,10 @@ export class EntryScreen {
       e.preventDefault();
       void this.submitNickname();
     });
+    this.agree.addEventListener('change', () => {
+      this.agree.closest('label')?.classList.remove('missing');
+      this.setStatus('');
+    });
     $('entry-continue').addEventListener('click', () => this.finishAccount());
     for (const b of document.querySelectorAll<HTMLButtonElement>('.entry-logout')) {
       b.addEventListener('click', () => void this.logout());
@@ -79,7 +84,7 @@ export class EntryScreen {
   }
 
   /** Show the right pane for the current session. */
-  setup(me: Me, config: AuthConfig, loginError: string | null) {
+  setup(me: Me, config: AuthConfig, loginError: string | null, notice: string | null = null) {
     this.me = me;
     if (!config.ready) {
       this.googleBtn.disabled = true;
@@ -88,6 +93,7 @@ export class EntryScreen {
     }
     this.showPane();
     if (loginError) this.setStatus(LOGIN_ERRORS[loginError] ?? '로그인하지 못했어요. 다시 시도해 주세요.');
+    else if (notice) this.setStatus(notice, true);
   }
 
   private showPane() {
@@ -148,10 +154,16 @@ export class EntryScreen {
       this.setStatus(`닉네임을 1~${NICKNAME_MAX}자로 적어 주세요.`);
       return;
     }
+    // 만 14세 이상 + 이용약관/개인정보처리방침 동의 (the server checks it too).
+    if (!this.agree.checked) {
+      this.agree.closest('label')?.classList.add('missing');
+      this.setStatus('만 14세 이상인지 확인하고 이용약관과 개인정보처리방침에 동의해 주세요.');
+      return;
+    }
     this.busy(true);
     try {
-      const r = await api<{ user: { id: number; nickname: string } }>('POST', '/api/me/nickname', { nickname: name });
-      this.me = { user: r.user, needsNickname: false };
+      const r = await api<{ user: { id: number; nickname: string } }>('POST', '/api/me/nickname', { nickname: name, agree: true });
+      this.me = { user: r.user, needsNickname: false, needsConsent: false };
       this.finishAccount();
     } catch (err) {
       this.busy(false);

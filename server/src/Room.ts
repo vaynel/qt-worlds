@@ -496,6 +496,27 @@ export class Room implements RoomEvents {
     }
   }
 
+  /**
+   * 회원 탈퇴: the rows are already gone, so visibility can't be checked any
+   * more. Every client hears "gone" for those ids (ids alone reveal nothing),
+   * and that account's connections leave voice and are closed.
+   */
+  accountDeleted(userId: number, lanternIds: number[]) {
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.userId === userId) continue;
+      for (const id of lanternIds) this.send(c, { t: 'lanternGone', id });
+    }
+    for (const key of this.voiceBlocks.keys()) if (key.endsWith(`:${userId}`)) this.voiceBlocks.delete(key);
+    for (const c of this.clients.values()) {
+      if (c.userId !== userId) continue;
+      this.voiceLeave(c, 'removed');
+      c.userId = null;
+      c.accountName = null;
+      c.groupIds = new Set();
+      c.ws.close(4005, 'account deleted');
+    }
+  }
+
   /** Live rename: every connection of that account gets the new name, and everyone sees it. */
   nicknameChanged(userId: number, nickname: string) {
     for (const c of this.clients.values()) {

@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Connect, type Plugin } from 'vite';
+import { LEGAL, legalPlaceholders } from './src/config/legal';
+import { renderPrivacy, renderTerms } from './src/legal/pages';
 
 /**
  * Writes dist/sw.js after the build: client/sw/sw.js (hand-written) prefixed
@@ -11,7 +13,7 @@ import { defineConfig, type Plugin } from 'vite';
  * dev server never registers one (see src/pwa/pwa.ts).
  * WORLDS_SW_KILL=1 ships client/sw/sw-killswitch.js as /sw.js instead.
  */
-const SHELL_EXTRAS = ['/manifest.json', '/favicon.svg', '/favicon-32.png', '/icon-192.png', '/badge-96.png', '/apple-touch-icon.png'];
+const SHELL_EXTRAS = ['/privacy.html', '/terms.html', '/manifest.json', '/favicon.svg', '/favicon-32.png', '/icon-192.png', '/badge-96.png', '/apple-touch-icon.png'];
 function serviceWorker(): Plugin {
   let outDir = 'dist';
   return {
@@ -40,6 +42,56 @@ function serviceWorker(): Plugin {
   };
 }
 
+/**
+ * 개인정보처리방침 (/privacy) and 이용약관 (/terms): static pages rendered from
+ * src/legal/pages.ts with the operator details in src/config/legal.ts.
+ * Builds emit dist/privacy.html + dist/terms.html (the Node server maps
+ * /privacy -> privacy.html; the service worker precaches both). Dev and
+ * preview serve them directly. Placeholders left in src/config/legal.ts make
+ * every build print a loud warning (the build still succeeds).
+ */
+const LEGAL_PAGES: Record<string, () => string> = {
+  privacy: () => renderPrivacy(LEGAL),
+  terms: () => renderTerms(LEGAL),
+};
+function warnLegalPlaceholders() {
+  const missing = legalPlaceholders();
+  if (!missing.length) return;
+  const bar = '!'.repeat(72);
+  console.warn(
+    `\n\x1b[1;33m${bar}\n` +
+      `!! WARNING: LEGAL PLACEHOLDERS — 개인정보처리방침/이용약관에 운영자 정보가 비어 있어요\n` +
+      `!! Fill these in client/src/config/legal.ts, then rebuild:\n` +
+      missing.map((k) => `!!   - ${k} = ${JSON.stringify((LEGAL as Record<string, string>)[k])}`).join('\n') +
+      `\n${bar}\x1b[0m\n`,
+  );
+}
+function legalPages(): Plugin {
+  const serve: Connect.NextHandleFunction = (req, res, next) => {
+    const m = /^\/(privacy|terms)(\.html)?\/?$/.exec((req.url ?? '').split('?')[0]);
+    if (!m || (req.method !== 'GET' && req.method !== 'HEAD')) return next();
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.setHeader('cache-control', 'no-cache');
+    res.end(req.method === 'HEAD' ? undefined : LEGAL_PAGES[m[1]]());
+  };
+  return {
+    name: 'worlds-legal',
+    buildStart() {
+      warnLegalPlaceholders();
+    },
+    configureServer(server) {
+      warnLegalPlaceholders();
+      server.middlewares.use(serve);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(serve);
+    },
+    generateBundle() {
+      for (const [name, render] of Object.entries(LEGAL_PAGES)) this.emitFile({ type: 'asset', fileName: `${name}.html`, source: render() });
+    },
+  };
+}
+
 // Dev: Vite on 5180, game/API server on 5181. The browser always talks to the
 // same origin (/api, /ws) and Vite forwards both, so phones on the LAN only
 // need port 5180. xfwd adds X-Forwarded-For/Proto/Host (trusted by the server
@@ -53,7 +105,7 @@ const proxy = {
 };
 
 export default defineConfig({
-  plugins: [serviceWorker()],
+  plugins: [legalPages(), serviceWorker()],
   define: { __BUILD_TAG__: JSON.stringify(process.env.WORLDS_BUILD_TAG ?? '') },
   server: {
     host: '0.0.0.0',

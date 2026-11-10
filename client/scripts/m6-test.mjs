@@ -97,7 +97,7 @@ class Agent {
       if (!loc || !loc.includes('/api/')) break;
       url = new URL(loc, url).toString();
     }
-    const r = await this.json('POST', '/api/me/nickname', { nickname });
+    const r = await this.json('POST', '/api/me/nickname', { nickname, agree: true });
     this.id = r.data?.user?.id;
     this.nickname = nickname;
     return this;

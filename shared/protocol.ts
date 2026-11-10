@@ -6,6 +6,15 @@
 
 export const PROTOCOL_VERSION = 1;
 
+/**
+ * Version of 이용약관 + 개인정보처리방침 that sign-up consent refers to.
+ * Bump it (to the new 시행일) when the texts change materially: every account
+ * is then asked to agree again on its next visit.
+ */
+export const TERMS_VERSION = '2026-11-10';
+/** Minimum age for an account (만 14세 이상; PIPA art. 22-2). */
+export const MIN_AGE = 14;
+
 /** Server -> client snapshot rate. */
 export const SNAPSHOT_HZ = 12;
 /** Client -> server state send rate. */

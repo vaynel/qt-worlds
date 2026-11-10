@@ -5,7 +5,8 @@
  *   PRECACHE    - ["/index.html", "/assets/...", icons, manifest]
  *
  * Rules:
- *   - navigations: network first; offline -> cached /index.html -> inline offline page
+ *   - navigations: network first; offline -> cached page (/privacy -> /privacy.html,
+ *     else /index.html) -> inline offline page
  *   - /assets/* (content-hashed): cache first
  *   - other precached same-origin files (icons, manifest): cache first
  *   - everything else (/api/*, /ws, /health, /sw.js, YouTube, Google, any
@@ -93,6 +94,10 @@ async function navigate(request) {
   }
   // Behind Cloudflare a stopped server answers 502/503/504: treat as offline.
   if (res && !(res.status >= 502 && res.status <= 504)) return res;
+  // Static pages (/privacy, /terms) have their own precached file.
+  const path = new URL(request.url).pathname.replace(/\/$/, '');
+  const own = path && PRECACHE.includes(`${path}.html`) ? await caches.match(`${path}.html`, { cacheName: CACHE }) : null;
+  if (own) return own;
   const shell = await caches.match('/index.html', { cacheName: CACHE });
   return shell || res || offlinePage();
 }

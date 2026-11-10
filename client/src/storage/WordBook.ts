@@ -212,7 +212,13 @@ export class ServerWordBookStore implements WordBookStore {
 
   async saveWord(word: WordPassage): Promise<void> {
     // The server stores its own copy of the verse for that date.
-    await api('PUT', `/api/wordbook/pages/${encodeURIComponent(word.date)}`);
+    try {
+      await api('PUT', `/api/wordbook/pages/${encodeURIComponent(word.date)}`);
+    } catch (err) {
+      // Not agreed to the terms yet (pre-M7 account): reading the word still works.
+      if (err instanceof ApiError && err.code === 'needs_consent') return;
+      throw err;
+    }
   }
 
   async addMeditation(word: WordPassage, entry: Omit<MeditationEntry, 'id' | 'createdAt'>): Promise<MeditationEntry> {

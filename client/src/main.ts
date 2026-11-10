@@ -8,6 +8,8 @@ import { GuestWordBookStore, LocalWordBookStore, ServerWordBookStore, type WordB
 import { EntryScreen } from './ui/EntryScreen';
 import { preloadYouTubeApi, WorshipPlayer } from './ui/WorshipPlayer';
 import { initPwa } from './pwa/pwa';
+import { consent, ConsentSheet } from './ui/Legal';
+import { Modal } from './ui/dom';
 
 // Service worker (production builds only), install prompt capture.
 initPwa();
@@ -65,9 +67,12 @@ window.addEventListener('resize', syncViewport);
 const params = new URLSearchParams(location.search);
 // Results of the OAuth redirect (?login=ok|nickname, ?login_error=code): read, then tidy the URL.
 const loginError = params.get('login_error');
-if (params.has('login') || params.has('login_error')) {
+// After 회원 탈퇴 (?deleted=1) the entry screen says goodbye once.
+const deleted = params.get('deleted') === '1';
+if (params.has('login') || params.has('login_error') || params.has('deleted')) {
   params.delete('login');
   params.delete('login_error');
+  params.delete('deleted');
   const q = params.toString();
   history.replaceState(null, '', `${location.pathname}${q ? `?${q}` : ''}${location.hash}`);
 }
@@ -78,7 +83,7 @@ let game: Game | null = null;
 /** Ask for a nickname, connect, and only then build the world (seed comes from the server). */
 async function enter(): Promise<void> {
   const [me, authConfig] = await Promise.all([getMe(), getAuthConfig()]);
-  entry.setup(me, authConfig, loginError);
+  entry.setup(me, authConfig, loginError, deleted ? '탈퇴가 끝났어요. 계정과 기록을 모두 지웠어요. 그동안 함께해 주셔서 고마워요.' : null);
   for (;;) {
     const choice = await entry.ask();
     // Start worship inside the 입장 tap (same task, before any network wait) so
@@ -128,8 +133,21 @@ async function enter(): Promise<void> {
       pushEnabled: authConfig.push === true,
     });
     game.start();
+    // Accounts from before the terms existed: ask once (per browser session), gently.
+    // Browsing keeps working; saving and sharing wait for the agreement.
+    consent.set(choice.mode === 'account' && meNow?.needsConsent === true);
+    if (consent.needed && !ConsentSheet.shownThisSession()) void showConsentWhenFree();
     return;
   }
+}
+
+/** Wait until no other sheet (e.g. the first-time guide) is open, then ask. */
+async function showConsentWhenFree() {
+  const loading = document.getElementById('loading');
+  await new Promise((r) => setTimeout(r, 600));
+  // After the loading card has faded and while no other sheet is open.
+  while (Modal.anyOpen || (loading && !loading.hidden && !loading.classList.contains('done'))) await new Promise((r) => setTimeout(r, 500));
+  if (consent.needed) new ConsentSheet().open();
 }
 
 void enter();

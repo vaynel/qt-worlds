@@ -575,11 +575,11 @@ export class GroupChatService {
     return this.get(Number(info.lastInsertRowid))!;
   }
 
-  /** Delete my own message. */
+  /** Delete my own message (the text is wiped at once; only the "지운 메시지" marker stays). */
   remove(userId: number, groupId: number, id: number): GroupMessage {
     this.member(userId, groupId);
     const r = this.db
-      .prepare("UPDATE group_messages SET deleted_at = ? WHERE id = ? AND group_id = ? AND user_id = ? AND kind = 'msg' AND deleted_at IS NULL")
+      .prepare("UPDATE group_messages SET deleted_at = ?, text = '' WHERE id = ? AND group_id = ? AND user_id = ? AND kind = 'msg' AND deleted_at IS NULL")
       .run(Date.now(), id, groupId, userId);
     if (!r.changes) throw new HttpError(404, 'not_found', '내가 보낸 메시지만 지울 수 있어요.');
     return this.get(id)!;

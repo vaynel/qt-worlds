@@ -173,6 +173,14 @@ export class WorshipPlayer {
   private readonly ytAlt: HTMLAnchorElement;
   /** Safety record for tests: playback must never run while folded. */
   private playedWhileFolded = false;
+  /**
+   * YouTube API policy: no background playback. When the page is hidden (other
+   * tab/app, screen off, pagehide) we pause, and resume on return only if it
+   * was playing (or about to) before.
+   */
+  private pausedForBackground = false;
+  private backgroundPauses = 0;
+  private playedWhileHidden = false;
 
   constructor(private readonly videos: WorshipVideo[] = WORSHIP_VIDEOS) {
     let saved: string | null = null;
@@ -291,6 +299,42 @@ export class WorshipPlayer {
     window.addEventListener('worlds-modal', () => this.applySize());
     document.getElementById('app')!.append(this.root, this.tab);
     this.updateLinks();
+    // Visibility is the signal (not window blur: a second desktop window beside
+    // the game must not stop the music while the page is still on screen).
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.pauseForBackground();
+      else this.resumeFromBackground();
+    });
+    // pagehide also pauses (navigating away, bfcache). Resuming relies on
+    // visibilitychange alone, which also fires when the page comes back.
+    window.addEventListener('pagehide', () => this.pauseForBackground());
+  }
+
+  private static pageHidden(): boolean {
+    return document.visibilityState === 'hidden';
+  }
+
+  private pauseForBackground() {
+    const active = this.state === STATE.PLAYING || this.state === STATE.BUFFERING;
+    if (active) this.pausedForBackground = true;
+    window.clearTimeout(this.graceTimer);
+    if (this.player && this.ready && active) {
+      this.backgroundPauses++;
+      try {
+        this.player.pauseVideo();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private resumeFromBackground() {
+    if (!this.pausedForBackground) return;
+    this.pausedForBackground = false;
+    // Still on screen and not folded/closed: the user had started it, so carry on.
+    if (this.effective === 'folded' || this.mode === 'hidden' || !this.player || !this.ready) return;
+    this.player.playVideo();
+    this.armPrompt();
   }
 
   private volumeRow(id: string): HTMLElement {
@@ -740,7 +784,10 @@ export class WorshipPlayer {
         onReady: () => {
           this.ready = true;
           this.setVolume(this.volume, this.muted, this.globalMuted);
-          if (autoplay && this.effective !== 'folded') {
+          if (autoplay && this.effective !== 'folded' && WorshipPlayer.pageHidden()) {
+            // Became ready while in the background: start when the page is back.
+            this.pausedForBackground = true;
+          } else if (autoplay && this.effective !== 'folded') {
             this.player?.playVideo();
             this.armPrompt();
           } else {
@@ -784,6 +831,15 @@ export class WorshipPlayer {
       // Defensive: should never happen; record it and stop at once.
       this.playedWhileFolded = true;
       this.player?.pauseVideo();
+      return;
+    }
+    if (state === STATE.PLAYING && WorshipPlayer.pageHidden()) {
+      // Defensive: started while the page is hidden (e.g. a late autoplay): no
+      // background play. Not counted as playing; the pause event follows.
+      this.playedWhileHidden = true;
+      this.pausedForBackground = true;
+      this.player?.pauseVideo();
+      return;
     }
     this.setState(state);
     if (state === STATE.PLAYING) {
@@ -836,6 +892,9 @@ export class WorshipPlayer {
       device: DEVICE,
       effective: this.effective,
       playedWhileFolded: this.playedWhileFolded,
+      pausedForBackground: this.pausedForBackground,
+      backgroundPauses: this.backgroundPauses,
+      playedWhileHidden: this.playedWhileHidden,
       tabVisible: !this.tab.hidden,
       state: names[this.state] ?? String(this.state),
       ready: this.ready,

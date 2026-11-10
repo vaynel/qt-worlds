@@ -37,6 +37,8 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 export interface Me {
   user: { id: number; nickname: string | null; onboarded?: boolean } | null;
   needsNickname: boolean;
+  /** Signed in with a nickname, but hasn't agreed to the current terms yet (pre-M7 accounts). */
+  needsConsent?: boolean;
 }
 
 export interface AuthConfig {

@@ -62,7 +62,8 @@ export interface NetHandlers {
 }
 
 /** Codes after which reconnecting would just fail again. */
-const FATAL_CLOSE = new Set([4001, 4002, 4003, 4004]);
+// 4005: the account was deleted (회원 탈퇴): never reconnect.
+const FATAL_CLOSE = new Set([4001, 4002, 4003, 4004, 4005]);
 const CONNECT_TIMEOUT_MS = 6000;
 
 /**

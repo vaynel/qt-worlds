@@ -36,12 +36,15 @@
               </div>
               <button type="submit" id="entry-submit">로그인 없이 둘러보기</button>
             </form>
+            <p class="entry-note entry-guest-terms" id="entry-guest-terms">둘러보기도 <a href="/terms" target="_blank" rel="noopener">이용약관</a>을 따릅니다.</p>
           </section>
 
           <form id="entry-nick" class="entry-pane" hidden novalidate>
             <p class="entry-step">닉네임 정하기</p>
             <p class="entry-note">다른 분과 겹치지 않는 1~12자 이름이에요. 나중에 설정에서 바꿀 수 있어요.</p>
             <input id="account-nickname" type="text" maxlength="24" autocomplete="nickname" enterkeyhint="go" placeholder="예: 은혜" aria-label="닉네임" />
+            <label class="entry-check entry-consent"><input type="checkbox" id="nick-agree" required />
+              <span>만 14세 이상이며, <a href="/terms" target="_blank" rel="noopener">이용약관</a>과 <a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a>에 동의합니다 <span class="req">(필수)</span></span></label>
             <button type="submit" id="nick-submit" class="primary">이 이름으로 시작하기</button>
             <button type="button" class="link-btn entry-logout">다른 계정으로 로그인</button>
           </form>
@@ -57,6 +60,11 @@
             <button type="button" id="entry-retry">다시 시도</button>
             <button type="button" id="entry-solo">혼자 둘러보기</button>
           </div>
+          <nav class="entry-legal" id="entry-legal" aria-label="약관">
+            <a href="/terms" target="_blank" rel="noopener">이용약관</a>
+            <span aria-hidden="true">·</span>
+            <a href="/privacy" target="_blank" rel="noopener"><strong>개인정보처리방침</strong></a>
+          </nav>
         </div>
       </div>
 

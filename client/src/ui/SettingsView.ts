@@ -5,6 +5,7 @@ import { installMode, isStandalone, onInstallChange } from '../pwa/pwa';
 import { button, el, Modal } from './dom';
 import type { InstallGuide } from './InstallGuide';
 import { NotifySettings } from './NotifySettings';
+import { consent, ConsentSheet, DeleteAccountSheet, downloadMyData, legalLinks } from './Legal';
 
 type SliderKey = 'master' | 'ambience' | 'worship' | 'ui' | 'voice';
 
@@ -19,6 +20,8 @@ const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
 /** ⚙ 설정: volume sliders and a mute switch, saved in localStorage. */
 export class SettingsView {
   private readonly modal = new Modal('settings-overlay', '설정');
+  private readonly consentSheet = new ConsentSheet();
+  private readonly deleteSheet = new DeleteAccountSheet();
 
   constructor(
     private readonly audio: AudioEngine,
@@ -57,12 +60,18 @@ export class SettingsView {
     const box = el('div', 'settings-account');
     box.append(el('p', 'settings-section', '계정'));
     const acc = this.account();
+    box.id = 'settings-account';
     if (!acc) {
       box.append(el('p', 'settings-note', '로그인 없이 둘러보는 중이에요. 로그인하면 묵상을 저장하고 등불과 모임을 쓸 수 있어요.'));
       const g = button('', 'google-btn', () => startGoogleLogin(true));
       g.append(el('span', 'google-g'), el('span', 'google-label', 'Google로 로그인'));
-      box.append(g);
+      box.append(g, legalLinks('settings'));
       return box;
+    }
+    if (consent.needed) {
+      const agree = button('약관 보고 동의하기', 'primary', () => this.consentSheet.open());
+      agree.id = 'settings-consent';
+      box.append(el('p', 'settings-note', '이용약관과 개인정보처리방침에 동의하면 묵상을 저장하고 나눌 수 있어요.'), agree);
     }
     const form = el('form', 'groups-form');
     const input = el('input');
@@ -94,7 +103,35 @@ export class SettingsView {
       }
     });
     out.id = 'settings-logout';
-    box.append(form, status, out);
+
+    // 정보주체 권리: 열람 (내려받기), 삭제 (탈퇴).
+    const dataStatus = el('p', 'groups-status');
+    dataStatus.setAttribute('role', 'status');
+    const exportBtn = button('내 데이터 내려받기', '', async () => {
+      exportBtn.disabled = true;
+      dataStatus.textContent = '준비하고 있어요…';
+      try {
+        await downloadMyData();
+        dataStatus.textContent = '내 데이터를 JSON 파일로 내려받았어요.';
+      } catch (err) {
+        dataStatus.textContent = err instanceof ApiError ? err.message : '잠시 후 다시 시도해 주세요.';
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+    exportBtn.id = 'settings-export';
+    const del = button('회원 탈퇴', 'ghost danger', () => this.deleteSheet.open(acc));
+    del.id = 'settings-delete';
+    const row = el('div', 'settings-legal-row');
+    row.append(exportBtn, out, del);
+    box.append(
+      form,
+      status,
+      row,
+      dataStatus,
+      el('p', 'settings-note', '묵상, 등불, 모임 등 내 계정의 기록을 파일로 받을 수 있어요. 탈퇴하면 모두 바로 지워져요.'),
+      legalLinks('settings'),
+    );
     return box;
   }
 

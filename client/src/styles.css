@@ -1680,6 +1680,95 @@ body.touch:not(.in-world) #worship.dock {
   color: var(--ink-soft);
 }
 
+.entry-note a,
+.entry-consent a,
+.entry-legal a,
+.legal-links a {
+  color: #a2412f;
+}
+
+.entry-consent {
+  align-items: flex-start;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--paper-line);
+  border-radius: 10px;
+  background: rgba(255, 253, 246, 0.7);
+}
+
+.entry-consent input {
+  flex: none;
+  margin-top: 1px;
+}
+
+.entry-consent .req {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.entry-consent.missing {
+  border-color: #a2412f;
+  box-shadow: 0 0 0 2px rgba(162, 65, 47, 0.18);
+}
+
+.entry-guest-terms {
+  text-align: center;
+  margin-top: -2px;
+}
+
+.entry-legal {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+}
+
+.settings-legal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.consent-sheet .consent-body,
+.delete-sheet .delete-body {
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.delete-sheet ul {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 0.9rem;
+}
+
+.delete-sheet li {
+  margin: 2px 0;
+}
+
+.delete-sheet input[type='text'] {
+  width: 100%;
+}
+
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .entry-divider {
   display: flex;
   align-items: center;

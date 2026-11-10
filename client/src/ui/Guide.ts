@@ -1,4 +1,5 @@
 import { button, el, Modal } from './dom';
+import { legalLinks } from './Legal';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -138,9 +139,10 @@ export class Guide {
             ['말씀 책', '날마다 쌓인 말씀과 나의 묵상, 담아 둔 묵상'],
             ['모임', '모임 만들기 · 코드로 참여하기'],
             ['찬양', '찬양 플레이어 열기/닫기 (작게·크게, 목록, 음량)'],
-            ['⚙ 설정', '소리, 닉네임, 사용 안내, 로그아웃'],
+            ['⚙ 설정', '소리, 닉네임, 사용 안내, 내 데이터 내려받기, 로그아웃'],
           ]),
           p('이제 시작해 볼까요?', 'guide-soft'),
+          legalLinks('guide'),
         ],
       },
     ];
