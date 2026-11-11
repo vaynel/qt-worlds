@@ -30,6 +30,7 @@ export class SettingsView {
     private readonly openGuide: () => void = () => undefined,
     private readonly install: InstallGuide | null = null,
     private readonly pushEnabled = false,
+    private readonly look: { open: () => void; isAdmin: () => boolean; openAdmin: () => void } | null = null,
   ) {
     // beforeinstallprompt may arrive late: refresh the button if settings are open.
     onInstallChange(() => {
@@ -204,6 +205,26 @@ export class SettingsView {
     const help = el('div', 'settings-account');
     help.append(el('p', 'settings-section', '사용 안내'), guide);
     body.append(help);
+    if (this.look) {
+      const look = this.look;
+      const box = el('div', 'settings-account');
+      box.id = 'settings-look';
+      const b = button('👕 꾸미기', '', () => {
+        this.modal.close();
+        look.open();
+      });
+      b.id = 'settings-look-btn';
+      box.append(el('p', 'settings-section', '꾸미기'), b, el('p', 'settings-note', '옷과 목도리 색, 피부, 머리 모양을 고르고 옷에 그림을 그릴 수 있어요. 로그인하면 저장돼요.'));
+      if (look.isAdmin()) {
+        const a = button('옷 그림 관리', '', () => {
+          this.modal.close();
+          look.openAdmin();
+        });
+        a.id = 'settings-admin';
+        box.append(a);
+      }
+      body.append(box);
+    }
     const app = this.installSection();
     if (app) body.append(app);
     if (this.pushEnabled) body.append(new NotifySettings(!!this.account(), this.install!).root);

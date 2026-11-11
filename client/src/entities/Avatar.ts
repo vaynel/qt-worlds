@@ -1,5 +1,12 @@
 import * as THREE from 'three';
-import { BENCH_SEAT_HEIGHT, type SeatKind } from '../../../shared/protocol';
+import {
+  BENCH_SEAT_HEIGHT,
+  OUTFIT_CELLS,
+  OUTFIT_PALETTE,
+  OUTFIT_SIZE,
+  type HairStyle,
+  type SeatKind,
+} from '../../../shared/protocol';
 
 /** Hip pivot height when standing (top of the leg pivots). */
 const HIP = 0.32;
@@ -22,12 +29,46 @@ export interface AvatarColors {
   hair: number;
 }
 
-export const DEFAULT_AVATAR: AvatarColors = {
+/** Colours plus hair style (M8 꾸미기). */
+export interface AvatarLook extends AvatarColors {
+  hairStyle: HairStyle;
+}
+
+export const DEFAULT_AVATAR: AvatarLook = {
   robe: 0xf1e4c8,
   scarf: 0xc8644a,
   skin: 0xf0c9a4,
   hair: 0x5a3e2b,
+  hairStyle: 'short',
 };
+
+/**
+ * Robe texture for a 16×16 pixel drawing: transparent cells take the robe
+ * colour. The drawing spans half the robe's circumference and repeats, so it
+ * shows on the front and on the back (see the robe's UV setup below).
+ */
+function patternData(pixels: string, robe: number, out: Uint8Array) {
+  const n = OUTFIT_SIZE;
+  for (let row = 0; row < n; row++) {
+    // DataTexture row 0 is the bottom of the robe (v = 0); the drawing starts at the top.
+    const texRow = n - 1 - row;
+    for (let col = 0; col < n; col++) {
+      const ch = pixels.charCodeAt(row * n + col);
+      // '0'-'9' = 48-57, 'a'-'f' = 97-102, '.' = transparent.
+      const idx = ch >= 48 && ch <= 57 ? ch - 48 : ch >= 97 && ch <= 102 ? ch - 87 : -1;
+      const c = idx >= 0 ? OUTFIT_PALETTE[idx] : robe;
+      const o = (texRow * n + col) * 4;
+      out[o] = (c >> 16) & 255;
+      out[o + 1] = (c >> 8) & 255;
+      out[o + 2] = c & 255;
+      out[o + 3] = 255;
+    }
+  }
+}
+
+/** Robe faces: 8 sides, a flat face centred on the front (+z). */
+const ROBE_SIDES = 8;
+const ROBE_THETA0 = -Math.PI / ROBE_SIDES;
 
 /** Gentle, warm variations so remote players are easy to tell apart. */
 const SCARVES = [0xc8644a, 0x5f8f6b, 0x4f78a6, 0xd2a03c, 0x9a5fa0, 0xc77a8a, 0x3f8f8f, 0x8a6a4a];
@@ -72,8 +113,22 @@ export class Avatar {
   private sitHeight = 0.61;
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
+  private readonly castShadow: boolean;
+  private readonly robeMat: THREE.MeshLambertMaterial;
+  private readonly scarfMat: THREE.MeshLambertMaterial;
+  private readonly skinMat: THREE.MeshLambertMaterial;
+  private readonly hairMat: THREE.MeshLambertMaterial;
+  private readonly hairGroup = new THREE.Group();
+  private hairGeos: THREE.BufferGeometry[] = [];
+  private look: AvatarLook;
+  /** Worn drawing (M8): texture on the robe's side, or null for the plain robe. */
+  private pattern: { pixels: string; texture: THREE.DataTexture; material: THREE.MeshLambertMaterial } | null = null;
+  /** Pattern textures alive across all avatars (tests check they are disposed on leave). */
+  static liveTextures = 0;
 
-  constructor(colors: AvatarColors = DEFAULT_AVATAR, castShadow = true) {
+  constructor(colors: AvatarColors | AvatarLook = DEFAULT_AVATAR, castShadow = true) {
+    this.castShadow = castShadow;
+    this.look = { hairStyle: 'short', ...colors };
     const mat = (color: number) => {
       const m = new THREE.MeshLambertMaterial({ color, flatShading: true });
       this.materials.push(m);
@@ -89,18 +144,23 @@ export class Avatar {
     };
 
     const robe = mat(colors.robe);
+    this.robeMat = robe;
     const dark = mat(0x6b4a33);
 
     this.root.add(this.body);
-    this.robe = part(new THREE.CylinderGeometry(0.26, 0.44, 0.95, 7), robe, 0, ROBE_MID, 0, this.body);
-    part(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 7), mat(colors.scarf), 0, 1.2, 0, this.body);
+    this.robe = part(new THREE.CylinderGeometry(0.26, 0.44, ROBE_H, ROBE_SIDES, 1, false, ROBE_THETA0), robe, 0, ROBE_MID, 0, this.body);
+    this.scarfMat = mat(colors.scarf);
+    part(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 7), this.scarfMat, 0, 1.2, 0, this.body);
 
     // Head pivots at the neck so it can bow in prayer.
     this.head.position.set(0, 1.25, 0);
     this.body.add(this.head);
-    part(new THREE.IcosahedronGeometry(0.27, 1), mat(colors.skin), 0, 0.23, 0, this.head);
-    const hair = part(new THREE.SphereGeometry(0.29, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.55), mat(colors.hair), 0, 0.27, -0.04, this.head);
-    hair.rotation.x = -0.35;
+    this.skinMat = mat(colors.skin);
+    part(new THREE.IcosahedronGeometry(0.27, 1), this.skinMat, 0, 0.23, 0, this.head);
+    this.hairMat = mat(colors.hair);
+    this.hairMat.side = THREE.DoubleSide;
+    this.head.add(this.hairGroup);
+    this.buildHair(this.look.hairStyle);
     const eye = mat(0x3a2a20);
     part(new THREE.SphereGeometry(0.035, 5, 4), eye, -0.09, 0.25, 0.245, this.head);
     part(new THREE.SphereGeometry(0.035, 5, 4), eye, 0.09, 0.25, 0.245, this.head);
@@ -127,6 +187,102 @@ export class Avatar {
     };
     this.shinL = shin(this.legL);
     this.shinR = shin(this.legR);
+  }
+
+  /**
+   * Hair styles from a few cheap primitives, all inside the head group so they
+   * follow every pose (bowing in prayer, sitting). Fronts stay open for the face.
+   */
+  private buildHair(style: HairStyle) {
+    for (const g of this.hairGeos) g.dispose();
+    this.hairGeos = [];
+    this.hairGroup.clear();
+    const add = (geo: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0) => {
+      this.hairGeos.push(geo);
+      const m = new THREE.Mesh(geo, this.hairMat);
+      m.position.set(x, y, z);
+      m.rotation.x = rx;
+      m.castShadow = this.castShadow;
+      this.hairGroup.add(m);
+      return m;
+    };
+    if (style === 'bald') return;
+    // The cap every style starts from (today's 짧은 머리).
+    add(new THREE.SphereGeometry(0.29, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.55), 0, 0.27, -0.04, -0.35);
+    // Open cylinders: theta 0 is the face (+z), so start past it and leave a gap there.
+    if (style === 'bob') {
+      add(new THREE.CylinderGeometry(0.29, 0.315, 0.24, 9, 1, true, Math.PI * 0.3, Math.PI * 1.4), 0, 0.17, -0.02);
+    } else if (style === 'long') {
+      add(new THREE.CylinderGeometry(0.29, 0.34, 0.5, 9, 1, true, Math.PI * 0.34, Math.PI * 1.32), 0, 0.04, -0.03);
+    } else if (style === 'tied') {
+      // A bun at the back with a short tail hanging from it.
+      add(new THREE.IcosahedronGeometry(0.115, 0), 0, 0.31, -0.28);
+      add(new THREE.ConeGeometry(0.08, 0.3, 6), 0, 0.12, -0.32, 0.25);
+    }
+  }
+
+  /** Colours and hair style (꾸미기). Cheap: material colours, and hair rebuilt only if the style changed. */
+  setLook(look: AvatarLook) {
+    const prev = this.look;
+    this.look = { ...look };
+    this.robeMat.color.setHex(look.robe);
+    this.scarfMat.color.setHex(look.scarf);
+    this.skinMat.color.setHex(look.skin);
+    this.hairMat.color.setHex(look.hair);
+    if (prev.hairStyle !== look.hairStyle) this.buildHair(look.hairStyle);
+    if (this.pattern && prev.robe !== look.robe) {
+      patternData(this.pattern.pixels, look.robe, this.pattern.texture.image.data as Uint8Array);
+      this.pattern.texture.needsUpdate = true;
+    }
+  }
+
+  get currentLook(): AvatarLook {
+    return { ...this.look };
+  }
+
+  /** Worn drawing on the robe (16×16 palette string), or null for the plain robe. */
+  setPattern(pixels: string | null) {
+    if (pixels !== null && pixels.length !== OUTFIT_CELLS) pixels = null;
+    if (pixels === null) {
+      if (!this.pattern) return;
+      this.robe.material = this.robeMat;
+      this.pattern.texture.dispose();
+      this.pattern.material.dispose();
+      this.pattern = null;
+      Avatar.liveTextures--;
+      return;
+    }
+    if (!this.pattern) {
+      const data = new Uint8Array(OUTFIT_CELLS * 4);
+      const texture = new THREE.DataTexture(data, OUTFIT_SIZE, OUTFIT_SIZE, THREE.RGBAFormat);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      // Crisp pixels: no smoothing, no mipmaps.
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      // The drawing covers half the circumference and repeats (front + back),
+      // centred on the front face: geometry u at the front is 1/(2·sides).
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.repeat.set(2, 1);
+      texture.offset.set(0.5 - 2 * (0.5 / ROBE_SIDES), 0);
+      const material = new THREE.MeshLambertMaterial({ map: texture, flatShading: true });
+      this.pattern = { pixels, texture, material };
+      Avatar.liveTextures++;
+    }
+    this.pattern.pixels = pixels;
+    patternData(pixels, this.look.robe, this.pattern.texture.image.data as Uint8Array);
+    this.pattern.texture.needsUpdate = true;
+    // Side gets the drawing; the top and bottom caps keep the plain robe colour.
+    this.robe.material = [this.pattern.material, this.robeMat, this.robeMat];
+  }
+
+  /** For tests: what is drawn on the robe (pixels and a checksum of the texture bytes). */
+  get patternInfo(): { pixels: string; checksum: number; filter: string } | null {
+    if (!this.pattern) return null;
+    const d = this.pattern.texture.image.data as Uint8Array;
+    let h = 0;
+    for (let i = 0; i < d.length; i++) h = (Math.imul(h, 31) + d[i]) >>> 0;
+    return { pixels: this.pattern.pixels, checksum: h, filter: this.pattern.texture.magFilter === THREE.NearestFilter ? 'nearest' : 'linear' };
   }
 
   /**
@@ -191,7 +347,9 @@ export class Avatar {
   }
 
   dispose(): void {
+    this.setPattern(null);
     for (const g of this.geometries) g.dispose();
+    for (const g of this.hairGeos) g.dispose();
     for (const m of this.materials) m.dispose();
   }
 }

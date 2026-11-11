@@ -27,6 +27,8 @@ export interface SocialOptions {
   tagView?: () => import('../world/NameTag').TagView;
   /** After a WebSocket reconnect (the server forgot room state). */
   onReconnect?: () => void;
+  /** Our own appearance (welcome, live after saving, hidden after reports). */
+  onLocalLook?: (look: import('../../../shared/protocol').Look | null) => void;
 }
 
 /**
@@ -67,7 +69,11 @@ export class Social {
       this.applyWelcome(options.welcome, false);
       net.on({
         welcome: (w) => this.applyWelcome(w, true),
-        join: (p) => this.remotes.add(p.id, p.name, p.guest === true),
+        join: (p) => this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null),
+        look: (id, look) => {
+          if (id === this.localId) this.o.onLocalLook?.(look);
+          else this.remotes.setLook(id, look);
+        },
         rename: (id, name) => {
           if (id === this.localId) {
             this.localName = name;
@@ -101,8 +107,9 @@ export class Social {
     this.localId = w.id;
     this.localName = w.name;
     this.remotes.clear();
-    for (const p of w.players) this.remotes.add(p.id, p.name, p.guest === true);
+    for (const p of w.players) this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null);
     this.localGuest = w.guest;
+    this.o.onLocalLook?.(w.look);
     this.o.onLocalName?.(w.name, w.guest);
     this.applyMats(w.mats);
     this.applyLogs(w.logs);
@@ -256,6 +263,12 @@ export class Social {
   }
 
   // ------------------------------------------------------------------ frame
+
+  /** Send our state on the next frame (tests turning the avatar). */
+  forceSend() {
+    this.lastSent.t = 0;
+    this.lastSent.yaw = NaN;
+  }
 
   private sendStateNow() {
     const net = this.o.net;

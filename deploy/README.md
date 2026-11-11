@@ -109,6 +109,7 @@ The app logs nicknames on join/leave and voice-room join, campfire chat *lengths
 - **Operator details live in `client/src/config/legal.ts`**: `OPERATOR_NAME`, `PRIVACY_OFFICER_NAME`, `PRIVACY_CONTACT` (email) and `EFFECTIVE_DATE`. Until the placeholders are replaced, every `npm run build` prints a loud `WARNING: LEGAL PLACEHOLDERS` (the build still succeeds). Rebuild the image after editing.
 - Consent: sign-up records `users.terms_agreed_at` and `users.terms_version` (migration v6). When the texts change materially, bump `TERMS_VERSION` in `shared/protocol.ts` and `EFFECTIVE_DATE`. Every account then sees the consent sheet once, and saving or sharing waits until they agree.
 - Hourly 파기 sweep (server): expired sessions, group chat older than 7 days, lantern copies (taken down: after 1 day; expired: 1 day after leaving the hill), and sign-ups that never chose a nickname (after 1 day). SQLite runs with `secure_delete=ON`.
+- 꾸미기 (M8, migration v7): `users.appearance` (palette indices JSON), `users.outfit_slot`, `users.outfit_strikes`, `users.outfit_ban_until`, tables `outfits` (16×16 drawings as 256 palette-index characters, content hash) and `outfit_reports`. A drawing with 3 distinct reporters is hidden for everyone but its owner; every 3 hidden drawings pause uploads for 7 days. Replaced drawings that were reported are kept 30 days after their last report for review, then swept. Account deletion removes all of it (cascades); the export includes appearance, drawings and the user's own reports.
 - 내 데이터 내려받기: `GET /api/me/export`; 회원 탈퇴: `POST /api/me/delete` (`{ nickname }`). Both are rate-limited. The export limit can be set with `EXPORT_RATE_LIMIT` (default 10 per hour per user/IP).
 
 ## 6. Environment reference
@@ -125,6 +126,7 @@ The app logs nicknames on join/leave and voice-room join, campfire chat *lengths
 | `AUTH_RATE_LIMIT` | 30 | Login starts/callbacks per IP per minute |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | from `npx web-push generate-vapid-keys` | Web Push; notifications are off (UI hidden) if missing. See §8 |
 | `VAPID_SUBJECT` | `mailto:you@example.com` | Contact for push services (`mailto:` or `https:` URL). Required with the keys |
+| `WORLDS_ADMIN_EMAILS` | your Google email | Comma-separated, matched against the verified Google email. These accounts see ⚙ → 옷 그림 관리 (reported outfits: 숨김 유지 / 복구 / 그림 금지 n일). Everyone else gets 404 from `/api/admin/*`. Empty = no admin |
 
 ## 7. Without Docker (production mode on the host)
 

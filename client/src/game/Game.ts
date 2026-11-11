@@ -31,6 +31,13 @@ import { Interior } from '../world/Interior';
 import { World } from '../world/World';
 import { BENCHES, BENCH_SEATS, CAMPFIRE, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
 import { Devotion } from './Devotion';
+import type { Look } from '../../../shared/protocol';
+import { Avatar, DEFAULT_AVATAR } from '../entities/Avatar';
+import { avatarLook, outfitCache, safeAppearance } from './looks';
+import { CustomizeView, hiddenNotice, type MyLook } from '../ui/CustomizeView';
+import { ReportView } from '../ui/ReportView';
+import { AdminView } from '../ui/AdminView';
+import { getMe } from '../net/api';
 import { Social } from './Social';
 
 export interface GameSession {
@@ -103,6 +110,15 @@ export class Game {
   private pathGlow: PathGlow | null = null;
   private readonly guideDue: boolean;
   private readonly raycaster = new THREE.Raycaster();
+  /** 꾸미기 (M8). */
+  private readonly customize = new CustomizeView((mine) => this.applyMine(mine));
+  private readonly adminView = new AdminView();
+  private reportView!: ReportView;
+  private isAdmin = false;
+  private localLook: Look | null = null;
+  private localOutfit: number | null = null;
+  private noticeEl: HTMLElement | null = null;
+  private noticeDismissed = new Set<number>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -173,6 +189,7 @@ export class Game {
       onReconnect: () => this.voice?.rejoinAfterReconnect(),
       tagView: () => this.tagView(),
       onWord: (word: WordPassage) => void this.devotion?.setWord(word),
+      onLocalLook: (look) => this.applyLocalLook(look),
     });
 
     this.audio = session.audio;
@@ -207,6 +224,12 @@ export class Game {
       onUnread: (n) => this.hud.setGroupsUnread(n),
     });
     this.groupsView.setMe(session.account?.id ?? null);
+    this.reportView = new ReportView(this.social.remotes, () => !!this.account, (reason) => this.loginPrompt.open(reason, ''));
+    if (session.account) {
+      void getMe().then((me) => {
+        this.isAdmin = (me as { admin?: boolean }).admin === true;
+      });
+    }
     if (session.account) void this.groupsView.refreshUnread();
     session.net?.on({
       groupChat: (m) => this.groupsView.receive(m),
@@ -255,6 +278,11 @@ export class Game {
       () => this.guide.open((started) => started && this.showPaths()),
       this.installGuide,
       session.pushEnabled,
+      {
+        open: () => this.openCustomize(),
+        isAdmin: () => this.isAdmin,
+        openAdmin: () => void this.adminView.open(),
+      },
     );
     // Tapping a 🕊️ notification while the app is open: show today's word.
     window.addEventListener('worlds-notification-click', () => {
@@ -272,6 +300,11 @@ export class Game {
       else this.worship.open(this.inCloset, true);
     });
     this.hud.bind('settings', () => this.settings.open());
+    this.hud.bind('look', () => this.openCustomize());
+    // "함께 N명": who is here (and 🚩 for drawn outfits).
+    this.hud.onPeople(() => {
+      if (session.net) this.reportView.openList();
+    });
     this.hud.bind('groups', () => {
       if (!this.account) return needLogin('로그인하면 모임을 만들고, 모임 사람들과만 등불을 나눌 수 있어요.');
       void this.groupsView.open();
@@ -300,7 +333,7 @@ export class Game {
       this.tapStart = null;
       if (!s0 || this.inCloset) return;
       if (Math.hypot(e.clientX - s0.x, e.clientY - s0.y) < 8 && performance.now() - s0.t < 450) {
-        if (!this.devotion.tap(e.clientX, e.clientY, canvas)) this.tapLantern(e.clientX, e.clientY);
+        if (!this.devotion.tap(e.clientX, e.clientY, canvas) && !this.tapLantern(e.clientX, e.clientY)) this.tapPerson(e.clientX, e.clientY);
       }
     });
     // Typing must not leave movement keys "held".
@@ -400,19 +433,92 @@ export class Game {
     }
   }
 
-  /** Tap on a lantern: read it if close enough. */
-  private tapLantern(clientX: number, clientY: number) {
+  /** Tap on a lantern: read it if close enough. True when a lantern was hit. */
+  private tapLantern(clientX: number, clientY: number): boolean {
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const id = this.lanterns.pick(this.raycaster);
-    if (id === null) return;
+    if (id === null) return false;
     const p = this.player.position;
     if (this.lanterns.distanceTo(id, p.x, p.z) > LANTERN_TAP_REACH) {
       this.hud.toast('등불에 조금 더 가까이 가 주세요.', this.elapsed);
-      return;
+      return true;
     }
     void this.openLantern(id);
+    return true;
+  }
+
+  /** Tap on another person (avatar or name tag): their card, with 🚩 옷 신고. */
+  private tapPerson(clientX: number, clientY: number) {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const id = this.social.remotes.pick(this.raycaster);
+    if (id) this.reportView.openPlayer(id);
+  }
+
+  // ------------------------------------------------------------------ 꾸미기 (M8)
+
+  private openCustomize(tab?: 'color' | 'hair' | 'draw') {
+    if (!this.account) {
+      this.loginPrompt.open('로그인하면 내 모습의 색과 머리 모양을 고르고, 옷에 그림을 그려 입을 수 있어요.', '');
+      return;
+    }
+    this.customize.open(tab).catch((err) => this.hud.toast(err instanceof ApiError ? err.message : '꾸미기를 열지 못했어요.', this.elapsed));
+  }
+
+  /** Right after saving (the server's 'look' message follows with the same data). */
+  private applyMine(mine: MyLook) {
+    const worn = mine.worn !== null ? mine.slots[mine.worn] : null;
+    if (!mine.appearance && !worn) return this.applyLocalLook(null);
+    const look: Look = { ...(mine.appearance ?? { r: 0, s: 0, k: 1, h: 0, y: 0 }) };
+    if (worn) Object.assign(look, { o: worn.id, oh: worn.hash, ...(worn.hidden ? { hid: true } : {}) });
+    this.applyLocalLook(look);
+  }
+
+  /** Our own avatar: saved colours/hair and the worn drawing (even when hidden for others). */
+  private applyLocalLook(raw: Look | null) {
+    const a = raw ? safeAppearance(raw) : null;
+    this.localLook = raw && a ? { ...raw, ...a } : null;
+    const avatar = this.player.avatar;
+    avatar.setLook(a ? avatarLook(a) : DEFAULT_AVATAR);
+    const o = this.localLook && Number.isInteger(this.localLook.o) ? (this.localLook.o as number) : null;
+    if (o !== this.localOutfit) {
+      this.localOutfit = o;
+      if (o === null) avatar.setPattern(null);
+      else outfitCache.load(o, (px) => this.localOutfit === o && avatar.setPattern(px));
+    }
+    this.showHiddenNotice(this.localLook?.hid === true && o !== null ? o : null);
+  }
+
+  /** "신고가 쌓여 옷 그림이 숨겨졌어요" for the owner (once per drawing, dismissable). */
+  private showHiddenNotice(outfitId: number | null) {
+    if (outfitId === null || this.noticeDismissed.has(outfitId)) {
+      this.noticeEl?.remove();
+      this.noticeEl = null;
+      return;
+    }
+    if (this.noticeEl) return;
+    const box = el('section', 'card outfit-notice');
+    box.id = 'outfit-notice';
+    box.setAttribute('role', 'status');
+    const actions = el('div', 'outfit-notice-actions');
+    const fix = button('그림 고치기', 'primary', () => {
+      this.noticeDismissed.add(outfitId);
+      this.showHiddenNotice(null);
+      this.openCustomize('draw');
+    });
+    const close = button('닫기', 'ghost', () => {
+      this.noticeDismissed.add(outfitId);
+      this.showHiddenNotice(null);
+    });
+    close.id = 'outfit-notice-close';
+    actions.append(fix, close);
+    box.append(hiddenNotice(), actions);
+    box.addEventListener('pointerdown', (e) => e.stopPropagation());
+    document.getElementById('app')!.append(box);
+    this.noticeEl = box;
   }
 
   /** First login on a device with an M3 local word book: offer to move it into the account. */
@@ -527,6 +633,22 @@ export class Game {
       voiceStats: () => this.voice?.stats(),
       voiceReleaseMic: () => this.voice?.releaseMic(),
       dropSocket: () => this.session.net?.debugDrop(),
+      /** Screen position of a remote avatar's chest (tap it like a player would). */
+      remoteScreen: (id: string) => {
+        const v = this.social.remotes.headWorld(id);
+        if (!v) return null;
+        v.project(this.camera);
+        const r = this.canvas.getBoundingClientRect();
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, z: v.z };
+      },
+      openCustomize: (tab?: 'color' | 'hair' | 'draw') => this.openCustomize(tab),
+      /** Painter/customize state right now (the debug object lags a few frames). */
+      customize: () => this.customize.describe(),
+      /** Turn our avatar (screenshots). */
+      face: (yaw: number) => {
+        this.player.yaw = yaw;
+        this.social.forceSend();
+      },
       /** Campfire log seats and chat radius (shared protocol numbers). */
       logSeats: () => ({ campfire: CAMPFIRE, seats: LOG_SEATS.map((s) => ({ ...s })) }),
       /** Plaza bench seats (shared protocol numbers). */
@@ -615,7 +737,8 @@ export class Game {
     if (this.inCloset) {
       this.interior.update(dt, this.elapsed, this.world.dayNight.night);
       this.renderer.render(this.interior.scene, this.interior.camera);
-    } else {
+    } else if (!this.customize.isOpen || this.frame % 4 === 0) {
+      // The 꾸미기 preview has its own renderer: draw the world behind it less often.
       this.renderer.render(this.scene, this.camera);
     }
 
@@ -718,6 +841,19 @@ export class Game {
         guide: this.guide.describe(),
         voice: this.voice?.describe() ?? null,
         localTag: this.localTag ? { text: this.localTag.text, guest: this.localTag.isGuest, visible: this.localTag.visible } : null,
+      },
+      m8: {
+        look: this.localLook,
+        avatar: (() => {
+          const l = this.player.avatar.currentLook;
+          return { robe: `#${l.robe.toString(16).padStart(6, '0')}`, hairStyle: l.hairStyle, pattern: this.player.avatar.patternInfo };
+        })(),
+        liveTextures: Avatar.liveTextures,
+        outfitRequests: outfitCache.requests,
+        notice: !!this.noticeEl,
+        admin: this.isAdmin,
+        customize: this.customize.describe(),
+        report: this.reportView?.isOpen ?? false,
       },
     };
   }

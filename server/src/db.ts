@@ -162,6 +162,34 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN terms_agreed_at INTEGER;
   ALTER TABLE users ADD COLUMN terms_version TEXT;
   `,
+  // v7: 꾸미기 (M8): appearance as validated palette indices, pixel outfits
+  // (content-hashed, 3 slots, one worn), outfit reports, strikes and upload bans.
+  `
+  ALTER TABLE users ADD COLUMN appearance TEXT;
+  ALTER TABLE users ADD COLUMN outfit_slot INTEGER;
+  ALTER TABLE users ADD COLUMN outfit_strikes INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN outfit_ban_until INTEGER;
+  CREATE TABLE outfits (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot INTEGER CHECK (slot IS NULL OR (slot >= 0 AND slot < 3)),
+    hash TEXT NOT NULL,
+    pixels TEXT NOT NULL CHECK (length(pixels) = 256),
+    created_at INTEGER NOT NULL,
+    hidden_at INTEGER,
+    review TEXT CHECK (review IS NULL OR review IN ('kept', 'restored')),
+    reviewed_at INTEGER
+  );
+  CREATE UNIQUE INDEX outfits_user_slot ON outfits(user_id, slot) WHERE slot IS NOT NULL;
+  CREATE TABLE outfit_reports (
+    outfit_id INTEGER NOT NULL REFERENCES outfits(id) ON DELETE CASCADE,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (reason IN ('inappropriate', 'hate', 'other')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (outfit_id, reporter_id)
+  );
+  CREATE INDEX outfit_reports_reporter ON outfit_reports(reporter_id);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

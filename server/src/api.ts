@@ -1,11 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { safeReturn, type MockProvider, type OidcFlow, type Sessions, type SessionUser, type Users } from './auth.js';
+import { adminEmails, isAdmin, safeReturn, type MockProvider, type OidcFlow, type Sessions, type SessionUser, type Users } from './auth.js';
 import { HttpError, originAllowed, RateLimiter, readJson, redirect, requestInfo, sendJson, type RequestInfo } from './http.js';
 import type { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 import type { GroupMessage } from '../../shared/protocol.js';
 import { TokenBucket } from './rateLimit.js';
 import type { PushService } from './push.js';
 import type { AccountService } from './account.js';
+import type { LookService } from './looks.js';
 import { TERMS_VERSION } from '../../shared/protocol.js';
 
 /** What the API tells the realtime room about. */
@@ -17,6 +18,8 @@ export interface RoomEvents {
   voiceCount(groupId: number): number;
   groupChat(message: GroupMessage, update: boolean): void;
   groupRead(userId: number, groupId: number, lastReadId: number): void;
+  /** 꾸미기: that account's appearance or worn drawing changed (or was hidden/restored). */
+  lookChanged(userId: number): void;
   /** 회원 탈퇴: take the lanterns down for everyone and drop that account's connections. */
   accountDeleted(userId: number, lanternIds: number[]): void;
 }
@@ -100,6 +103,7 @@ export interface ApiDeps {
   chat: GroupChatService;
   push: PushService;
   accounts: AccountService;
+  looks: LookService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -139,6 +143,10 @@ export class Api {
   private readonly exportLimit = new RateLimiter(Number(process.env.EXPORT_RATE_LIMIT ?? 10), 3_600_000);
   private readonly deleteLimit = new RateLimiter(5, 3_600_000);
   private readonly deleteIpLimit = new RateLimiter(20, 3_600_000);
+  private readonly lookLimit = new RateLimiter(Number(process.env.LOOK_RATE_LIMIT ?? 60), 3_600_000);
+  private readonly outfitLimit = new RateLimiter(Number(process.env.OUTFIT_RATE_LIMIT ?? 20), 3_600_000);
+  private readonly reportLimit = new RateLimiter(30, 3_600_000);
+  private readonly admins = adminEmails();
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
 
@@ -209,6 +217,7 @@ export class Api {
         // Accounts from before M7 (or after a terms update) are asked once, gently.
         needsConsent: !!user && !!user.nickname && !user.consented,
         termsVersion: TERMS_VERSION,
+        ...(isAdmin(user, this.admins) ? { admin: true } : {}),
       });
     });
     r(
@@ -276,6 +285,64 @@ export class Api {
       },
       open,
     );
+
+    // ---------------- 꾸미기 (M8): appearance and pixel outfits (signed-in accounts only)
+    r('GET', '/api/me/look', ({ res, user }) => sendJson(res, 200, d.looks.mine(this.signedIn(user).id)));
+    r('PUT', '/api/me/look', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      this.limit(this.lookLimit, `user:${u.id}`);
+      const body = await readJson(req);
+      const mine = d.looks.setLook(u.id, body.appearance, body.worn);
+      d.room.lookChanged(u.id);
+      sendJson(res, 200, mine);
+    });
+    r('PUT', '/api/me/outfits/:slot', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const slot = Number(params[0]);
+      const body = await readJson(req);
+      this.limit(this.outfitLimit, `user:${u.id}`);
+      const out = d.looks.saveOutfit(u.id, slot, body.pixels);
+      if (out.wornChanged) d.room.lookChanged(u.id);
+      sendJson(res, 200, out.mine);
+    });
+    r('DELETE', '/api/me/outfits/:slot', ({ res, user, params }) => {
+      const u = this.signedIn(user);
+      const out = d.looks.deleteOutfit(u.id, Number(params[0]));
+      if (out.wornChanged) d.room.lookChanged(u.id);
+      sendJson(res, 200, out.mine);
+    });
+    // Pixels by id, batched (?ids=1,2,3): a crowd joining costs one small request.
+    r('GET', '/api/outfits', ({ res, user, query }) => {
+      const ids = [...new Set((query.get('ids') ?? '').split(',').map(Number))].filter((n) => Number.isInteger(n) && n > 0).slice(0, 60);
+      sendJson(res, 200, { outfits: d.looks.pixels(ids, user?.id ?? null, isAdmin(user, this.admins)) }, { 'cache-control': 'private, max-age=60' });
+    });
+    r('POST', '/api/outfits/:id/report', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const oid = id(params[0]);
+      const body = await readJson(req);
+      this.limit(this.reportLimit, `user:${u.id}`);
+      const out = d.looks.report(u.id, oid, body.reason);
+      if (out.changed) {
+        d.room.lookChanged(out.ownerId);
+        console.log(`outfit ${oid} hidden after ${out.reporters} reports`);
+      }
+      sendJson(res, 200, { ok: true, duplicate: out.duplicate });
+    });
+
+    // ---------------- admin (WORLDS_ADMIN_EMAILS). Everyone else gets a plain 404.
+    r('GET', '/api/admin/outfits', ({ res, user }) => {
+      this.admin(user);
+      sendJson(res, 200, { outfits: d.looks.adminList() });
+    }, open);
+    r('POST', '/api/admin/outfits/:id', async ({ req, res, user, params }) => {
+      const u = this.admin(user);
+      const oid = id(params[0]);
+      const body = await readJson(req);
+      const out = d.looks.adminAction(oid, body.action, body.days);
+      d.room.lookChanged(out.ownerId);
+      console.log(`admin ${u.id}: outfit ${oid} ${String(body.action).slice(0, 10)}`);
+      sendJson(res, 200, { ok: true });
+    }, open);
 
     // ---------------- word book (owner only)
     r('GET', '/api/wordbook', ({ res, user }) => sendJson(res, 200, d.wordbook.list(this.signedIn(user).id)));
@@ -491,6 +558,11 @@ export class Api {
 
   private limit(limiter: RateLimiter, key: string) {
     if (!limiter.hit(key)) throw new HttpError(429, 'rate_limited', '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.');
+  }
+
+  private admin(user: SessionUser | null): SessionUser {
+    if (!user || !isAdmin(user, this.admins)) throw new HttpError(404, 'not_found', '찾을 수 없어요.');
+    return user;
   }
 
   /** Writes need an account with a nickname; guests get a gentle 401. */

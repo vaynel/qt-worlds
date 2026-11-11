@@ -177,10 +177,9 @@ try {
   });
   const buildOut = `${build.stdout}\n${build.stderr}`;
   check('client build succeeds', build.status === 0, build.status === 0 ? '' : buildOut.slice(-400));
-  check(
-    'build prints a loud LEGAL PLACEHOLDERS warning naming the fields to fill',
-    /WARNING: LEGAL PLACEHOLDERS/.test(buildOut) && /OPERATOR_NAME/.test(buildOut) && /PRIVACY_CONTACT/.test(buildOut) && /src\/config\/legal\.ts/.test(buildOut),
-  );
+  // Operator details are filled in (src/config/legal.ts), so the placeholder
+  // warning must be gone; it reappears only if a field is reset to a placeholder.
+  check('build has no LEGAL PLACEHOLDERS warning (operator details filled in)', !/WARNING: LEGAL PLACEHOLDERS/.test(buildOut));
   check('build emits privacy.html and terms.html', existsSync(resolve(DIST, 'privacy.html')) && existsSync(resolve(DIST, 'terms.html')));
   const sw = readFileSync(resolve(DIST, 'sw.js'), 'utf-8');
   const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(sw)[1]);
@@ -215,7 +214,7 @@ try {
   }
   check('/privacy.html also serves the page', (await fetch(`${ORIGIN}/privacy.html`)).status === 200);
   const privacyHtml = await (await fetch(`${ORIGIN}/privacy`)).text();
-  check('pages show the placeholders until the operator fills them in', privacyHtml.includes('[운영자 이름 입력 필요]') && privacyHtml.includes('[연락 이메일 입력 필요]'));
+  check('pages show the real operator details, no placeholders', !privacyHtml.includes('입력 필요') && privacyHtml.includes('QT 월드 운영팀'));
   check('an unknown extensionless path still gets the SPA', (await (await fetch(`${ORIGIN}/somewhere`)).text()).includes('id="world-canvas"'));
 
   browser = await launch();

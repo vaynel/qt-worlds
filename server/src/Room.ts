@@ -18,6 +18,7 @@ import {
   validateChat,
   validateNickname,
   type ErrorCode,
+  type Look,
   type PlayerInfo,
   type PlayerSnap,
   type ServerMessage,
@@ -27,6 +28,7 @@ import type { RoomEvents } from './api.js';
 import type { SessionUser, Users } from './auth.js';
 import type { DailyWord } from './dailyWord.js';
 import type { GroupService, LanternService } from './services.js';
+import type { LookService } from './looks.js';
 import { TokenBucket } from './rateLimit.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
@@ -62,6 +64,9 @@ interface Client {
   testClient: boolean;
   /** Last accepted position time (ms) for the speed check; 0 = none yet. */
   lastStateAt: number;
+  /** Appearance as others see it, and as this account itself sees it (hidden drawing flagged). */
+  lookPublic: Look | null;
+  lookOwn: Look | null;
 }
 
 /** Fastest legit movement (run speed 7.5 m/s) with headroom for lag. */
@@ -83,6 +88,7 @@ export interface RoomOptions {
   users?: Users | null;
   groups?: GroupService | null;
   lanterns?: LanternService | null;
+  looks?: LookService | null;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -148,6 +154,8 @@ export class Room implements RoomEvents {
       groupIds: user && this.options.groups ? this.options.groups.groupIds(user.id) : new Set(),
       testClient: false,
       lastStateAt: 0,
+      lookPublic: null,
+      lookOwn: null,
     };
     client.helloTimer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
     this.clients.set(client.id, client);
@@ -430,9 +438,10 @@ export class Room implements RoomEvents {
     client.joined = true;
     client.name = name;
     client.baseName = base;
+    this.loadLook(client);
 
     const players: PlayerInfo[] = [];
-    for (const c of this.clients.values()) if (c.joined && c !== client) players.push({ id: c.id, name: c.name, guest: c.userId === null });
+    for (const c of this.clients.values()) if (c.joined && c !== client) players.push(this.info(c, client));
     this.send(client, {
       t: 'welcome',
       id: client.id,
@@ -446,10 +455,43 @@ export class Room implements RoomEvents {
       word: this.wordFor(client),
       account: client.userId !== null && client.accountName ? { id: client.userId, nickname: client.accountName } : null,
       guest: client.userId === null,
+      look: client.lookOwn,
     });
     this.sendLanterns(client);
-    this.broadcast({ t: 'join', player: { id: client.id, name, guest: client.userId === null } }, client);
+    for (const c of this.clients.values()) {
+      if (c.joined && c !== client) this.send(c, { t: 'join', player: this.info(client, c) });
+    }
     this.log(`join ${name} (${client.id}), players=${this.playerCount}`);
+  }
+
+  // ---------------------------------------------------------------- looks (M8)
+
+  private loadLook(c: Client) {
+    const looks = this.options.looks;
+    c.lookPublic = c.userId !== null && looks ? looks.lookFor(c.userId, false) : null;
+    c.lookOwn = c.userId !== null && looks ? looks.lookFor(c.userId, true) : null;
+  }
+
+  /** What `viewer` sees of `c`: the same account sees its own hidden drawing, others don't. */
+  private lookSeenBy(c: Client, viewer: Client): Look | null {
+    return c.userId !== null && c.userId === viewer.userId ? c.lookOwn : c.lookPublic;
+  }
+
+  private info(c: Client, viewer: Client): PlayerInfo {
+    const look = this.lookSeenBy(c, viewer);
+    return { id: c.id, name: c.name, guest: c.userId === null, ...(look ? { look } : {}) };
+  }
+
+  /** Appearance saved, drawing worn/edited, hidden or restored: everyone sees it live. */
+  lookChanged(userId: number) {
+    for (const c of this.clients.values()) {
+      if (c.userId !== userId) continue;
+      this.loadLook(c);
+      if (!c.joined) continue;
+      for (const v of this.clients.values()) {
+        if (v.joined) this.send(v, { t: 'look', id: c.id, look: this.lookSeenBy(c, v) });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- lanterns

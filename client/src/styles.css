@@ -3493,3 +3493,460 @@ body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
   flex: none;
   min-height: 36px;
 }
+
+/* ---------- M8: 꾸미기 (customize), 옷 그리기 (painter), 신고, 관리 ---------- */
+
+.net-status[role='button'] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.net-status[role='button']:hover {
+  text-decoration: underline;
+}
+
+.chip {
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #fffdf7;
+  border: 1px solid rgba(176, 120, 72, 0.35);
+  min-height: 36px;
+}
+.chip[aria-pressed='true'],
+.chip[aria-checked='true'] {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff8ea;
+}
+.chip:disabled {
+  opacity: 0.45;
+}
+.chip.big-chip {
+  min-height: 44px;
+  padding: 9px 14px;
+}
+.chip.ghost-chip {
+  background: transparent;
+  color: var(--ink-soft);
+}
+
+.sheet.look {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+}
+.look-stage {
+  position: relative;
+  margin: 0 16px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #f3e7cf;
+  flex: none;
+}
+.look-preview {
+  display: block;
+  width: 100%;
+  height: 210px;
+  cursor: grab;
+  touch-action: none;
+}
+.look-hint {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.look-turn {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+}
+.look-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 12px 16px 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f4e8d2;
+  flex: none;
+}
+.look-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 9px 6px;
+  min-height: 40px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+.look-tab[aria-selected='true'] {
+  background: #fffaf0;
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(74, 52, 38, 0.15);
+}
+.look-body {
+  padding: 10px 16px 6px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.look-row {
+  margin-bottom: 12px;
+}
+.look-swatches,
+.painter-palette {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 7px;
+}
+.swatch {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border-radius: 10px;
+  border: 2px solid rgba(74, 52, 38, 0.18);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08);
+}
+.swatch.big {
+  min-height: 34px;
+}
+.swatch[aria-checked='true'] {
+  border-color: var(--ink);
+  box-shadow:
+    0 0 0 2px #fffaf0,
+    0 0 0 4px var(--accent);
+}
+.look-styles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.look-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--paper-line);
+  flex: none;
+}
+.look-foot .primary {
+  margin-left: auto;
+  min-height: 44px;
+}
+.look-status {
+  margin: 0;
+  font-size: 0.8rem;
+  flex: 1;
+}
+.look-slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.look-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 12px;
+  font-size: 0.74rem;
+  min-height: 72px;
+  justify-content: center;
+}
+.look-slot[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+  background: #fff3df;
+}
+.slot-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  image-rendering: pixelated;
+  border: 1px solid rgba(74, 52, 38, 0.2);
+  flex: none;
+}
+.look-ban {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fbe3d6;
+  font-size: 0.82rem;
+}
+.outfit-hidden-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fbe3d6;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.outfit-hidden-note a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.painter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.painter.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.painter-grid {
+  display: block;
+  touch-action: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px rgba(74, 52, 38, 0.25);
+  cursor: crosshair;
+  image-rendering: pixelated;
+}
+.painter-palette {
+  width: 100%;
+}
+.painter-palette .swatch {
+  min-height: 32px;
+}
+.painter-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* Worship player docked at the top on narrow screens: the sheet takes the rest. */
+@media (max-width: 999px) {
+  body.overlay-open.worship-on .sheet.look,
+  body.overlay-open.worship-on .sheet.admin-sheet {
+    height: 100%;
+    border-radius: 18px 18px 0 0;
+  }
+  body.overlay-open.worship-on .look-preview {
+    height: 150px;
+  }
+  /* Painting with the player docked: a smaller preview leaves room for the grid. */
+  body.overlay-open.worship-on .sheet.look.drawing .look-preview {
+    height: 104px;
+  }
+}
+@media (max-width: 480px) {
+  .look-preview {
+    height: 180px;
+  }
+  .sheet.look .book-top {
+    padding: 8px 14px;
+  }
+}
+
+/* 신고 */
+.sheet.report-sheet {
+  width: min(420px, 100%);
+}
+.report-body {
+  padding: 0 18px 18px;
+}
+.report-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.report-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--paper-line);
+  list-style: none;
+}
+.report-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.report-guest {
+  color: var(--ink-soft);
+}
+.report-btn {
+  flex: none;
+}
+.report-reasons {
+  margin-top: 12px;
+}
+
+/* Hidden-outfit notice for the owner */
+.outfit-notice {
+  position: absolute;
+  z-index: 25;
+  left: 50%;
+  top: calc(var(--safe-top) + 168px);
+  transform: translateX(-50%);
+  width: min(380px, calc(100vw - 24px));
+  padding: 12px 14px;
+  pointer-events: auto;
+}
+.outfit-notice .outfit-hidden-note {
+  margin: 0 0 8px;
+}
+.outfit-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 관리 */
+.sheet.admin-sheet {
+  width: min(560px, 100%);
+}
+.admin-loading {
+  padding: 18px;
+}
+.admin-body {
+  padding: 0 16px 16px;
+}
+.admin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.admin-item {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--paper-line);
+}
+.admin-thumb {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  image-rendering: pixelated;
+  border: 1px solid rgba(74, 52, 38, 0.25);
+}
+.admin-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.84rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.admin-state {
+  color: #4f7a52;
+  font-weight: 700;
+}
+.admin-state.hidden {
+  color: var(--accent);
+}
+.admin-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.admin-ban-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.admin-days {
+  width: 64px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(176, 120, 72, 0.4);
+  font-size: 16px;
+}
+
+/* Wide screens: preview on the left, tabs and painter on the right. */
+@media (min-width: 760px) {
+  .sheet.look {
+    display: grid;
+    width: min(820px, 100%);
+    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: min(700px, calc(var(--vvh, 100dvh) - 32px));
+    overflow: hidden;
+  }
+  .sheet.look .painter-palette {
+    grid-template-columns: repeat(16, minmax(0, 1fr));
+    gap: 5px;
+    max-width: 440px;
+  }
+  .sheet.look .painter-palette .swatch {
+    min-height: 0;
+  }
+  .sheet.look .look-swatches {
+    grid-template-columns: repeat(8, 40px);
+  }
+  .sheet.look > .book-top {
+    grid-column: 1 / -1;
+  }
+  .sheet.look > .look-stage {
+    grid-column: 1;
+    grid-row: 2 / 5;
+    margin: 0 0 16px 16px;
+    min-height: 360px;
+  }
+  .sheet.look .look-preview {
+    height: 100%;
+    min-height: 360px;
+  }
+  .sheet.look > .look-tabs {
+    grid-column: 2;
+    margin-top: 0;
+  }
+  .sheet.look > .look-body {
+    grid-column: 2;
+  }
+  .sheet.look > .look-foot {
+    grid-column: 2;
+  }
+}
+
+/* 꾸미기 HUD button: a small shirt icon (text label on desktop only). */
+.look-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tool-icon {
+  width: 16px;
+  height: 16px;
+  fill: #e9b9a6;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  flex: none;
+}
+body.touch .look-tool {
+  padding: 6px 9px;
+}
+body.touch .look-tool .tool-label {
+  display: none;
+}
+body.touch #tools {
+  gap: 4px;
+}
+body.touch .tool {
+  padding: 6px 8px;
+}
+
+body.touch .tool.gear {
+  padding: 6px 9px;
+}

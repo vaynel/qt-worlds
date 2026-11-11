@@ -2,6 +2,7 @@ import { cleanText, GROUP_CHAT_DAYS, nicknameKey, TERMS_VERSION } from '../../sh
 import type { DB } from './db.js';
 import { HttpError } from './http.js';
 import { LANTERN_DAYS } from './services.js';
+import type { LookService } from './looks.js';
 
 const DAY_MS = 86_400_000;
 /** A 내린 lantern's copy is kept this long (the 10-a-day limit counts it), then deleted. */
@@ -31,7 +32,10 @@ export interface DeletionResult {
  * hourly 파기 sweep for lantern copies and unfinished sign-ups.
  */
 export class AccountService {
-  constructor(private readonly db: DB) {}
+  constructor(
+    private readonly db: DB,
+    private readonly looks: LookService | null = null,
+  ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
   export(userId: number) {
@@ -197,6 +201,7 @@ export class AccountService {
           ? { daily: prefs.daily === 1, dailyTimeMinutes: prefs.daily_time, prayer: prefs.prayer === 1, updatedAt: iso(prefs.updated_at) }
           : null,
       },
+      appearance: this.looks?.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
       retention: {
         groupMessagesDays: GROUP_CHAT_DAYS,
@@ -266,7 +271,8 @@ export class AccountService {
 
       // Everything else cascades from users: sessions, word book pages, meditations,
       // lanterns (→ their reactions), my reactions, my saved lanterns, memberships,
-      // read pointers, push subscriptions and preferences.
+      // read pointers, push subscriptions and preferences, appearance and strikes
+      // (columns on users), my outfit drawings (→ reports about them) and my reports.
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
       const remainingGroups = memberOf.filter((g) => !deletedGroups.includes(g));
@@ -279,13 +285,14 @@ export class AccountService {
    *  - lantern copies: 내린 ones after a day, expired ones a day after leaving the hill;
    *  - sign-ups that never chose a nickname nor agreed to the terms, after a day.
    */
-  sweep(now = Date.now()): { lanterns: number; signups: number } {
+  sweep(now = Date.now()): { lanterns: number; signups: number; outfits: number } {
     const lanterns = this.db
       .prepare('DELETE FROM lanterns WHERE (removed_at IS NOT NULL AND removed_at < ?) OR created_at < ?')
       .run(now - REMOVED_LANTERN_GRACE_MS, now - LANTERN_DAYS * DAY_MS - EXPIRED_LANTERN_GRACE_MS).changes;
     const signups = this.db
       .prepare('DELETE FROM users WHERE nickname IS NULL AND terms_agreed_at IS NULL AND created_at < ?')
       .run(now - ABANDONED_SIGNUP_MS).changes;
-    return { lanterns, signups };
+    const outfits = this.looks?.sweep(now) ?? 0;
+    return { lanterns, signups, outfits };
   }
 }

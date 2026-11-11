@@ -32,6 +32,7 @@ export class Hud {
   private readonly worshipBtn = $<HTMLButtonElement>('btn-worship');
   private readonly settingsBtn = $<HTMLButtonElement>('btn-settings');
   private readonly groupsBtn = $<HTMLButtonElement>('btn-groups');
+  private readonly lookBtn = $<HTMLButtonElement>('btn-look');
   private netText = '';
   private actionText: string | null = null;
   private toastUntil = 0;
@@ -97,7 +98,25 @@ export class Hud {
   }
 
   /** Wire a HUD button; taps never leak into camera drags. */
-  bind(which: 'meditate' | 'letter' | 'word' | 'book' | 'worship' | 'settings' | 'groups', fn: () => void) {
+  /** Tap on "함께 N명": who is here. */
+  onPeople(fn: () => void) {
+    this.netStatus.setAttribute('role', 'button');
+    this.netStatus.tabIndex = 0;
+    this.netStatus.setAttribute('aria-label', '함께 있는 사람 보기');
+    this.netStatus.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.netStatus.addEventListener('click', (e) => {
+      e.preventDefault();
+      fn();
+    });
+    this.netStatus.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fn();
+      }
+    });
+  }
+
+  bind(which: 'meditate' | 'letter' | 'word' | 'book' | 'worship' | 'settings' | 'groups' | 'look', fn: () => void) {
     const btn = {
       meditate: this.meditateBtn,
       letter: this.letterBtn,
@@ -106,6 +125,7 @@ export class Hud {
       worship: this.worshipBtn,
       settings: this.settingsBtn,
       groups: this.groupsBtn,
+      look: this.lookBtn,
     }[which];
     btn.addEventListener('pointerdown', (e) => e.stopPropagation());
     btn.addEventListener('click', (e) => {

@@ -11,7 +11,7 @@ export const PROTOCOL_VERSION = 1;
  * Bump it (to the new 시행일) when the texts change materially: every account
  * is then asked to agree again on its next visit.
  */
-export const TERMS_VERSION = '2026-11-10';
+export const TERMS_VERSION = '2026-11-11';
 /** Minimum age for an account (만 14세 이상; PIPA art. 22-2). */
 export const MIN_AGE = 14;
 
@@ -260,6 +260,8 @@ export interface PlayerInfo {
   name: string;
   /** Not signed in (shown with a small "손님" marker). */
   guest?: boolean;
+  /** Saved appearance (M8); absent = today's default/hashed look. */
+  look?: Look;
 }
 
 export interface PlayerSnap extends StatePayload {
@@ -342,6 +344,8 @@ export type ServerMessage =
       /** The signed-in account, or null for a guest. */
       account?: AccountInfo | null;
       guest?: boolean;
+      /** Your own saved appearance (M8), as only you see it. */
+      look?: Look | null;
     }
   | { t: 'word'; word: WordPassage }
   | { t: 'lanterns'; lanterns: LanternInfo[] }
@@ -368,6 +372,8 @@ export type ServerMessage =
   | { t: 'leave'; id: string }
   /** A signed-in player changed their nickname. */
   | { t: 'rename'; id: string; name: string }
+  /** Someone's appearance changed (null = back to the default look). Also sent for your own id. */
+  | { t: 'look'; id: string; look: Look | null }
   | { t: 'snap'; players: PlayerSnap[] }
   | { t: 'chat'; id: string; name: string; text: string }
   | { t: 'mats'; mats: (string | null)[] }
@@ -504,6 +510,88 @@ export function parseClientMessage(data: string): ClientMessage | null {
       return null;
   }
 }
+
+// ------------------------------------------------------------------ appearance (M8)
+
+/** 겉옷 palette: warm, earthy low-poly tones. Index 0 is today's default cream robe. */
+export const ROBE_COLORS = [
+  0xf1e4c8, 0xe6d6bb, 0xd9bf94, 0xc9a06a, 0xb8735a, 0xa0503a, 0xd9a3a3, 0x9a6a8e,
+  0x7d5a7e, 0x9cbfd6, 0x5f7fa6, 0x3f4f6e, 0x9fb39a, 0x6f8a5b, 0x8c8f5a, 0x4a4540,
+] as const;
+/** 목도리 palette. Index 0 is the default terracotta. */
+export const SCARF_COLORS = [0xc8644a, 0xe08a3c, 0xd2a03c, 0x5f8f6b, 0x3f8f8f, 0x4f78a6, 0x9a5fa0, 0xc77a8a, 0xb04050, 0x8a6a4a, 0xf3ece0, 0x3a3a44] as const;
+/** 피부 tones. Index 1 is the default. */
+export const SKIN_COLORS = [0xf6dcc0, 0xf0c9a4, 0xe0b088, 0xc68e62, 0xa06a44, 0x6e4a30] as const;
+/** 머리색. Index 0 is the default brown. */
+export const HAIR_COLORS = [0x5a3e2b, 0x2f2620, 0x15120f, 0x7a5236, 0xa8743a, 0xd9b26a, 0x8f4a2c, 0xa8a29a] as const;
+/** 머리 모양: 짧은 머리, 단발, 긴 머리, 묶은 머리, 민머리. */
+export const HAIR_STYLES = ['short', 'bob', 'long', 'tied', 'bald'] as const;
+export type HairStyle = (typeof HAIR_STYLES)[number];
+
+/** Saved colours + hair style as palette indices (what the DB stores). */
+export interface Appearance {
+  /** robe */
+  r: number;
+  /** scarf */
+  s: number;
+  /** skin */
+  k: number;
+  /** hair colour */
+  h: number;
+  /** hair style (HAIR_STYLES index) */
+  y: number;
+}
+export const DEFAULT_APPEARANCE: Appearance = { r: 0, s: 0, k: 1, h: 0, y: 0 };
+
+/** What others see: appearance plus the worn outfit drawing (if visible to this viewer). */
+export interface Look extends Appearance {
+  /** Worn outfit id (fetch pixels from /api/outfits?ids=). */
+  o?: number;
+  /** Content hash of that outfit. */
+  oh?: string;
+  /** Only in your own look: the worn drawing was hidden after reports (others see the plain robe). */
+  hid?: true;
+}
+
+const inRange = (v: unknown, n: number): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) < n;
+
+/** Strict: exactly the five palette indices, each in range. */
+export function validateAppearance(raw: unknown): Appearance | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const a = raw as Record<string, unknown>;
+  if (Object.keys(a).some((k) => !['r', 's', 'k', 'h', 'y'].includes(k))) return null;
+  if (!inRange(a.r, ROBE_COLORS.length) || !inRange(a.s, SCARF_COLORS.length) || !inRange(a.k, SKIN_COLORS.length)) return null;
+  if (!inRange(a.h, HAIR_COLORS.length) || !inRange(a.y, HAIR_STYLES.length)) return null;
+  return { r: a.r, s: a.s, k: a.k, h: a.h, y: a.y };
+}
+
+/** Pixel outfit (옷 그리기): OUTFIT_SIZE² cells, row by row from the top-left. */
+export const OUTFIT_SIZE = 16;
+export const OUTFIT_CELLS = OUTFIT_SIZE * OUTFIT_SIZE;
+export const OUTFIT_SLOTS = 3;
+/** Encoding: one character per cell, '0'-'9' 'a'-'f' = OUTFIT_PALETTE index, '.' = transparent (robe colour). */
+export const OUTFIT_TRANSPARENT = '.';
+export const OUTFIT_PALETTE = [
+  0x1f1a1c, 0xf7f1e3, 0xc8463c, 0xe8833a, 0xf2c94c, 0x8bbf4a, 0x3e8e5a, 0x5bb3d6,
+  0x2f5d9e, 0x7d4f9e, 0xe58fac, 0x8a5a3b, 0xdcb68e, 0xa29c96, 0x55525e, 0xc9a03a,
+] as const;
+const OUTFIT_RE = new RegExp(`^[0-9a-f.]{${OUTFIT_CELLS}}$`);
+
+/** Exact size, only palette indices < 16 or transparent, and not completely empty. */
+export function validateOutfitPixels(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !OUTFIT_RE.test(raw)) return null;
+  return /[0-9a-f]/.test(raw) ? raw : null;
+}
+
+/** Reasons for 🚩 옷 신고. */
+export const REPORT_REASONS = ['inappropriate', 'hate', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+export const REPORT_LABELS: Record<ReportReason, string> = { inappropriate: '부적절한 그림', hate: '혐오·욕설', other: '기타' };
+/** Distinct reporters that hide an outfit automatically. */
+export const OUTFIT_HIDE_REPORTS = 3;
+/** Hidden outfits after which drawing uploads pause for OUTFIT_BAN_DAYS. */
+export const OUTFIT_STRIKES_BAN = 3;
+export const OUTFIT_BAN_DAYS = 7;
 
 // ------------------------------------------------------------------ dates
 

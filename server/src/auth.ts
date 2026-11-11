@@ -27,6 +27,7 @@ export interface SessionUser {
   id: number;
   nickname: string | null;
   email: string | null;
+  emailVerified: boolean;
   onboarded: boolean;
   /** Agreed to the current TERMS_VERSION (이용약관 + 개인정보처리방침, 만 14세 이상). */
   consented: boolean;
@@ -55,7 +56,7 @@ export class Sessions {
     if (!token || token.length > 100) return null;
     const row = this.db
       .prepare(
-        `SELECT u.id, u.nickname, u.email, u.onboarded_at, u.terms_agreed_at, u.terms_version, s.expires_at
+        `SELECT u.id, u.nickname, u.email, u.email_verified, u.onboarded_at, u.terms_agreed_at, u.terms_version, s.expires_at
          FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
       )
       .get(sha256(token)) as
@@ -63,6 +64,7 @@ export class Sessions {
           id: number;
           nickname: string | null;
           email: string | null;
+          email_verified: number;
           onboarded_at: number | null;
           terms_agreed_at: number | null;
           terms_version: string | null;
@@ -78,6 +80,7 @@ export class Sessions {
       id: row.id,
       nickname: row.nickname,
       email: row.email,
+      emailVerified: row.email_verified === 1,
       onboarded: row.onboarded_at !== null,
       consented: row.terms_agreed_at !== null && row.terms_version === TERMS_VERSION,
     };
@@ -97,6 +100,20 @@ export class Sessions {
   sweep() {
     this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
   }
+}
+
+/** WORLDS_ADMIN_EMAILS (comma-separated), matched against the verified Google email. */
+export function adminEmails(raw = process.env.WORLDS_ADMIN_EMAILS ?? ''): Set<string> {
+  return new Set(
+    raw
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@')),
+  );
+}
+
+export function isAdmin(user: SessionUser | null, admins: Set<string>): boolean {
+  return !!user && user.emailVerified && !!user.email && admins.has(user.email.toLowerCase());
 }
 
 export function accountOf(user: SessionUser | null): AccountInfo | null {

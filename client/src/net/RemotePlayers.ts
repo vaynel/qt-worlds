@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import type { PlayerSnap, SeatKind } from '../../../shared/protocol';
-import { Avatar, colorsForId, seatHeight } from '../entities/Avatar';
+import type { Look, PlayerSnap, SeatKind } from '../../../shared/protocol';
+import { Avatar, colorsForId, seatHeight, type AvatarLook } from '../entities/Avatar';
+import { avatarLook, outfitCache, safeAppearance } from '../game/looks';
 import { createBubble, disposeSprite } from '../world/labels';
 import { NameTag, type TagView } from '../world/NameTag';
 
@@ -34,6 +35,11 @@ interface Remote {
   kind: SeatKind;
   inside: boolean;
   bubbleSlot: BubbleSlot;
+  guest: boolean;
+  /** Saved appearance (null = hashed default colours). */
+  look: Look | null;
+  /** Worn drawing id while it is (being) shown. */
+  outfitId: number | null;
 }
 
 const lerpAngle = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -92,13 +98,14 @@ export class RemotePlayers {
     return this.players.size;
   }
 
-  add(id: string, name: string, guest = false): void {
+  add(id: string, name: string, guest = false, look: Look | null = null): void {
     if (this.players.has(id)) return;
     const avatar = new Avatar(colorsForId(id), this.shadows);
     avatar.root.visible = false; // until the first snapshot places it
+    avatar.root.userData.remoteId = id;
     const tag = new NameTag(avatar.root, name, guest);
     this.group.add(avatar.root);
-    this.players.set(id, {
+    const p: Remote = {
       id,
       name,
       avatar,
@@ -108,7 +115,58 @@ export class RemotePlayers {
       kind: 'mat',
       inside: false,
       bubbleSlot: new BubbleSlot(avatar.root),
+      guest,
+      look: null,
+      outfitId: null,
+    };
+    this.players.set(id, p);
+    if (look) this.setLook(id, look);
+  }
+
+  /** Live appearance change (꾸미기). Players without a saved look keep their hashed colours. */
+  setLook(id: string, raw: Look | null): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    const a = raw ? safeAppearance(raw) : null;
+    p.look = a && raw ? { ...a, ...(Number.isInteger(raw.o) && (raw.o as number) > 0 ? { o: raw.o, oh: String(raw.oh ?? '') } : {}) } : null;
+    const colors: AvatarLook = a ? avatarLook(a) : { ...colorsForId(id), hairStyle: 'short' };
+    p.avatar.setLook(colors);
+    const want = p.look?.o ?? null;
+    if (want === p.outfitId) return;
+    p.outfitId = want;
+    if (want === null) return p.avatar.setPattern(null);
+    outfitCache.load(want, (pixels) => {
+      // Still the same person wearing the same drawing?
+      if (this.players.get(id) === p && p.outfitId === want) p.avatar.setPattern(pixels);
     });
+  }
+
+  /** Who is wearing what (players list, report). */
+  info(id: string): { name: string; guest: boolean; outfitId: number | null; patterned: boolean } | null {
+    const p = this.players.get(id);
+    return p ? { name: p.name, guest: p.guest, outfitId: p.outfitId, patterned: !!p.avatar.patternInfo } : null;
+  }
+
+  list(): { id: string; name: string; guest: boolean; outfitId: number | null }[] {
+    return [...this.players.values()].map((p) => ({ id: p.id, name: p.name, guest: p.guest, outfitId: p.outfitId }));
+  }
+
+  /** Remote avatar under a ray (tap on a person), nearest first. */
+  pick(raycaster: THREE.Raycaster): string | null {
+    const roots = [...this.players.values()].filter((p) => p.avatar.root.visible).map((p) => p.avatar.root);
+    for (const hit of raycaster.intersectObjects(roots, true)) {
+      let o: THREE.Object3D | null = hit.object;
+      while (o && o.userData.remoteId === undefined) o = o.parent;
+      if (o) return o.userData.remoteId as string;
+    }
+    return null;
+  }
+
+  /** Screen position of a remote's head (tests click it like a player would). */
+  headWorld(id: string): THREE.Vector3 | null {
+    const p = this.players.get(id);
+    if (!p) return null;
+    return p.avatar.root.localToWorld(new THREE.Vector3(0, 1.1, 0));
   }
 
   remove(id: string): void {
@@ -225,6 +283,7 @@ export class RemotePlayers {
     speakingTag: boolean;
     guest: boolean;
     tagVisible: boolean;
+    look: { robe: string; scarf: string; skin: string; hair: string; hairStyle: string; saved: boolean; outfitId: number | null; pattern: { checksum: number; pixels: string; filter: string } | null };
   }[] {
     return [...this.players.values()].map((p) => ({
       id: p.id,
@@ -241,6 +300,20 @@ export class RemotePlayers {
       speakingTag: p.tag.isSpeaking,
       guest: p.tag.isGuest,
       tagVisible: p.avatar.root.visible && p.tag.visible,
+      look: (() => {
+        const l = p.avatar.currentLook;
+        const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
+        return {
+          robe: hex(l.robe),
+          scarf: hex(l.scarf),
+          skin: hex(l.skin),
+          hair: hex(l.hair),
+          hairStyle: l.hairStyle,
+          saved: p.look !== null,
+          outfitId: p.outfitId,
+          pattern: p.avatar.patternInfo,
+        };
+      })(),
     }));
   }
 }

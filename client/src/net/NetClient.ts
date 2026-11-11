@@ -13,6 +13,7 @@ import {
   type VoiceSignal,
   type GroupMessage,
   type SeatKind,
+  type Look,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -31,6 +32,8 @@ export interface Welcome {
   word: WordPassage | null;
   account: AccountInfo | null;
   guest: boolean;
+  /** Our own saved appearance (M8), null = default look. */
+  look: Look | null;
 }
 
 export interface NetHandlers {
@@ -46,6 +49,7 @@ export interface NetHandlers {
   status(status: NetStatus): void;
   word(word: WordPassage): void;
   rename(id: string, name: string): void;
+  look(id: string, look: Look | null): void;
   lanterns(list: LanternInfo[]): void;
   lantern(l: LanternInfo): void;
   lanternGone(id: number): void;
@@ -143,6 +147,9 @@ export class NetClient {
         break;
       case 'rename':
         this.handlers.rename?.(msg.id, msg.name);
+        break;
+      case 'look':
+        this.handlers.look?.(msg.id, msg.look);
         break;
       case 'snap':
         this.handlers.snapshot?.(msg.players);
@@ -284,6 +291,7 @@ export class NetClient {
             word: msg.word ?? null,
             account: msg.account ?? null,
             guest: msg.guest ?? !msg.account,
+            look: msg.look ?? null,
           };
           this.setStatus('online');
           if (first) first.onWelcome(w);
@@ -296,6 +304,9 @@ export class NetClient {
           break;
         case 'rename':
           if (typeof msg.id === 'string' && typeof msg.name === 'string') this.dispatch(msg);
+          break;
+        case 'look':
+          if (typeof msg.id === 'string') this.dispatch(msg);
           break;
         case 'snap':
           if (Array.isArray(msg.players)) this.dispatch(msg);

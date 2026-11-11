@@ -9,6 +9,7 @@ import { DailyWord } from './dailyWord.js';
 import { defaultDbPath, openDb, serverRoot } from './db.js';
 import { originAllowed, requestInfo, StaticClient } from './http.js';
 import { PushService } from './push.js';
+import { LookService } from './looks.js';
 import { Room } from './Room.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
@@ -54,7 +55,8 @@ const groups = new GroupService(db);
 const lanterns = new LanternService(db, groups);
 const wordbook = new WordBookService(db, dailyWord, TEST_MODE);
 const chat = new GroupChatService(db, groups);
-const accounts = new AccountService(db);
+const looks = new LookService(db);
+const accounts = new AccountService(db, looks);
 const push = new PushService(db, dailyWord, {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -75,6 +77,10 @@ const authConfig: AuthConfig = {
 const oidc = new OidcFlow(authConfig, users, sessions);
 if (mock) log('WARNING: mock OIDC login is enabled (tests only)');
 else if (!oidc.enabled) log('Google login not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET): guest mode only');
+{
+  const admins = (process.env.WORLDS_ADMIN_EMAILS ?? '').split(',').filter((e) => e.includes('@')).length;
+  log(admins ? `admins: ${admins} account(s) from WORLDS_ADMIN_EMAILS` : 'WORLDS_ADMIN_EMAILS not set: no outfit admin');
+}
 if (TEST_MODE) log('WARNING: test mode (date overrides, test teleports) is enabled');
 
 const room = new Room({
@@ -87,10 +93,11 @@ const room = new Room({
   users,
   groups,
   lanterns,
+  looks,
 });
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -161,7 +168,7 @@ const sweep = () => {
   sessions.sweep();
   chat.purge();
   const gone = accounts.sweep();
-  if (gone.lanterns || gone.signups) log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups deleted`);
+  if (gone.lanterns || gone.signups || gone.outfits) log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings deleted`);
 };
 const sweeper = setInterval(sweep, 3_600_000);
 sweep();
