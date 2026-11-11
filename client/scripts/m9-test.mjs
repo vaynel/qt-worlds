@@ -252,14 +252,13 @@ try {
   await toStall(A, 6.5);
   await A.evaluate(() => window.__WORLDS_TEST__.view(Math.PI + Math.atan2(6.4, 6.4) + 0.35, 0.32, 0.4));
   await until(A, () => window.__WORLDS_DEBUG__.m9.shopOpen === false && window.__WORLDS_DEBUG__.m9.stall.opacity < 0.05, null, 15000);
-  await until(A, () => document.querySelector('#shop-chip:not([hidden])')?.textContent.includes('12:00에 열어요'), null, 8000).catch(() => undefined);
-  check('closed (09:00): the stall is not there; the HUD shows the next opening (12:00)', (await A.textContent('#shop-chip')).includes('12:00에 열어요'), await A.textContent('#shop-chip'));
+  check('closed (09:00): the stall is not there, and no hours chip in the HUD', (await A.locator('#shop-chip').count()) === 0);
   await sleep(600);
   await shot(A, 'closed');
   await setClock(kst(D0, '12:00'));
   await until(A, () => window.__WORLDS_DEBUG__.m9.shopOpen === true && window.__WORLDS_DEBUG__.m9.stall.opacity > 0.95, null, 15000);
   check('12:00: the stall appears (fades in) without reloading', (await m9(A)).stall.open === true);
-  check('open: the HUD shop chip shows the closing time', (await A.textContent('#shop-chip')).includes('15:00까지'), await A.textContent('#shop-chip'));
+  check('open: still no hours chip in the HUD (removed by request)', (await A.locator('#shop-chip').count()) === 0);
   await A.goto(BASE + Q('12:40'));
   await A.waitForSelector('#entry-continue');
   await A.click('#entry-continue');
@@ -271,7 +270,7 @@ try {
   await shot(A, 'shop-open-day');
   await setClock(kst(D0, '15:00'));
   await until(A, () => window.__WORLDS_DEBUG__.m9.shopOpen === false && window.__WORLDS_DEBUG__.m9.stall.opacity < 0.05, null, 15000);
-  check('15:00: the stall goes away again; next opening 18:00', (await A.textContent('#shop-chip')).includes('18:00'));
+  check('15:00: the stall goes away again', (await m9(A)).stall.open === false);
   await toStall(A, 2);
   await until(A, () => window.__WORLDS_DEBUG__.m9.nearShop);
   await A.keyboard.press('KeyE');
@@ -668,10 +667,11 @@ try {
     worshipHandle: (await Ph.isVisible('#worship-handle')) ? await box(Ph, '#worship-handle') : null,
   };
   const hits = Object.entries(others).filter(([, b]) => overlaps(dock, b)).map(([k]) => k);
-  check('phone: HUD dock (shop + 2 prop chips) overlaps nothing (joystick, action, HUD, worship player)', dock && dock.height > 60 && hits.length === 0, `${JSON.stringify(dock)} hits ${hits.join(',')}`);
+  check('phone: HUD dock (2 prop chips) overlaps nothing (joystick, action, HUD, worship player)', dock && dock.height > 60 && hits.length === 0, `${JSON.stringify(dock)} hits ${hits.join(',')}`);
   check('phone: dock stays on screen', dock.x >= 0 && dock.x + dock.width <= 390 && dock.y + dock.height <= 844);
   await shot(Ph, 'hud-chip-phone');
-  await Ph.tap('#shop-chip');
+  // The HUD hours chip was removed; open the sheet through the game's own path.
+  await Ph.evaluate(() => window.__WORLDS_TEST__.openShop());
   await until(Ph, () => window.__WORLDS_DEBUG__.m9.sheet);
   await sleep(700);
   const sheet = await box(Ph, '.sheet.shop-sheet');

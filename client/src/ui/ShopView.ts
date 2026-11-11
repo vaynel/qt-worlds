@@ -133,44 +133,33 @@ export class ShopView {
 }
 
 /**
- * HUD dock (top-left, under the place card): 🏪 shop chip while open (or the
- * next opening time in the plaza) and one chip per borrowed prop with the time
- * left and [반납] (tap twice to confirm).
+ * HUD dock (top-left, under the place card): one chip per borrowed prop with
+ * the time left and [반납] (tap twice to confirm). The shop's opening hours are
+ * not shown here (the user removed that chip); the stall, its sign and the
+ * shop sheet show them.
  */
 export class PropDock {
   readonly root = el('div', 'prop-dock');
-  private readonly shopChip = button('', 'prop-chip shop-chip');
   private readonly list = el('div', 'prop-list');
   private confirmId: number | null = null;
   private confirmUntil = 0;
   private lastKey = '';
-  private showClosed = false;
 
   constructor(
     private readonly shop: ShopClient,
-    onShop: () => void,
+    _onShop: () => void,
     private readonly toast: (text: string) => void,
   ) {
     this.root.id = 'prop-dock';
-    this.shopChip.id = 'shop-chip';
-    this.shopChip.addEventListener('click', (e) => {
-      e.preventDefault();
-      onShop();
-      this.shopChip.blur();
-    });
     this.list.id = 'prop-list';
-    this.root.append(this.shopChip, this.list);
+    this.root.append(this.list);
     this.root.addEventListener('pointerdown', (e) => e.stopPropagation());
     document.getElementById('app')!.append(this.root);
     shop.onChange(() => this.update(true));
   }
 
-  /** Show the "next opening" chip while closed (only near the plaza). */
-  setNearPlaza(near: boolean) {
-    if (near === this.showClosed) return;
-    this.showClosed = near;
-    this.update(true);
-  }
+  /** Kept for callers; the hours chip was removed. */
+  setNearPlaza(_near: boolean) {}
 
   /** Called every frame; rewrites the DOM only when a label changes. */
   update(force = false) {
@@ -181,17 +170,9 @@ export class PropDock {
       force = true;
     }
     const chips = s.rentals.map((r) => `${r.id}:${r.item}:${minutesLeft(s.remainingMs(r))}:${s.returning.has(r.id)}`);
-    const shopText = s.open || (this.showClosed && s.status) ? '소품 가게' : '';
-    const shopSub = s.open ? `${s.closesLabel()}까지 열림` : `${s.nextOpenLabel()}에 열어요`;
-    const key = `${shopText}|${shopSub}|${chips.join(',')}|${this.confirmId}`;
+    const key = `${chips.join(',')}|${this.confirmId}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
-    this.shopChip.hidden = !shopText;
-    const main = el('span', 'shop-chip-main');
-    main.append(el('span', 'shop-awning mini'), shopText);
-    this.shopChip.replaceChildren(main, el('span', 'shop-chip-sub', shopSub));
-    this.shopChip.classList.toggle('closed', !s.open);
-    this.shopChip.setAttribute('aria-label', s.open ? `나눔 소품 가게 열기 (${s.closesLabel()}까지)` : `나눔 소품 가게 · 다음 문 여는 시간 ${s.nextOpenLabel()}`);
     this.list.replaceChildren(
       ...s.rentals.map((r) => {
         const def = PROPS[r.item];
@@ -209,7 +190,7 @@ export class PropDock {
         return chip;
       }),
     );
-    this.root.hidden = !shopText && s.rentals.length === 0;
+    this.root.hidden = s.rentals.length === 0;
   }
 
   private async giveBack(id: number, name: string) {

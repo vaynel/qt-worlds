@@ -191,6 +191,18 @@ export class ShopClient {
           continue;
         }
         if (res.ok && d.rental) return { ok: true, rental: d.rental };
+        if (!d.error) {
+          // Ambiguous answer (no JSON error, e.g. a proxy hiccup): the server may
+          // have rented it anyway. Never guess: re-sync, then report what is true.
+          await this.refresh();
+          const got = this.rentals.find((r) => r.item === item);
+          if (got) return { ok: true, rental: got };
+          if (attempt + 1 < RETRIES) {
+            // Same requestId, so a retry can't double-rent (server replays).
+            await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+            continue;
+          }
+        }
         return { ok: false, code: d.error ?? 'error', message: d.message ?? '빌리지 못했어요.' };
       }
     } finally {
