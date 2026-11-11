@@ -135,8 +135,8 @@ try {
   // M10: opening 말씀 also files today's (real-date) word, so page back to DAY.
   await A.waitForSelector('.book-page');
   for (let i = 0; i < 10 && !(await A.$('.note-share')); i++) {
-    if (await A.isDisabled('.book-nav button:last-child')) break;
-    await A.click('.book-nav button:last-child');
+    if (await A.isDisabled('#book-prev-day')) break;
+    await A.click('#book-prev-day');
   }
   await A.waitForSelector('.note-share');
   await A.click('.note-share');

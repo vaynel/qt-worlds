@@ -26,6 +26,7 @@ import {
   freshDb,
   launch,
   loginJoin,
+  ONLINE_MS,
   mobile,
   rawClient,
   serverDir,
@@ -313,7 +314,7 @@ try {
   await A.reload();
   await A.waitForSelector('#entry-signed-in:not([hidden])');
   await A.click('#entry-continue');
-  await until(A, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
+  await until(A, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, ONLINE_MS);
   check('after reload the look is still applied (saved per account)', (await m8(A)).avatar.robe === wantRobe && (await m8(A)).avatar.hairStyle === 'tied');
   const aId2 = (await debug(A)).net.id;
   await until(B, (id) => window.__WORLDS_DEBUG__.net.remotes.some((r) => r.id === id), aId2);
@@ -402,13 +403,15 @@ try {
   await G.waitForSelector('#entry-signed-out:not([hidden])');
   await G.fill('#nickname', '나그네');
   await G.click('#entry-submit');
-  await until(G, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
+  await until(G, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, ONLINE_MS);
   await until(G, (id) => window.__WORLDS_DEBUG__.net.remotes.find((r) => r.id === id)?.look.pattern, aId2, 15000);
   await G.click('#net-status');
   await G.waitForSelector('#players-list .report-btn');
   await G.click('#players-list .report-btn');
   await until(G, () => window.__WORLDS_DEBUG__.m3.modal === '로그인 안내');
   check('guest: 🚩 opens the login prompt instead of reporting', (await debug(G)).m3.modal === '로그인 안내');
+  // Done with the guest: free its SwiftShader browser before the admin logs in (slow CPUs).
+  await gctx.close();
 
   // B taps A's avatar in the world → card → 🚩 옷 신고.
   await B.evaluate(() => window.__WORLDS_TEST__.view(0, 0.18, -2));
@@ -622,7 +625,6 @@ try {
 
   // ---------------------------------------------------------------- crowd: 10 drawn robes
   step('crowd');
-  await G.context().close();
   const baseTex = (await m8(B)).liveTextures;
   const reqBefore = (await m8(B)).outfitRequests;
   const crowd = [];
@@ -662,7 +664,7 @@ try {
   await B.reload();
   await B.waitForSelector('#entry-signed-in:not([hidden])');
   await B.click('#entry-continue');
-  await until(B, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
+  await until(B, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, ONLINE_MS);
   await until(B, () => window.__WORLDS_DEBUG__.net.remotes.filter((r) => r.look.pattern).length >= 11, null, 20000).catch(() => undefined);
   const rejoin = await debug(B);
   check('joining a room with 11 drawn robes fetches them in one batched request', rejoin.net.remotes.filter((r) => r.look.pattern).length >= 11 && rejoin.m8.outfitRequests === 1, `${rejoin.m8.outfitRequests} requests`);

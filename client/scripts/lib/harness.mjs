@@ -120,7 +120,12 @@ export const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor
 export const debug = (page) => page.evaluate(() => window.__WORLDS_DEBUG__);
 export const until = (page, fn, arg, ms = 30000) => page.waitForFunction(fn, arg, { timeout: ms, polling: 250 });
 export const teleport = (page, p) => page.evaluate(({ x, z }) => window.__WORLDS_TEST__.teleport(x, z), p);
-const online = (page) => until(page, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
+/**
+ * How long a browser may take to come online. SwiftShader on a slow CPU with
+ * several browsers open can need more than a minute; override with TEST_ONLINE_MS.
+ */
+export const ONLINE_MS = Number(process.env.TEST_ONLINE_MS ?? 120000);
+export const online = (page) => until(page, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, ONLINE_MS);
 
 /** Enter as a guest, or continue as the signed-in account if this browser has a session. */
 export async function join(page, base, nickname, query) {

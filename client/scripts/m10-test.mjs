@@ -250,6 +250,54 @@ try {
   await M.keyboard.press('Escape');
   await waitModal(M, null);
 
+  // B2: [지난 말씀] pager reads left = older (‹ 이전 날), right = newer (다음 날 ›).
+  step('B2 day pager');
+  await M.evaluate(async (days) => {
+    for (const d of days) await fetch(`/api/wordbook/pages/${d}`, { method: 'PUT' });
+  }, ['2026-11-05', '2026-11-06']);
+  await M.tap('#btn-word');
+  await waitModal(M, '나의 말씀 책');
+  await M.tap('#book-tab-mine');
+  await M.waitForSelector('.book-nav');
+  const pager = () =>
+    M.evaluate(() => {
+      const nav = document.querySelector('.book-nav');
+      const prev = document.getElementById('book-prev-day');
+      const next = document.getElementById('book-next-day');
+      const m = /(\d+) \/ (\d+)장/.exec(nav.querySelector('.book-count').textContent);
+      return {
+        first: nav.firstElementChild.id,
+        last: nav.lastElementChild.id,
+        prevText: prev.textContent,
+        nextText: next.textContent,
+        prevLeft: prev.getBoundingClientRect().right <= next.getBoundingClientRect().left,
+        prevOff: prev.disabled,
+        nextOff: next.disabled,
+        n: Number(m[1]),
+        total: Number(m[2]),
+        date: document.querySelector('.book-page .book-date')?.textContent,
+      };
+    });
+  for (let i = 0; i < 10 && !(await M.isDisabled('#book-next-day')); i++) await M.tap('#book-next-day');
+  const newest = await pager();
+  check(
+    'B2: pager shows "‹ 이전 날" on the left and "다음 날 ›" on the right',
+    newest.first === 'book-prev-day' && newest.last === 'book-next-day' && newest.prevText === '‹ 이전 날' && newest.nextText === '다음 날 ›' && newest.prevLeft,
+    JSON.stringify(newest),
+  );
+  check('B2: newest page: 다음 날 disabled, 이전 날 enabled, count N / N', newest.total >= 3 && newest.n === newest.total && newest.nextOff && !newest.prevOff, JSON.stringify(newest));
+  await M.tap('#book-prev-day');
+  const older = await pager();
+  check('B2: 이전 날 goes one day older (count N-1, other date)', older.n === newest.n - 1 && older.date !== newest.date && !older.nextOff, JSON.stringify(older));
+  await M.tap('#book-next-day');
+  check('B2: 다음 날 comes back to the newer day', (await pager()).date === newest.date);
+  for (let i = 0; i < 10 && !(await M.isDisabled('#book-prev-day')); i++) await M.tap('#book-prev-day');
+  const oldest = await pager();
+  check('B2: oldest page: 이전 날 disabled, 다음 날 enabled, count 1 / N', oldest.n === 1 && oldest.prevOff && !oldest.nextOff, JSON.stringify(oldest));
+  await shot(M, 'b2-pager-oldest-phone');
+  await M.keyboard.press('Escape');
+  await waitModal(M, null);
+
   // ================================================================ ⚙ menu (phone)
   step('settings menu');
   await M.tap('#btn-settings');

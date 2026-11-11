@@ -240,11 +240,14 @@ export class WordBookView {
     sheet.append(paper);
 
     const nav = el('footer', 'book-nav');
-    const newer = button('‹ 다음 날', '', () => this.go(-1));
-    const older = button('이전 날 ›', '', () => this.go(1));
-    newer.disabled = this.index === 0;
+    // Older days on the left, newer on the right; the count runs 1 (oldest) … N (newest).
+    const older = button('‹ 이전 날', '', () => this.go(1));
+    older.id = 'book-prev-day';
+    const newer = button('다음 날 ›', '', () => this.go(-1));
+    newer.id = 'book-next-day';
     older.disabled = this.index >= this.pages.length - 1;
-    nav.append(newer, el('span', 'book-count', `${this.pages.length - this.index} / ${this.pages.length}장`), older);
+    newer.disabled = this.index === 0;
+    nav.append(older, el('span', 'book-count', `${this.pages.length - this.index} / ${this.pages.length}장`), newer);
     sheet.append(nav);
   }
 

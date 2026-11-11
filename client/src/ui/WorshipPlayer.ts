@@ -450,8 +450,13 @@ export class WorshipPlayer {
     if (modal && eff !== 'folded') eff = 'open';
     this.effective = eff;
     const large = !inRoom && eff === 'open' && !modal && this.size === 'large' && !IS_TOUCH;
+    // 골방 + a sheet: one compact, on-screen placement (video only, under the HUD,
+    // beside or above the sheet). The room size classes come off meanwhile so
+    // their rules can't fight it; the chosen size (and 작게) return on close.
+    const roomSheet = inRoom && modal && eff !== 'folded';
+    this.root.classList.toggle('room-sheet', roomSheet);
     for (const k of ['s', 'm', 'l'] as const) {
-      this.root.classList.toggle(`room-${k}`, inRoom && this.roomSize === k);
+      this.root.classList.toggle(`room-${k}`, inRoom && !roomSheet && this.roomSize === k);
       this.roomSizeBtns[k].setAttribute('aria-pressed', this.roomSize === k ? 'true' : 'false');
     }
     this.root.classList.toggle('mini', eff === 'mini');
@@ -466,6 +471,7 @@ export class WorshipPlayer {
     body.toggle('worship-on', visible && eff !== 'folded');
     body.toggle('worship-mini', visible && eff === 'mini');
     body.toggle('worship-folded', visible && eff === 'folded');
+    body.toggle('worship-room-sheet', visible && roomSheet);
     this.tab.hidden = !(visible && eff === 'folded' && !modal);
     if (eff === 'folded') this.pauseForFold();
     this.sizeBtn.replaceChildren(icon(this.size === 'large' ? 'small' : 'large'));

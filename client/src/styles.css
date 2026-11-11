@@ -1465,10 +1465,10 @@ body.touch:not(.in-world) #worship.dock {
 }
 
 /* Narrow screens with a sheet open: player docks at the top and the sheet
-   takes the rest of the visible viewport, so neither covers the other. */
+   takes the rest of the visible viewport, so neither covers the other.
+   (In the 골방 the player uses #worship.room-sheet instead, see B1 at the end.) */
 @media (max-width: 999px) {
-  body.overlay-open #worship.dock,
-  body.overlay-open #worship.room {
+  body.overlay-open #worship.dock {
     top: calc(var(--vvtop, 0px) + 8px);
     bottom: auto;
     left: 50%;
@@ -1476,8 +1476,7 @@ body.touch:not(.in-world) #worship.dock {
     width: min(372px, calc(100vw - 16px));
     transform: translateX(-50%);
   }
-  body.overlay-open #worship.dock .worship-frame,
-  body.overlay-open #worship.room .worship-frame {
+  body.overlay-open #worship.dock .worship-frame {
     width: 100%;
     height: 200px;
     aspect-ratio: auto;
@@ -4499,4 +4498,69 @@ body.touch .shop-chip-sub {
   margin-top: 2px;
   font-size: 0.74rem;
   color: var(--ink-soft);
+}
+
+/* =================== B1: 골방 + a sheet open =================== */
+
+/* WorshipPlayer sets #worship.room-sheet (and body.worship-room-sheet) while a
+   sheet is open in the 골방 and takes the room-s/m/l and mini classes off, so
+   this is the only placement then: the video alone (no header, size steps or
+   handle), right-aligned under the HUD tool row, never over the sheet. The
+   room size comes back when the sheet closes. The selectors are kept at
+   (1,2,1) or more so they win over `body.touch #worship.room` by order. */
+body #worship.room.room-sheet {
+  --room-sheet-top: calc(var(--safe-top) + 132px);
+  --room-sheet-w: 356px;
+  top: calc(var(--vvtop, 0px) + var(--room-sheet-top));
+  bottom: auto;
+  left: auto;
+  right: var(--safe-right);
+  width: var(--room-sheet-w);
+  padding: 0;
+  transform: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+body.touch:not(.tablet) #worship.room.room-sheet {
+  --room-sheet-top: calc(var(--safe-top) + 124px);
+  --room-sheet-w: 200px;
+}
+
+body #worship.room.room-sheet .worship-head,
+body #worship.room.room-sheet .worship-side,
+body #worship.room.room-sheet .worship-handle {
+  display: none;
+}
+
+body #worship.room.room-sheet .worship-frame {
+  width: var(--room-sheet-w);
+  height: 200px;
+  aspect-ratio: auto;
+  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
+}
+
+/* Wide screens: the sheet stays left of the player. */
+@media (min-width: 1000px) {
+  body.overlay-open.worship-room-sheet .overlay {
+    padding-right: 400px;
+  }
+}
+
+/* Narrower screens: the sheet starts below the player (the HUD stays visible
+   above it) and takes the rest of the visible viewport. */
+@media (max-width: 999px) {
+  body.overlay-open.worship-room-sheet .overlay {
+    --room-sheet-bottom: calc(var(--safe-top) + 132px + 210px);
+    top: calc(var(--vvtop, 0px) + var(--room-sheet-bottom));
+    height: calc(var(--vvh, 100dvh) - var(--room-sheet-bottom));
+    align-items: stretch;
+  }
+  body.touch:not(.tablet).overlay-open.worship-room-sheet .overlay {
+    --room-sheet-bottom: calc(var(--safe-top) + 124px + 210px);
+  }
+  body.overlay-open.worship-room-sheet .sheet {
+    max-height: 100%;
+  }
 }
