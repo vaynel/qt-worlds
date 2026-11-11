@@ -262,6 +262,8 @@ export interface PlayerInfo {
   guest?: boolean;
   /** Saved appearance (M8); absent = today's default/hashed look. */
   look?: Look;
+  /** Props borrowed from 나눔 소품 가게 (M9): item and slot only, never timers. */
+  props?: PropWear[];
 }
 
 export interface PlayerSnap extends StatePayload {
@@ -379,6 +381,14 @@ export type ServerMessage =
   | { t: 'mats'; mats: (string | null)[] }
   | { t: 'logs'; logs: (string | null)[] }
   | { t: 'benches'; benches: (string | null)[] }
+  /** Someone's borrowed props changed (rented, returned, expired). Also sent for your own id. */
+  | { t: 'props'; id: string; props: PropWear[] }
+  /** 나눔 소품 가게: open/closed, this window's stock (server clock). */
+  | { t: 'shop'; shop: ShopStatus }
+  /** Your own rentals and today's count (only to your account's connections). */
+  | { t: 'myShop'; mine: MyShop; ended?: PropId[] }
+  /** 10 minutes left on a borrowed prop (once per rental). */
+  | { t: 'propReminder'; item: PropId; endsAt: number; now: number }
   | { t: 'error'; code: ErrorCode; message: string };
 
 // ------------------------------------------------------------------ validation
@@ -605,4 +615,165 @@ export function seoulDate(now: Date = new Date()): string {
   }).formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+// ------------------------------------------------------------------ 나눔 소품 가게 (M9)
+
+/**
+ * Free prop rental. No money, no points, no random draws: every prop is free,
+ * first come first served, a fixed number per opening window.
+ */
+export const PROP_IDS = ['lantern', 'guitar', 'bible', 'dove', 'footprints', 'hat'] as const;
+export type PropId = (typeof PROP_IDS)[number];
+export const PROP_SLOTS = ['hand', 'head', 'shoulder', 'back', 'effect'] as const;
+export type PropSlot = (typeof PROP_SLOTS)[number];
+export const PROP_SLOT_LABELS: Record<PropSlot, string> = { hand: '손', head: '머리', shoulder: '어깨', back: '등', effect: '효과' };
+
+export interface PropDef {
+  id: PropId;
+  name: string;
+  emoji: string;
+  slot: PropSlot;
+  /** How long one rental lasts. */
+  minutes: number;
+  /** Default stock released at each opening window (admins can change it). */
+  stock: number;
+  rare?: boolean;
+  blurb: string;
+}
+
+export const PROPS: Record<PropId, PropDef> = {
+  lantern: { id: 'lantern', name: '손등불', emoji: '🏮', slot: 'hand', minutes: 60, stock: 4, blurb: '밤길을 밝혀 주는 작은 등불' },
+  guitar: { id: 'guitar', name: '기타', emoji: '🎸', slot: 'back', minutes: 60, stock: 2, blurb: '모닥불 통나무에 앉으면 연주해요' },
+  bible: { id: 'bible', name: '성경책', emoji: '📖', slot: 'hand', minutes: 60, stock: 5, blurb: '광장 벤치에 앉으면 펼쳐 읽어요' },
+  dove: { id: 'dove', name: '어깨 위 비둘기', emoji: '🕊️', slot: 'shoulder', minutes: 30, stock: 1, rare: true, blurb: '어깨에 앉아 함께 걸어요' },
+  footprints: { id: 'footprints', name: '빛나는 발자국', emoji: '✨', slot: 'effect', minutes: 30, stock: 1, rare: true, blurb: '걸은 자리에 빛이 잠깐 남아요' },
+  hat: { id: 'hat', name: '털모자', emoji: '🧣', slot: 'head', minutes: 60, stock: 4, blurb: '포근한 뜨개 모자' },
+};
+
+/** Rentals per account per KST day (early returns still count). */
+export const SHOP_DAILY_LIMIT = 2;
+/** Props worn at the same time (at most one per slot). */
+export const SHOP_MAX_ACTIVE = 2;
+/** The in-app toast and push reminder come this long before a rental ends. */
+export const PROP_REMIND_MS = 10 * 60_000;
+/** Stock an admin may set for one window. */
+export const SHOP_STOCK_MAX = 99;
+
+/** Opening windows (Asia/Seoul minutes of the day, end exclusive), the same every day. */
+export const SHOP_WINDOWS: readonly { start: number; end: number }[] = [
+  { start: 6 * 60, end: 9 * 60 },
+  { start: 12 * 60, end: 15 * 60 },
+  { start: 18 * 60, end: 23 * 60 },
+];
+
+/** Where the stall stands on the 중앙 광장 (behind the south-east bench, facing the basin). */
+export const SHOP_STALL = (() => {
+  const a = Math.PI / 4;
+  const r = 9.1;
+  const x = PLAZA.x + Math.cos(a) * r;
+  const z = PLAZA.z + Math.sin(a) * r;
+  return { x, z, yaw: Math.atan2(PLAZA.x - x, PLAZA.z - z), reach: 3.2 };
+})();
+
+export interface PropWear {
+  item: PropId;
+  slot: PropSlot;
+}
+
+const KST_MS = 9 * 3600_000;
+const DAY_MS = 86_400_000;
+
+/** YYYY-MM-DD in Korea for an instant (fixed +9 h; Korea has no daylight saving). */
+export function kstDateOf(ms: number): string {
+  return new Date(ms + KST_MS).toISOString().slice(0, 10);
+}
+
+/** "18:00" for a KST instant. */
+export function kstTimeOf(ms: number): string {
+  const d = new Date(ms + KST_MS);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+export interface ShopWindowInfo {
+  open: boolean;
+  /** KST date of the current (or, when closed, the next) window. */
+  date: string;
+  /** Current window index (0..2) while open, else null. */
+  win: number | null;
+  /** While open: when this window opened / closes. */
+  opensAt: number | null;
+  closesAt: number | null;
+  /** The next opening after this window (or from now when closed). */
+  nextOpenAt: number;
+  nextWin: number;
+}
+
+/** Shop window state at an instant (server clock). */
+export function shopWindowAt(ms: number): ShopWindowInfo {
+  const midnight = Math.floor((ms + KST_MS) / DAY_MS) * DAY_MS - KST_MS;
+  const date = kstDateOf(ms);
+  let win: number | null = null;
+  for (let i = 0; i < SHOP_WINDOWS.length; i++) {
+    const w = SHOP_WINDOWS[i];
+    if (ms >= midnight + w.start * 60_000 && ms < midnight + w.end * 60_000) win = i;
+  }
+  let nextWin = SHOP_WINDOWS.findIndex((w) => midnight + w.start * 60_000 > ms);
+  let nextOpenAt: number;
+  if (nextWin >= 0) nextOpenAt = midnight + SHOP_WINDOWS[nextWin].start * 60_000;
+  else {
+    nextWin = 0;
+    nextOpenAt = midnight + DAY_MS + SHOP_WINDOWS[0].start * 60_000;
+  }
+  if (win === null) return { open: false, date: kstDateOf(nextOpenAt), win: null, opensAt: null, closesAt: null, nextOpenAt, nextWin };
+  return {
+    open: true,
+    date,
+    win,
+    opensAt: midnight + SHOP_WINDOWS[win].start * 60_000,
+    closesAt: midnight + SHOP_WINDOWS[win].end * 60_000,
+    nextOpenAt,
+    nextWin,
+  };
+}
+
+export interface ShopStatus extends ShopWindowInfo {
+  /** Server time when this was made (clients correct their clock offset with it). */
+  now: number;
+  /** This window's stock while open (empty when closed). */
+  stock: Partial<Record<PropId, { remaining: number; total: number }>>;
+}
+
+export interface Rental {
+  id: number;
+  item: PropId;
+  slot: PropSlot;
+  startedAt: number;
+  endsAt: number;
+  status: 'active' | 'returned' | 'expired';
+}
+
+export interface MyShop {
+  /** Active rentals only. */
+  rentals: Rental[];
+  usedToday: number;
+  dailyLimit: number;
+  now: number;
+}
+
+export const isPropId = (v: unknown): v is PropId => typeof v === 'string' && (PROP_IDS as readonly string[]).includes(v);
+
+/** Props from the network: known items only, slot from our own table, one per slot, at most SHOP_MAX_ACTIVE. */
+export function validProps(raw: unknown): PropWear[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PropWear[] = [];
+  for (const p of raw.slice(0, 8)) {
+    const item = (p as { item?: unknown } | null)?.item;
+    if (!isPropId(item)) continue;
+    const slot = PROPS[item].slot;
+    if (out.some((o) => o.slot === slot || o.item === item)) continue;
+    out.push({ item, slot });
+    if (out.length >= SHOP_MAX_ACTIVE) break;
+  }
+  return out;
 }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Look, PlayerSnap, SeatKind } from '../../../shared/protocol';
+import { validProps, type Look, type PlayerSnap, type PropWear, type SeatKind } from '../../../shared/protocol';
 import { Avatar, colorsForId, seatHeight, type AvatarLook } from '../entities/Avatar';
 import { avatarLook, outfitCache, safeAppearance } from '../game/looks';
 import { createBubble, disposeSprite } from '../world/labels';
@@ -40,6 +40,8 @@ interface Remote {
   look: Look | null;
   /** Worn drawing id while it is (being) shown. */
   outfitId: number | null;
+  /** Borrowed props (M9). */
+  props: PropWear[];
 }
 
 const lerpAngle = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -98,13 +100,16 @@ export class RemotePlayers {
     return this.players.size;
   }
 
-  add(id: string, name: string, guest = false, look: Look | null = null): void {
+  add(id: string, name: string, guest = false, look: Look | null = null, props: PropWear[] = []): void {
     if (this.players.has(id)) return;
     const avatar = new Avatar(colorsForId(id), this.shadows);
     avatar.root.visible = false; // until the first snapshot places it
     avatar.root.userData.remoteId = id;
     const tag = new NameTag(avatar.root, name, guest);
     this.group.add(avatar.root);
+    // Footprint trail (빛나는 발자국) lives in world space next to the avatars.
+    this.group.add(avatar.trail);
+    avatar.setNight(this.night);
     const p: Remote = {
       id,
       name,
@@ -118,9 +123,28 @@ export class RemotePlayers {
       guest,
       look: null,
       outfitId: null,
+      props: [],
     };
     this.players.set(id, p);
     if (look) this.setLook(id, look);
+    if (props.length) this.setProps(id, props);
+  }
+
+  /** Live prop change (rented, returned, expired). Re-validated: known items, one per slot. */
+  setProps(id: string, raw: unknown): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.props = validProps(raw);
+    p.avatar.setProps(p.props);
+  }
+
+  private night = 0;
+
+  /** Lantern glow follows the night. */
+  setNight(night: number): void {
+    if (Math.abs(night - this.night) < 0.01) return;
+    this.night = night;
+    for (const p of this.players.values()) p.avatar.setNight(night);
   }
 
   /** Live appearance change (꾸미기). Players without a saved look keep their hashed colours. */
@@ -284,6 +308,8 @@ export class RemotePlayers {
     guest: boolean;
     tagVisible: boolean;
     look: { robe: string; scarf: string; skin: string; hair: string; hairStyle: string; saved: boolean; outfitId: number | null; pattern: { checksum: number; pixels: string; filter: string } | null };
+    props: PropWear[];
+    propsInfo: Avatar['propsInfo'];
   }[] {
     return [...this.players.values()].map((p) => ({
       id: p.id,
@@ -300,6 +326,8 @@ export class RemotePlayers {
       speakingTag: p.tag.isSpeaking,
       guest: p.tag.isGuest,
       tagVisible: p.avatar.root.visible && p.tag.visible,
+      props: p.props,
+      propsInfo: p.avatar.propsInfo,
       look: (() => {
         const l = p.avatar.currentLook;
         const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;

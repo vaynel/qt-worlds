@@ -2,7 +2,9 @@ import { cleanText, GROUP_CHAT_DAYS, nicknameKey, TERMS_VERSION } from '../../sh
 import type { DB } from './db.js';
 import { HttpError } from './http.js';
 import { LANTERN_DAYS } from './services.js';
+import { RENTAL_KEEP_DAYS } from './shop.js';
 import type { LookService } from './looks.js';
+import type { ShopService } from './shop.js';
 
 const DAY_MS = 86_400_000;
 /** A 내린 lantern's copy is kept this long (the 10-a-day limit counts it), then deleted. */
@@ -35,6 +37,7 @@ export class AccountService {
   constructor(
     private readonly db: DB,
     private readonly looks: LookService | null = null,
+    private readonly shop: ShopService | null = null,
   ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
@@ -120,8 +123,8 @@ export class AccountService {
       created_at: number;
       last_ok_at: number | null;
     }[];
-    const prefs = this.db.prepare('SELECT daily, daily_time, prayer, updated_at FROM push_prefs WHERE user_id = ?').get(userId) as
-      | { daily: number; daily_time: number; prayer: number; updated_at: number }
+    const prefs = this.db.prepare('SELECT daily, daily_time, prayer, props, updated_at FROM push_prefs WHERE user_id = ?').get(userId) as
+      | { daily: number; daily_time: number; prayer: number; props: number; updated_at: number }
       | undefined;
     const sessions = this.db.prepare('SELECT created_at, expires_at, persistent FROM sessions WHERE user_id = ? ORDER BY created_at').all(userId) as {
       created_at: number;
@@ -198,14 +201,16 @@ export class AccountService {
       notifications: {
         devices: subs.map((s) => ({ service: origin(s.endpoint), device: s.user_agent, createdAt: iso(s.created_at), lastDeliveredAt: iso(s.last_ok_at) })),
         prefs: prefs
-          ? { daily: prefs.daily === 1, dailyTimeMinutes: prefs.daily_time, prayer: prefs.prayer === 1, updatedAt: iso(prefs.updated_at) }
+          ? { daily: prefs.daily === 1, dailyTimeMinutes: prefs.daily_time, prayer: prefs.prayer === 1, propReminders: prefs.props === 1, updatedAt: iso(prefs.updated_at) }
           : null,
       },
       appearance: this.looks?.export(userId) ?? null,
+      propShop: this.shop?.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
       retention: {
         groupMessagesDays: GROUP_CHAT_DAYS,
         lanternDays: LANTERN_DAYS,
+        propRentalDays: RENTAL_KEEP_DAYS,
         termsVersionCurrent: TERMS_VERSION,
       },
     };
@@ -272,7 +277,8 @@ export class AccountService {
       // Everything else cascades from users: sessions, word book pages, meditations,
       // lanterns (→ their reactions), my reactions, my saved lanterns, memberships,
       // read pointers, push subscriptions and preferences, appearance and strikes
-      // (columns on users), my outfit drawings (→ reports about them) and my reports.
+      // (columns on users), my outfit drawings (→ reports about them) and my reports,
+      // prop rentals, their request log and daily counts (stock is not given back).
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
       const remainingGroups = memberOf.filter((g) => !deletedGroups.includes(g));
@@ -285,7 +291,7 @@ export class AccountService {
    *  - lantern copies: 내린 ones after a day, expired ones a day after leaving the hill;
    *  - sign-ups that never chose a nickname nor agreed to the terms, after a day.
    */
-  sweep(now = Date.now()): { lanterns: number; signups: number; outfits: number } {
+  sweep(now = Date.now()): { lanterns: number; signups: number; outfits: number; rentals: number } {
     const lanterns = this.db
       .prepare('DELETE FROM lanterns WHERE (removed_at IS NOT NULL AND removed_at < ?) OR created_at < ?')
       .run(now - REMOVED_LANTERN_GRACE_MS, now - LANTERN_DAYS * DAY_MS - EXPIRED_LANTERN_GRACE_MS).changes;
@@ -293,6 +299,7 @@ export class AccountService {
       .prepare('DELETE FROM users WHERE nickname IS NULL AND terms_agreed_at IS NULL AND created_at < ?')
       .run(now - ABANDONED_SIGNUP_MS).changes;
     const outfits = this.looks?.sweep(now) ?? 0;
-    return { lanterns, signups, outfits };
+    const rentals = this.shop?.sweep(now) ?? 0;
+    return { lanterns, signups, outfits, rentals };
   }
 }

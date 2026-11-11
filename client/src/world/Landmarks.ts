@@ -5,6 +5,7 @@ import type { CircleCollider } from './ChunkManager';
 import type { Heightfield } from './Heightfield';
 import { createLabelSprite } from './labels';
 import { mulberry32 } from './random';
+import { ShopStall } from './ShopStall';
 
 const matCache = new Map<number, THREE.MeshLambertMaterial>();
 function lambert(color: number): THREE.MeshLambertMaterial {
@@ -48,6 +49,8 @@ export class Landmarks {
 
   /** Door position of the private room, used by the proximity prompt. */
   readonly closetDoor = new THREE.Vector3();
+  /** 나눔 소품 가게 (M9) on the plaza. */
+  private shopStall!: ShopStall;
 
   constructor(private readonly field: Heightfield, shadows: boolean) {
     this.shadows = shadows;
@@ -171,6 +174,18 @@ export class Landmarks {
     this.colliders.push({ x: post.position.x, z: post.position.z, r: 0.25 });
 
     this.label(l, l.name, '처음 오신 곳', h + 3.4);
+
+    this.shopStall = new ShopStall(h, this.colliders, this.shadows);
+    this.group.add(this.shopStall.group);
+  }
+
+  /** 나눔 소품 가게: open (stall fades in) or closed (only a small sign with the next opening). */
+  setShop(open: boolean, nextOpenText: string) {
+    this.shopStall.setShop(open, nextOpenText);
+  }
+
+  get shopVisual(): { open: boolean; opacity: number } {
+    return this.shopStall.visual;
   }
 
   /** 기도의 뜰: an open hedge ring with mats laid toward the centre. */
@@ -356,9 +371,11 @@ export class Landmarks {
     this.night = night;
     for (const g of this.glows) g.material.emissiveIntensity = g.day + (g.night - g.day) * night;
     for (const l of this.lights) l.light.intensity = l.day + (l.night - l.day) * night;
+    this.shopStall.setNight(night);
   }
 
   update(elapsed: number, camera: THREE.Camera) {
+    this.shopStall.update(elapsed);
     // Flame flicker.
     const f = 1 + Math.sin(elapsed * 9.1) * 0.06 + Math.sin(elapsed * 13.7) * 0.04;
     for (const flame of this.flames) flame.scale.set(1, f, 1);

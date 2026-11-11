@@ -14,6 +14,10 @@ import {
   type GroupMessage,
   type SeatKind,
   type Look,
+  type MyShop,
+  type PropId,
+  type PropWear,
+  type ShopStatus,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -50,6 +54,11 @@ export interface NetHandlers {
   word(word: WordPassage): void;
   rename(id: string, name: string): void;
   look(id: string, look: Look | null): void;
+  /** 나눔 소품 가게 (M9). */
+  props(id: string, props: PropWear[]): void;
+  shop(shop: ShopStatus): void;
+  myShop(mine: MyShop, ended: PropId[]): void;
+  propReminder(item: PropId, endsAt: number, now: number): void;
   lanterns(list: LanternInfo[]): void;
   lantern(l: LanternInfo): void;
   lanternGone(id: number): void;
@@ -150,6 +159,18 @@ export class NetClient {
         break;
       case 'look':
         this.handlers.look?.(msg.id, msg.look);
+        break;
+      case 'props':
+        this.handlers.props?.(msg.id, msg.props);
+        break;
+      case 'shop':
+        this.handlers.shop?.(msg.shop);
+        break;
+      case 'myShop':
+        this.handlers.myShop?.(msg.mine, Array.isArray(msg.ended) ? msg.ended : []);
+        break;
+      case 'propReminder':
+        this.handlers.propReminder?.(msg.item, msg.endsAt, msg.now);
         break;
       case 'snap':
         this.handlers.snapshot?.(msg.players);
@@ -307,6 +328,18 @@ export class NetClient {
           break;
         case 'look':
           if (typeof msg.id === 'string') this.dispatch(msg);
+          break;
+        case 'props':
+          if (typeof msg.id === 'string' && Array.isArray(msg.props)) this.dispatch(msg);
+          break;
+        case 'shop':
+          if (msg.shop && typeof msg.shop.now === 'number') this.dispatch(msg);
+          break;
+        case 'myShop':
+          if (msg.mine && Array.isArray(msg.mine.rentals)) this.dispatch(msg);
+          break;
+        case 'propReminder':
+          if (typeof msg.item === 'string' && typeof msg.endsAt === 'number') this.dispatch(msg);
           break;
         case 'snap':
           if (Array.isArray(msg.players)) this.dispatch(msg);

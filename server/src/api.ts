@@ -7,6 +7,7 @@ import { TokenBucket } from './rateLimit.js';
 import type { PushService } from './push.js';
 import type { AccountService } from './account.js';
 import type { LookService } from './looks.js';
+import type { ShopService } from './shop.js';
 import { TERMS_VERSION } from '../../shared/protocol.js';
 
 /** What the API tells the realtime room about. */
@@ -104,6 +105,7 @@ export interface ApiDeps {
   push: PushService;
   accounts: AccountService;
   looks: LookService;
+  shop: ShopService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -134,7 +136,7 @@ const id = (s: string) => {
 
 export class Api {
   private readonly routes: { method: string; pattern: RegExp; handler: Handler; opts: RouteOpts }[] = [];
-  private readonly ipLimit = new RateLimiter(600, 60_000);
+  private readonly ipLimit = new RateLimiter(Number(process.env.IP_RATE_LIMIT ?? 600), 60_000);
   private readonly authLimit = new RateLimiter(Number(process.env.AUTH_RATE_LIMIT ?? 30), 60_000);
   private readonly nicknameLimit = new RateLimiter(10, 3_600_000);
   private readonly joinLimit = new RateLimiter(10, 60_000);
@@ -146,6 +148,7 @@ export class Api {
   private readonly lookLimit = new RateLimiter(Number(process.env.LOOK_RATE_LIMIT ?? 60), 3_600_000);
   private readonly outfitLimit = new RateLimiter(Number(process.env.OUTFIT_RATE_LIMIT ?? 20), 3_600_000);
   private readonly reportLimit = new RateLimiter(30, 3_600_000);
+  private readonly shopLimit = new RateLimiter(Number(process.env.SHOP_RATE_LIMIT ?? 60), 600_000);
   private readonly admins = adminEmails();
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
@@ -343,6 +346,68 @@ export class Api {
       console.log(`admin ${u.id}: outfit ${oid} ${String(body.action).slice(0, 10)}`);
       sendJson(res, 200, { ok: true });
     }, open);
+
+    // ---------------- 나눔 소품 가게 (M9). Everyone may look; renting needs an account,
+    // a nickname and consent (the route table blocks writes until consent).
+    r('GET', '/api/shop', ({ res, user }) => {
+      sendJson(res, 200, { shop: d.shop.status(), mine: user?.nickname ? d.shop.mine(user.id) : null, signedIn: !!user?.nickname });
+    });
+    r('POST', '/api/shop/rent', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      const body = await readJson(req);
+      this.limit(this.shopLimit, `user:${u.id}`);
+      const out = d.shop.rent(u.id, body.requestId, body.item);
+      const extra = { shop: d.shop.status(), mine: d.shop.mine(u.id), replayed: out.replayed };
+      if (out.ok) sendJson(res, 200, { ok: true, rental: out.rental, ...extra });
+      else sendJson(res, out.status, { error: out.error, message: out.message, ...extra });
+    });
+    // 반납 is always allowed (even before agreeing to new terms): it only gives something back.
+    r(
+      'POST',
+      '/api/shop/return',
+      async ({ req, res, user }) => {
+        const u = this.signedIn(user);
+        const body = await readJson(req);
+        this.limit(this.shopLimit, `user:${u.id}`);
+        const out = d.shop.returnRental(u.id, body.rentalId);
+        sendJson(res, 200, { ...out, mine: d.shop.mine(u.id) });
+      },
+      open,
+    );
+    r('GET', '/api/admin/shop', ({ res, user }) => {
+      this.admin(user);
+      sendJson(res, 200, d.shop.adminOverview());
+    }, open);
+    r('PUT', '/api/admin/shop/stock', async ({ req, res, user }) => {
+      const u = this.admin(user);
+      const body = await readJson(req);
+      const out = d.shop.adminSetWindowStock(body.win, body.item, body.total);
+      console.log(`admin ${u.id}: shop stock window ${Number(body.win)} ${String(body.item).slice(0, 12)} = ${Number(body.total)}`);
+      sendJson(res, 200, out);
+    }, open);
+    r('PUT', '/api/admin/shop/defaults', async ({ req, res, user }) => {
+      const u = this.admin(user);
+      const body = await readJson(req);
+      const out = d.shop.adminSetDefault(body.item, body.stock);
+      console.log(`admin ${u.id}: shop default ${String(body.item).slice(0, 12)} = ${Number(body.stock)}`);
+      sendJson(res, 200, out);
+    }, open);
+    if (d.testMode) {
+      // Test-only fake clock for the shop (windows, expiry, reminders). Never in production.
+      r('POST', '/api/test/shop/clock', async ({ req, res }) => {
+        const now = (await readJson(req)).now;
+        d.shop.now = typeof now === 'number' && Number.isFinite(now) ? () => now : () => Date.now();
+        if (d.push.mock) d.push.now = d.shop.now;
+        // Everyone's clock offset follows the jump (a real clock never jumps).
+        d.shop.events?.shopChanged();
+        sendJson(res, 200, { now: d.shop.now(), shop: d.shop.status() });
+      });
+      r('POST', '/api/test/shop/tick', async ({ res }) => sendJson(res, 200, await d.shop.tick()));
+      r('POST', '/api/test/shop/ensure', async ({ res }) => {
+        const s = d.shop.status();
+        sendJson(res, 200, { added: s.open && s.win !== null ? d.shop.ensureStock(s.date, s.win) : 0, shop: d.shop.status() });
+      });
+    }
 
     // ---------------- word book (owner only)
     r('GET', '/api/wordbook', ({ res, user }) => sendJson(res, 200, d.wordbook.list(this.signedIn(user).id)));

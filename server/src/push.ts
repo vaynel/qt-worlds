@@ -5,10 +5,11 @@ import type { DB } from './db.js';
 import { HttpError } from './http.js';
 
 /**
- * Web Push (M6). Two kinds of notifications, both opt-out per user:
+ * Web Push (M6). Kinds of notifications, each opt-out per user:
  *  - 🕊️ daily word at the user's chosen time (Asia/Seoul), at most once a day;
  *  - 🤲 someone prayed (기도하기) for one of my lanterns: never who, never which
- *    lantern, throttled and batched.
+ *    lantern, throttled and batched;
+ *  - ⏰ a borrowed prop (M9 나눔 소품 가게) has 10 minutes left (sent by ShopService).
  * Payloads only ever hold our own fixed text and the (public) daily word.
  * Disabled unless VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT are set.
  */
@@ -26,7 +27,7 @@ export const DAILY_TITLE = '🕊️ 오늘의 말씀이 도착했어요';
 export const PRAYER_TITLE = '🤲 누군가 당신의 묵상을 위해 기도하고 있어요';
 
 export interface PushPayload {
-  kind: 'daily' | 'prayer';
+  kind: 'daily' | 'prayer' | 'prop';
   title: string;
   body: string;
   url: string;
@@ -44,6 +45,7 @@ interface PrefsRow {
   daily: number;
   daily_time: number;
   prayer: number;
+  props: number;
 }
 
 export interface Delivery {
@@ -213,11 +215,13 @@ export class PushService {
   // ---------------------------------------------------------------- preferences
 
   prefs(userId: number) {
-    const p = this.db.prepare('SELECT daily, daily_time, prayer FROM push_prefs WHERE user_id = ?').get(userId) as PrefsRow | undefined;
+    const p = this.db.prepare('SELECT daily, daily_time, prayer, props FROM push_prefs WHERE user_id = ?').get(userId) as PrefsRow | undefined;
     return {
       daily: p ? p.daily === 1 : true,
       dailyTime: minutesToTime(p ? p.daily_time : DEFAULT_DAILY_MIN),
       prayer: p ? p.prayer === 1 : true,
+      /** 소품 만료 알림 (M9): 10 minutes before a borrowed prop goes back. */
+      props: p ? p.props === 1 : true,
       subscriptions: this.count(userId),
     };
   }
@@ -231,16 +235,17 @@ export class PushService {
     };
     const daily = bool(body.daily, cur.daily, '말씀 알림');
     const prayer = bool(body.prayer, cur.prayer, '기도 알림');
+    const props = bool(body.props, cur.props, '소품 만료 알림');
     const timeRaw = body.dailyTime === undefined ? cur.dailyTime : body.dailyTime;
     const m = typeof timeRaw === 'string' ? /^([01]\d|2[0-3]):(00|30)$/.exec(timeRaw) : null;
     if (!m) throw new HttpError(400, 'bad_time', '알림 시간은 30분 단위로 골라 주세요.');
     const minutes = Number(m[1]) * 60 + Number(m[2]);
     this.db
       .prepare(
-        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, updated_at = excluded.updated_at`,
+        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, props, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, props = excluded.props, updated_at = excluded.updated_at`,
       )
-      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, this.now());
+      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, props ? 1 : 0, this.now());
     return this.prefs(userId);
   }
 

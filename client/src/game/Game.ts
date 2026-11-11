@@ -39,6 +39,9 @@ import { ReportView } from '../ui/ReportView';
 import { AdminView } from '../ui/AdminView';
 import { getMe } from '../net/api';
 import { Social } from './Social';
+import { ShopClient } from './Shop';
+import { PropDock, ShopView } from '../ui/ShopView';
+import { PLAZA as PLAZA_CENTRE, PROPS, SHOP_STALL, shopWindowAt } from '../../../shared/protocol';
 
 export interface GameSession {
   /** null = solo mode ("혼자 둘러보기"). */
@@ -119,6 +122,11 @@ export class Game {
   private localOutfit: number | null = null;
   private noticeEl: HTMLElement | null = null;
   private noticeDismissed = new Set<number>();
+  /** 나눔 소품 가게 (M9). */
+  private readonly shop = new ShopClient(() => !!this.account);
+  private shopView!: ShopView;
+  private propDock!: PropDock;
+  private nearShop = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -212,6 +220,8 @@ export class Game {
     }
     this.store = session.store;
     this.account = session.account;
+    // After the voice chip exists: the HUD dock sits below it (CSS sibling rule).
+    this.setupShop(session);
     this.lanterns = new LanternField(this.world.field);
     this.scene.add(this.lanterns.group);
     const needLogin = (reason: string) => this.loginPrompt.open(reason);
@@ -281,11 +291,14 @@ export class Game {
       {
         open: () => this.openCustomize(),
         isAdmin: () => this.isAdmin,
-        openAdmin: () => void this.adminView.open(),
+        openAdmin: (tab) => void this.adminView.open(tab ?? 'outfits'),
       },
     );
     // Tapping a 🕊️ notification while the app is open: show today's word.
-    window.addEventListener('worlds-notification-click', () => {
+    window.addEventListener('worlds-notification-click', (e) => {
+      // ⏰ prop reminders just bring the app forward (the HUD chip shows the time left).
+      const url = (e as CustomEvent).detail;
+      if (typeof url === 'string' && url.includes('props=1')) return;
       if (!Modal.anyOpen) void this.devotion.openWord();
     });
 
@@ -417,12 +430,62 @@ export class Game {
     return null;
   }
 
-  /** E key / action button: enter the 골방, sit/stand on a mat, or read a lantern. */
+  /** E key / action button: enter the 골방, sit/stand on a mat, read a lantern, or visit the shop. */
   private primaryAction() {
     if (this.inCloset || this.transitioning) return;
     if (this.player.seat < 0 && this.nearDoor()) return this.enterCloset();
     if (this.player.seat < 0 && !this.social.seatAction(false) && this.nearLantern !== null) return void this.openLantern(this.nearLantern);
+    if (this.player.seat < 0 && !this.social.seatAction(false) && this.nearShop) return this.openShop();
     this.social.toggleSeat();
+  }
+
+  // ------------------------------------------------------------------ 나눔 소품 가게 (M9)
+
+  private setupShop(session: GameSession) {
+    const toast = (text: string, seconds = 4) => this.hud.toast(text, this.elapsed, seconds);
+    this.scene.add(this.player.avatar.trail);
+    this.shopView = new ShopView(this.shop, { toast, needLogin: (reason) => this.loginPrompt.open(reason, '') });
+    this.propDock = new PropDock(this.shop, () => this.openShop(), toast);
+    this.shop.onChange(() => this.applyShop());
+    if (session.net) {
+      session.net.on({
+        shop: (s) => this.shop.setStatus(s),
+        myShop: (mine, ended) => {
+          this.shop.setMine(mine);
+          for (const item of ended) if (PROPS[item]) toast(`${PROPS[item].emoji} ${PROPS[item].name} 사용 시간이 끝나서 가게로 돌아갔어요.`, 5);
+        },
+        propReminder: (item, _endsAt, now) => {
+          this.shop.syncClock(now);
+          if (PROPS[item]) toast(`⏰ ${PROPS[item].name} 사용 시간이 10분 남았어요`, 6);
+        },
+      });
+    } else {
+      // 혼자 둘러보기: the stall follows this device's clock, nothing can be borrowed.
+      const solo = () => this.shop.setStatus({ ...shopWindowAt(Date.now()), now: Date.now(), stock: {} });
+      solo();
+      window.setInterval(solo, 30_000);
+    }
+    this.applyShop();
+  }
+
+  private shopOpenShown: boolean | null = null;
+  private shopSignText = '';
+
+  /** Our avatar wears what the server says we borrowed; the stall follows the server's window. */
+  private applyShop() {
+    this.player.avatar.setProps(this.shop.props);
+    const open = this.shop.open;
+    const sign = this.shop.status ? `${this.shop.nextOpenLabel()}에 문을 열어요` : '';
+    if (open !== this.shopOpenShown || sign !== this.shopSignText) {
+      this.shopOpenShown = open;
+      this.shopSignText = sign;
+      this.world.landmarks.setShop(open, sign);
+    }
+  }
+
+  private openShop() {
+    if (this.inCloset) return;
+    this.shopView.open();
   }
 
   private async openLantern(id: number) {
@@ -653,6 +716,13 @@ export class Game {
       logSeats: () => ({ campfire: CAMPFIRE, seats: LOG_SEATS.map((s) => ({ ...s })) }),
       /** Plaza bench seats (shared protocol numbers). */
       benchSeats: () => ({ benches: BENCHES.map((b) => ({ ...b })), seats: BENCH_SEATS.map((s) => ({ ...s })) }),
+      /** 나눔 소품 가게: client state (what the server said) and the sheet. */
+      shop: () => ({ ...this.shop.describe(), sheetOpen: this.shopView.isOpen, nearShop: this.nearShop }),
+      openShop: () => this.openShop(),
+      /** Rent through the real client path (same requestId reused on retries). */
+      shopRent: (item: import('../../../shared/protocol').PropId, requestId?: string) => this.shop.rent(item, requestId),
+      shopRefresh: () => this.shop.refresh(),
+      stall: () => ({ ...SHOP_STALL }),
       /** Worship player fold state in the world dock (layout tests). */
       worshipFold: (fold: 'open' | 'mini' | 'folded') => this.worship.setFold(fold),
       /** Point the orbit camera (for screenshots). */
@@ -729,6 +799,8 @@ export class Game {
     // 5. Today's word, ambience, HUD
     this.devotion.update(dt, this.elapsed, !this.inCloset && !this.transitioning);
     this.lanterns.setNight(this.world.dayNight.night);
+    this.player.avatar.setNight(this.world.dayNight.night);
+    this.social.remotes.setNight(this.world.dayNight.night);
     if (!this.inCloset) this.localTag?.update(this.tagView());
     this.lanterns.update(this.elapsed, this.inCloset ? null : this.nearLantern);
     this.updateAudio();
@@ -787,9 +859,14 @@ export class Game {
     const seatLabel = this.social.seatAction(touch);
     const p0 = this.player.position;
     this.nearLantern = this.player.seat < 0 ? (this.lanterns.nearest(p0.x, p0.z, LANTERN_READ_REACH)?.id ?? null) : null;
+    this.nearShop = this.player.seat < 0 && Math.hypot(p0.x - SHOP_STALL.x, p0.z - SHOP_STALL.z) < SHOP_STALL.reach;
+    const shopLabel = this.shop.open ? '소품 가게 보기' : '가게 안내 보기';
     if (this.player.seat < 0 && this.nearDoor()) this.hud.setAction(touch ? '골방에 들어가기' : '골방에 들어가기 (E)');
     else if (!seatLabel && this.nearLantern !== null) this.hud.setAction(touch ? '등불 읽기' : '등불 읽기 (E)');
+    else if (!seatLabel && this.nearShop) this.hud.setAction(touch ? shopLabel : `${shopLabel} (E)`);
     else this.hud.setAction(seatLabel);
+    this.propDock.setNearPlaza(Math.hypot(p0.x - PLAZA_CENTRE.x, p0.z - PLAZA_CENTRE.z) < 16);
+    this.propDock.update();
 
     const p = this.player.position;
     const here = this.world.locate(p.x, p.z);
@@ -801,6 +878,10 @@ export class Game {
     const door = this.world.landmarks.closetDoor;
     if (Math.hypot(p.x - door.x, p.z - door.z) < 3.2) {
       this.hud.showPrompt('closet-door', '골방 문 앞', '문을 열고 들어가면 나만의 조용한 기도 방이에요.', this.elapsed, true);
+    } else if (this.nearShop) {
+      this.hud.clearPrompt('closet-door');
+      if (this.shop.open) this.hud.showPrompt('shop-open', '나눔 소품 가게', `모두 무료예요 · ${this.shop.closesLabel()}까지 열려 있어요`, this.elapsed);
+      else this.hud.showPrompt('shop-closed', '나눔 소품 가게', `지금은 문을 닫았어요 · ${this.shop.nextOpenLabel()}에 다시 열어요`, this.elapsed);
     } else {
       this.hud.clearPrompt('closet-door');
       if (here) this.hud.showPrompt(here.id, here.name, here.blurb, this.elapsed);
@@ -854,6 +935,16 @@ export class Game {
         admin: this.isAdmin,
         customize: this.customize.describe(),
         report: this.reportView?.isOpen ?? false,
+      },
+      m9: {
+        shopOpen: this.shop.open,
+        stall: this.world.landmarks.shopVisual,
+        props: this.player.avatar.propsInfo,
+        rentals: this.shop.rentals.map((r) => ({ id: r.id, item: r.item, endsAt: r.endsAt })),
+        usedToday: this.shop.mine?.usedToday ?? null,
+        sheet: this.shopView.isOpen,
+        nearShop: this.nearShop,
+        liveProps: Avatar.liveProps,
       },
     };
   }

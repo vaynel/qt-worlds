@@ -190,6 +190,63 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX outfit_reports_reporter ON outfit_reports(reporter_id);
   `,
+  // v8: 나눔 소품 가게 (M9): per-window stock, rentals with an idempotency key,
+  // a log of every rent outcome (replays return it), per-day counts, admin
+  // stock defaults, and the 소품 만료 알림 push preference.
+  `
+  CREATE TABLE shop_defaults (
+    item TEXT PRIMARY KEY,
+    stock INTEGER NOT NULL CHECK (stock >= 0 AND stock <= 99),
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE shop_stock (
+    kst_date TEXT NOT NULL,
+    win INTEGER NOT NULL CHECK (win >= 0 AND win < 3),
+    item TEXT NOT NULL,
+    total INTEGER NOT NULL CHECK (total >= 0),
+    remaining INTEGER NOT NULL CHECK (remaining >= 0 AND remaining <= total),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (kst_date, win, item)
+  );
+  CREATE TABLE rentals (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL UNIQUE,
+    item TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    kst_date TEXT NOT NULL,
+    win INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL CHECK (ends_at > started_at),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'returned', 'expired')),
+    ended_at INTEGER,
+    reminded_at INTEGER
+  );
+  CREATE UNIQUE INDEX rentals_one_item ON rentals(user_id, item) WHERE status = 'active';
+  CREATE UNIQUE INDEX rentals_one_slot ON rentals(user_id, slot) WHERE status = 'active';
+  CREATE INDEX rentals_active_ends ON rentals(status, ends_at);
+  CREATE INDEX rentals_user ON rentals(user_id, kst_date);
+  CREATE INDEX rentals_window ON rentals(kst_date, win);
+  CREATE TABLE rental_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    count INTEGER NOT NULL CHECK (count >= 0 AND count <= 2),
+    PRIMARY KEY (user_id, kst_date)
+  );
+  CREATE TABLE rental_requests (
+    request_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item TEXT NOT NULL,
+    rental_id INTEGER REFERENCES rentals(id) ON DELETE SET NULL,
+    status INTEGER NOT NULL,
+    error TEXT,
+    message TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX rental_requests_created ON rental_requests(created_at);
+  CREATE INDEX rental_requests_user ON rental_requests(user_id);
+  ALTER TABLE push_prefs ADD COLUMN props INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

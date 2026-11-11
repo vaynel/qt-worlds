@@ -11,6 +11,7 @@ import { originAllowed, requestInfo, StaticClient } from './http.js';
 import { PushService } from './push.js';
 import { LookService } from './looks.js';
 import { Room } from './Room.js';
+import { ShopService } from './shop.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
@@ -56,7 +57,6 @@ const lanterns = new LanternService(db, groups);
 const wordbook = new WordBookService(db, dailyWord, TEST_MODE);
 const chat = new GroupChatService(db, groups);
 const looks = new LookService(db);
-const accounts = new AccountService(db, looks);
 const push = new PushService(db, dailyWord, {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -64,6 +64,8 @@ const push = new PushService(db, dailyWord, {
   mock: PUSH_MOCK,
   testMode: TEST_MODE,
 });
+const shop = new ShopService(db, push);
+const accounts = new AccountService(db, looks, shop);
 if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
 else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
@@ -94,10 +96,12 @@ const room = new Room({
   groups,
   lanterns,
   looks,
+  shop,
 });
+shop.events = room;
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -168,12 +172,16 @@ const sweep = () => {
   sessions.sweep();
   chat.purge();
   const gone = accounts.sweep();
-  if (gone.lanterns || gone.signups || gone.outfits) log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings deleted`);
+  if (gone.lanterns || gone.signups || gone.outfits || gone.rentals)
+    log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings, ${gone.rentals} old rental records deleted`);
 };
 const sweeper = setInterval(sweep, 3_600_000);
 sweep();
 // Every minute: daily words that are due (Asia/Seoul) and batched prayer notices.
 // Mock push (tests) is driven by /api/test/push/tick with a fake clock instead.
+// Every second: shop windows (stock release), prop expiry and 10-minute reminders (server clock).
+const shopTimer = setInterval(() => void shop.tick().catch((e) => console.error('shop tick', e)), 1000);
+void shop.tick().catch((e) => console.error('shop tick', e));
 const pushTimer = push.enabled && !push.mock ? setInterval(() => void push.tick().catch((e) => console.error('push tick', e)), 60_000) : null;
 
 http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /ws, api /api) seed=${SEED} max=${MAX}`));
@@ -181,6 +189,7 @@ http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /
 const shutdown = () => {
   clearInterval(heartbeat);
   clearInterval(sweeper);
+  clearInterval(shopTimer);
   if (pushTimer) clearInterval(pushTimer);
   room.close();
   wss.close();

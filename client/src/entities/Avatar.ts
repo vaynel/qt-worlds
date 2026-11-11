@@ -5,8 +5,45 @@ import {
   OUTFIT_PALETTE,
   OUTFIT_SIZE,
   type HairStyle,
+  type PropId,
+  type PropWear,
   type SeatKind,
 } from '../../../shared/protocol';
+import {
+  bookClosedGeo,
+  bookOpenGeo,
+  doveBodyGeo,
+  doveHeadGeo,
+  FootTrail,
+  glowTexture,
+  guitarGeo,
+  hatGeo,
+  lanternCoreGeo,
+  lanternFrameGeo,
+  LANTERN_DROP,
+  propMaterial,
+} from './Props';
+
+/** Footprints: one print per this many metres walked, alternating feet. */
+const PRINT_STEP = 0.55;
+let poolGeo: THREE.BufferGeometry | null = null;
+
+interface LanternRig {
+  group: THREE.Group;
+  coreMat: THREE.MeshLambertMaterial;
+  haloMat: THREE.SpriteMaterial;
+  halo: THREE.Sprite;
+  pool: THREE.Mesh;
+  poolMat: THREE.MeshBasicMaterial;
+}
+interface PropRig {
+  lantern?: LanternRig;
+  guitar?: THREE.Mesh;
+  bible?: { closed: THREE.Mesh; open: THREE.Mesh };
+  dove?: { group: THREE.Group; head: THREE.Mesh };
+  hat?: THREE.Mesh;
+  feet?: FootTrail;
+}
 
 /** Hip pivot height when standing (top of the leg pivots). */
 const HIP = 0.32;
@@ -125,6 +162,22 @@ export class Avatar {
   private pattern: { pixels: string; texture: THREE.DataTexture; material: THREE.MeshLambertMaterial } | null = null;
   /** Pattern textures alive across all avatars (tests check they are disposed on leave). */
   static liveTextures = 0;
+  /** Borrowed props (M9) alive across all avatars (tests check they are disposed on leave). */
+  static liveProps = 0;
+  /** ✨ footprints live here, in world space: the owner adds this group to the scene. */
+  readonly trail = new THREE.Group();
+  private props: PropRig = {};
+  private propKey = '';
+  private propItems: PropId[] = [];
+  private night = 0;
+  /** Guitar playing (seated on a log) and reading (open book on a bench) blends. */
+  private play = 0;
+  private read = 0;
+  /** Hand prop set down beside the seat while the guitar is played. */
+  private handDown = false;
+  private readonly lastPrint = new THREE.Vector3(NaN, 0, NaN);
+  private printSide = 1;
+  private readonly tmpV = new THREE.Vector3();
 
   constructor(colors: AvatarColors | AvatarLook = DEFAULT_AVATAR, castShadow = true) {
     this.castShadow = castShadow;
@@ -147,6 +200,7 @@ export class Avatar {
     this.robeMat = robe;
     const dark = mat(0x6b4a33);
 
+    this.trail.name = 'prop-trail';
     this.root.add(this.body);
     this.robe = part(new THREE.CylinderGeometry(0.26, 0.44, ROBE_H, ROBE_SIDES, 1, false, ROBE_THETA0), robe, 0, ROBE_MID, 0, this.body);
     this.scarfMat = mat(colors.scarf);
@@ -207,8 +261,15 @@ export class Avatar {
       return m;
     };
     if (style === 'bald') return;
-    // The cap every style starts from (today's 짧은 머리).
-    add(new THREE.SphereGeometry(0.29, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.55), 0, 0.27, -0.04, -0.35);
+    const hat = !!this.props?.hat;
+    // The cap every style starts from (today's 짧은 머리). Under a 털모자 it
+    // would poke through the crown: hide it and leave a band of hair below the brim.
+    const cap = add(new THREE.SphereGeometry(0.29, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.55), 0, 0.27, -0.04, -0.35);
+    cap.visible = !hat;
+    cap.userData.cap = true;
+    if (hat && (style === 'short' || style === 'tied')) {
+      add(new THREE.CylinderGeometry(0.288, 0.298, 0.09, 9, 1, true, Math.PI * 0.42, Math.PI * 1.16), 0, 0.27, -0.025);
+    }
     // Open cylinders: theta 0 is the face (+z), so start past it and leave a gap there.
     if (style === 'bob') {
       add(new THREE.CylinderGeometry(0.29, 0.315, 0.24, 9, 1, true, Math.PI * 0.3, Math.PI * 1.4), 0, 0.17, -0.02);
@@ -216,7 +277,9 @@ export class Avatar {
       add(new THREE.CylinderGeometry(0.29, 0.34, 0.5, 9, 1, true, Math.PI * 0.34, Math.PI * 1.32), 0, 0.04, -0.03);
     } else if (style === 'tied') {
       // A bun at the back with a short tail hanging from it.
-      add(new THREE.IcosahedronGeometry(0.115, 0), 0, 0.31, -0.28);
+      // Under a hat the bun drops below the brim.
+      if (hat) add(new THREE.IcosahedronGeometry(0.1, 0), 0, 0.2, -0.3);
+      else add(new THREE.IcosahedronGeometry(0.115, 0), 0, 0.31, -0.28);
       add(new THREE.ConeGeometry(0.08, 0.3, 6), 0, 0.12, -0.32, 0.25);
     }
   }
@@ -285,6 +348,299 @@ export class Avatar {
     return { pixels: this.pattern.pixels, checksum: h, filter: this.pattern.texture.magFilter === THREE.NearestFilter ? 'nearest' : 'linear' };
   }
 
+
+  // ------------------------------------------------------------------ 소품 (M9)
+
+  /** Borrowed props to wear. Cheap when unchanged; removed props are freed. */
+  setProps(list: readonly PropWear[]): void {
+    const items = [...new Set(list.map((p) => p.item))].sort();
+    const key = items.join(',');
+    if (key === this.propKey) return;
+    this.propKey = key;
+    this.propItems = items;
+    const want = new Set(items);
+    const r = this.props;
+    const hadHat = !!r.hat;
+    if (r.lantern && !want.has('lantern')) {
+      const l = r.lantern;
+      l.group.removeFromParent();
+      l.pool.removeFromParent();
+      l.coreMat.dispose();
+      l.haloMat.dispose();
+      l.poolMat.dispose();
+      delete r.lantern;
+      Avatar.liveProps--;
+    }
+    if (r.guitar && !want.has('guitar')) {
+      r.guitar.removeFromParent();
+      delete r.guitar;
+      Avatar.liveProps--;
+    }
+    if (r.bible && !want.has('bible')) {
+      r.bible.closed.removeFromParent();
+      r.bible.open.removeFromParent();
+      delete r.bible;
+      Avatar.liveProps--;
+    }
+    if (r.dove && !want.has('dove')) {
+      r.dove.group.removeFromParent();
+      delete r.dove;
+      Avatar.liveProps--;
+    }
+    if (r.hat && !want.has('hat')) {
+      r.hat.removeFromParent();
+      delete r.hat;
+      Avatar.liveProps--;
+    }
+    if (r.feet && !want.has('footprints')) {
+      r.feet.dispose();
+      delete r.feet;
+      Avatar.liveProps--;
+    }
+    const mesh = (geo: THREE.BufferGeometry, parent: THREE.Object3D) => {
+      const m = new THREE.Mesh(geo, propMaterial());
+      m.castShadow = this.castShadow;
+      parent.add(m);
+      return m;
+    };
+    if (want.has('lantern') && !r.lantern) {
+      const group = new THREE.Group();
+      group.name = 'prop-lantern';
+      mesh(lanternFrameGeo(), group);
+      const coreMat = new THREE.MeshLambertMaterial({ color: 0xffd58a, emissive: 0xffb04a, emissiveIntensity: 0.5, flatShading: true });
+      group.add(new THREE.Mesh(lanternCoreGeo(), coreMat));
+      const haloMat = new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc070, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, opacity: 0.2 });
+      const halo = new THREE.Sprite(haloMat);
+      halo.position.y = -0.195;
+      halo.scale.setScalar(0.85);
+      halo.renderOrder = 3;
+      group.add(halo);
+      poolGeo ??= new THREE.PlaneGeometry(2.6, 2.6).rotateX(-Math.PI / 2);
+      const poolMat = new THREE.MeshBasicMaterial({
+        map: glowTexture(),
+        color: 0xffa850,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+        opacity: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      });
+      const pool = new THREE.Mesh(poolGeo, poolMat);
+      pool.renderOrder = 1;
+      pool.position.set(0.3, 0.06, 0.1);
+      this.root.add(pool);
+      this.armR.add(group);
+      group.position.set(0, -0.55, 0.03);
+      r.lantern = { group, coreMat, haloMat, halo, pool, poolMat };
+      Avatar.liveProps++;
+    }
+    if (want.has('guitar') && !r.guitar) {
+      r.guitar = mesh(guitarGeo(), this.body);
+      r.guitar.name = 'prop-guitar';
+      Avatar.liveProps++;
+    }
+    if (want.has('bible') && !r.bible) {
+      const closed = mesh(bookClosedGeo(), this.armR);
+      closed.name = 'prop-bible';
+      closed.position.set(0.0, -0.55, 0.1);
+      closed.rotation.set(0.15, 0.25, 0);
+      const open = mesh(bookOpenGeo(), this.body);
+      open.scale.setScalar(1.2);
+      open.visible = false;
+      r.bible = { closed, open };
+      Avatar.liveProps++;
+    }
+    if (want.has('dove') && !r.dove) {
+      const group = new THREE.Group();
+      group.name = 'prop-dove';
+      group.position.set(-0.31, 1.265, 0.0);
+      group.scale.setScalar(1.25);
+      mesh(doveBodyGeo(), group);
+      const head = mesh(doveHeadGeo(), group);
+      head.position.set(0, 0.1, 0.07);
+      this.body.add(group);
+      r.dove = { group, head };
+      Avatar.liveProps++;
+    }
+    if (want.has('hat') && !r.hat) {
+      r.hat = mesh(hatGeo(), this.head);
+      r.hat.name = 'prop-hat';
+      // Tipped back a touch so the brim clears the eyes.
+      r.hat.rotation.x = -0.14;
+      r.hat.position.set(0, 0.03, 0.02);
+      Avatar.liveProps++;
+    }
+    if (want.has('footprints') && !r.feet) {
+      r.feet = new FootTrail();
+      this.trail.add(r.feet.mesh);
+      this.lastPrint.set(NaN, 0, NaN);
+      Avatar.liveProps++;
+    }
+    if (hadHat !== !!r.hat) this.buildHair(this.look.hairStyle);
+    if (!r.guitar) this.play = 0;
+    if (!r.bible) this.read = 0;
+    if (!key) this.head.rotation.z = 0;
+    this.handDown = false;
+    this.placeProps();
+  }
+
+  /** Night factor 0..1: the hand lantern glows brighter after dark. */
+  setNight(night: number): void {
+    this.night = night;
+  }
+
+  /** For tests: what is worn and how it is shown right now. */
+  get propsInfo(): { items: PropId[]; guitar: 'back' | 'playing' | null; bible: 'closed' | 'open' | null; lanternGlow: number; trail: number; hairHidden: boolean } {
+    const r = this.props;
+    const cap = this.hairGroup.children.find((c) => c.userData.cap);
+    return {
+      items: [...this.propItems],
+      guitar: r.guitar ? (this.play > 0.5 ? 'playing' : 'back') : null,
+      bible: r.bible ? (r.bible.open.visible ? 'open' : 'closed') : null,
+      lanternGlow: r.lantern ? +r.lantern.coreMat.emissiveIntensity.toFixed(2) : 0,
+      trail: r.feet?.visibleCount ?? 0,
+      hairHidden: !!cap && !cap.visible,
+    };
+  }
+
+  /** Where each prop sits for the current pose (called when a pose flips). */
+  private placeProps() {
+    const r = this.props;
+    const playing = this.play > 0.5;
+    const reading = this.read > 0.5;
+    if (r.guitar) {
+      if (playing) {
+        // Across the lap, front out, neck to the left hand.
+        r.guitar.position.set(0.14, 0.68, 0.48);
+        r.guitar.rotation.set(-0.12, 0, 1.2);
+        r.guitar.scale.setScalar(1.2);
+      } else {
+        // Slung on the back, neck up over the right shoulder.
+        r.guitar.position.set(-0.08, 0.66, -0.41);
+        r.guitar.rotation.set(0.1, Math.PI, 0.6);
+        r.guitar.scale.setScalar(1.15);
+      }
+    }
+    // While playing, a hand prop is set down beside the seat.
+    const down = playing && (!!r.lantern || !!r.bible);
+    if (down !== this.handDown) {
+      this.handDown = down;
+      if (r.lantern) {
+        const g = r.lantern.group;
+        if (down) {
+          this.root.add(g);
+          g.position.set(0.42, LANTERN_DROP, 0.66);
+          g.rotation.set(0, 0.4, 0);
+          r.lantern.pool.position.set(0.42, 0.06, 0.66);
+        } else {
+          this.armR.add(g);
+          g.position.set(0, -0.55, 0.03);
+          r.lantern.pool.position.set(0.3, 0.06, 0.1);
+        }
+      }
+      if (r.bible) {
+        const b = r.bible.closed;
+        if (down) {
+          this.root.add(b);
+          b.position.set(-0.42, 0.03, 0.66);
+          b.rotation.set(Math.PI / 2, 0, 0.5);
+        } else {
+          this.armR.add(b);
+          b.position.set(0.0, -0.55, 0.1);
+          b.rotation.set(0.15, 0.25, 0);
+        }
+      }
+    }
+    if (r.bible) {
+      r.bible.open.visible = reading;
+      r.bible.closed.visible = !reading;
+      // Open on the lap, tipped toward the reader's eyes.
+      r.bible.open.position.set(0, 0.8, 0.44);
+      r.bible.open.rotation.set(-0.75, 0, 0);
+    }
+  }
+
+  /** Per-frame prop motion: pose blends, lantern hanging, dove, glow, footprints. */
+  private animateProps(dt: number, speed: number, elapsed: number, moving: number) {
+    const r = this.props;
+    const k = 1 - Math.exp(-6 * dt);
+    const seated = this.sitTarget === 1;
+    const playTarget = r.guitar && seated && this.sitHeight >= 0.58 ? 1 : 0;
+    const readTarget = r.bible && seated && this.sitHeight < 0.58 ? 1 : 0;
+    const wasPlay = this.play > 0.5;
+    const wasRead = this.read > 0.5;
+    this.play += (playTarget - this.play) * k;
+    this.read += (readTarget - this.read) * k;
+    if (wasPlay !== this.play > 0.5 || wasRead !== this.read > 0.5) this.placeProps();
+    const p = this.play;
+    const q = this.read;
+    if (p > 0.001) {
+      // Right hand strums over the sound hole, left hand on the neck.
+      const strum = Math.sin(elapsed * 7.5) * 0.09 + Math.sin(elapsed * 3.1) * 0.03;
+      this.armR.rotation.x += (-1.0 + strum - this.armR.rotation.x) * p;
+      this.armR.rotation.z += (-0.42 - this.armR.rotation.z) * p;
+      this.armL.rotation.x += (-1.32 - this.armL.rotation.x) * p;
+      this.armL.rotation.z += (-0.12 - this.armL.rotation.z) * p;
+      this.head.rotation.x += (0.2 + Math.sin(elapsed * 1.5) * 0.04 - this.head.rotation.x) * p;
+      this.head.rotation.z = Math.sin(elapsed * 1.5) * 0.06 * p;
+    } else {
+      this.head.rotation.z = 0;
+    }
+    if (q > 0.001) {
+      // Both hands hold the open book; head bowed to read.
+      this.armL.rotation.x += (-1.08 - this.armL.rotation.x) * q;
+      this.armR.rotation.x += (-1.08 - this.armR.rotation.x) * q;
+      this.armL.rotation.z += (0.32 - this.armL.rotation.z) * q;
+      this.armR.rotation.z += (-0.32 - this.armR.rotation.z) * q;
+      this.head.rotation.x += (0.42 - this.head.rotation.x) * q;
+    }
+    const l = r.lantern;
+    if (l) {
+      if (!this.handDown) {
+        // Hang straight down from the hand, swinging a little while walking.
+        l.group.rotation.x = -this.armR.rotation.x - this.body.rotation.x + Math.sin(this.phase + 0.6) * 0.18 * moving;
+        l.group.rotation.z = -this.armR.rotation.z;
+      }
+      const n = this.night;
+      const flicker = 1 + Math.sin(elapsed * 11.3) * 0.04 + Math.sin(elapsed * 7.1) * 0.03;
+      l.coreMat.emissiveIntensity = (0.45 + 1.9 * n) * flicker;
+      l.haloMat.opacity = (0.12 + 0.78 * n) * flicker;
+      l.halo.scale.setScalar(0.7 + 0.45 * n);
+      l.poolMat.opacity = 0.55 * n * flicker;
+      l.pool.visible = n > 0.02;
+    }
+    const d = r.dove;
+    if (d) {
+      d.group.position.y = 1.255 + Math.abs(Math.sin(elapsed * 2.2)) * 0.012 + Math.abs(Math.sin(this.phase)) * 0.01 * moving;
+      // A peck now and then, otherwise looking about.
+      const cycle = elapsed % 4.2;
+      const peck = cycle < 0.35 ? Math.sin((cycle / 0.35) * Math.PI) * 0.7 : 0;
+      d.head.rotation.x = peck;
+      d.head.rotation.y = Math.sin(elapsed * 0.9) * 0.5 * (peck === 0 ? 1 : 0.2);
+    }
+    const f = r.feet;
+    if (f) {
+      f.update(dt);
+      if (this.root.visible) {
+        const v = this.root.getWorldPosition(this.tmpV);
+        const lp = this.lastPrint;
+        const dist = Number.isNaN(lp.x) ? Infinity : Math.hypot(v.x - lp.x, v.z - lp.z);
+        if (dist > 3 || speed < 0.3) {
+          // Teleport or standing still: start counting again from here.
+          if (dist > 3) lp.copy(v);
+        } else if (dist >= PRINT_STEP) {
+          lp.copy(v);
+          this.printSide = -this.printSide;
+          const yaw = this.root.rotation.y;
+          const side = 0.11 * this.printSide;
+          f.spawn(v.x + Math.cos(yaw) * side, v.y, v.z - Math.sin(yaw) * side, yaw);
+        }
+      }
+    }
+  }
+
   /**
    * Seated pose, blended in smoothly: 'pray' kneels with hands joined (mats),
    * 'sit' sits relaxed on a seat whose top is `height` m up (a campfire log
@@ -344,9 +700,12 @@ export class Avatar {
     this.legL.position.y = this.legR.position.y = hipY;
     this.body.position.y = bob + breathe - 0.4 * s + (this.sitHeight - SIT_ROBE_BOTTOM) * q;
     this.body.rotation.x = 0.06 * moving + 0.08 * s + (low ? 0.02 : 0.1) * q;
+    if (this.propKey) this.animateProps(dt, speed, elapsed, moving);
   }
 
   dispose(): void {
+    this.setProps([]);
+    this.trail.removeFromParent();
     this.setPattern(null);
     for (const g of this.geometries) g.dispose();
     for (const g of this.hairGeos) g.dispose();

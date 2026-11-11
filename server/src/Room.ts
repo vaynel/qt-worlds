@@ -21,6 +21,8 @@ import {
   type Look,
   type PlayerInfo,
   type PlayerSnap,
+  type PropId,
+  type PropWear,
   type ServerMessage,
   type StatePayload,
 } from '../../shared/protocol.js';
@@ -29,6 +31,7 @@ import type { SessionUser, Users } from './auth.js';
 import type { DailyWord } from './dailyWord.js';
 import type { GroupService, LanternService } from './services.js';
 import type { LookService } from './looks.js';
+import type { ShopEvents, ShopService } from './shop.js';
 import { TokenBucket } from './rateLimit.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
@@ -67,6 +70,8 @@ interface Client {
   /** Appearance as others see it, and as this account itself sees it (hidden drawing flagged). */
   lookPublic: Look | null;
   lookOwn: Look | null;
+  /** Borrowed props (M9) everyone sees. */
+  props: PropWear[];
 }
 
 /** Fastest legit movement (run speed 7.5 m/s) with headroom for lag. */
@@ -89,6 +94,7 @@ export interface RoomOptions {
   groups?: GroupService | null;
   lanterns?: LanternService | null;
   looks?: LookService | null;
+  shop?: ShopService | null;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -98,7 +104,7 @@ const round = (v: number) => Math.round(v * 100) / 100;
  * occupancy and who may hear whom; clients own their own movement (validated
  * for shape and range only, see known issues).
  */
-export class Room implements RoomEvents {
+export class Room implements RoomEvents, ShopEvents {
   private readonly clients = new Map<string, Client>();
   private readonly mats: (string | null)[] = Array(MAT_COUNT).fill(null);
   /** Campfire log seats (LOG_SEATS order). */
@@ -156,6 +162,7 @@ export class Room implements RoomEvents {
       lastStateAt: 0,
       lookPublic: null,
       lookOwn: null,
+      props: [],
     };
     client.helloTimer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
     this.clients.set(client.id, client);
@@ -439,6 +446,7 @@ export class Room implements RoomEvents {
     client.name = name;
     client.baseName = base;
     this.loadLook(client);
+    client.props = this.loadProps(client);
 
     const players: PlayerInfo[] = [];
     for (const c of this.clients.values()) if (c.joined && c !== client) players.push(this.info(c, client));
@@ -458,6 +466,7 @@ export class Room implements RoomEvents {
       look: client.lookOwn,
     });
     this.sendLanterns(client);
+    this.sendShop(client);
     for (const c of this.clients.values()) {
       if (c.joined && c !== client) this.send(c, { t: 'join', player: this.info(client, c) });
     }
@@ -479,7 +488,62 @@ export class Room implements RoomEvents {
 
   private info(c: Client, viewer: Client): PlayerInfo {
     const look = this.lookSeenBy(c, viewer);
-    return { id: c.id, name: c.name, guest: c.userId === null, ...(look ? { look } : {}) };
+    return { id: c.id, name: c.name, guest: c.userId === null, ...(look ? { look } : {}), ...(c.props.length ? { props: c.props } : {}) };
+  }
+
+  // ---------------------------------------------------------------- 나눔 소품 가게 (M9)
+
+  private loadProps(c: Client): PropWear[] {
+    return c.userId !== null && this.options.shop ? this.options.shop.activeProps(c.userId) : [];
+  }
+
+  /** Shop status to everyone, and this account's own rentals, right after joining (also after a reconnect). */
+  private sendShop(c: Client) {
+    const shop = this.options.shop;
+    if (!shop) return;
+    this.send(c, { t: 'shop', shop: shop.status() });
+    if (c.userId !== null) this.send(c, { t: 'myShop', mine: shop.mine(c.userId) });
+  }
+
+  /** Rented, returned or expired: everyone sees the props change live. */
+  propsChanged(userId: number) {
+    for (const c of this.clients.values()) {
+      if (c.userId !== userId) continue;
+      const next = this.loadProps(c);
+      if (JSON.stringify(next) === JSON.stringify(c.props)) continue;
+      c.props = next;
+      if (c.joined) this.broadcast({ t: 'props', id: c.id, props: next });
+    }
+  }
+
+  private shopTimer: NodeJS.Timeout | null = null;
+
+  /** Window opened/closed or stock changed: one coalesced broadcast. */
+  shopChanged() {
+    if (this.shopTimer || !this.options.shop) return;
+    this.shopTimer = setTimeout(() => {
+      this.shopTimer = null;
+      const shop = this.options.shop;
+      if (shop && this.playerCount > 0) this.broadcast({ t: 'shop', shop: shop.status() });
+    }, 150);
+  }
+
+  myShopChanged(userId: number, ended?: PropId[]) {
+    const shop = this.options.shop;
+    if (!shop) return;
+    let mine: ReturnType<ShopService['mine']> | null = null;
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.userId !== userId) continue;
+      mine ??= shop.mine(userId);
+      this.send(c, { t: 'myShop', mine, ...(ended?.length ? { ended } : {}) });
+    }
+  }
+
+  propReminder(userId: number, item: PropId, endsAt: number) {
+    const now = this.options.shop?.now() ?? Date.now();
+    for (const c of this.clients.values()) {
+      if (c.joined && c.userId === userId) this.send(c, { t: 'propReminder', item, endsAt, now });
+    }
   }
 
   /** Appearance saved, drawing worn/edited, hidden or restored: everyone sees it live. */
@@ -657,6 +721,7 @@ export class Room implements RoomEvents {
 
   close(): void {
     clearInterval(this.timer);
+    if (this.shopTimer) clearTimeout(this.shopTimer);
     for (const c of this.clients.values()) c.ws.close(1001, 'server shutdown');
   }
 }

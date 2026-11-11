@@ -24,6 +24,7 @@ interface WorldsDebug {
   m3: Record<string, unknown>;
   m4: Record<string, unknown>;
   m8: Record<string, unknown>;
+  m9: Record<string, unknown>;
 }
 
 interface Window {

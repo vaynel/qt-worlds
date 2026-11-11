@@ -69,7 +69,11 @@ export class Social {
       this.applyWelcome(options.welcome, false);
       net.on({
         welcome: (w) => this.applyWelcome(w, true),
-        join: (p) => this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null),
+        join: (p) => this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null, p.props ?? []),
+        // Our own props come with myShop (the shop client); others' live here.
+        props: (id, props) => {
+          if (id !== this.localId) this.remotes.setProps(id, props);
+        },
         look: (id, look) => {
           if (id === this.localId) this.o.onLocalLook?.(look);
           else this.remotes.setLook(id, look);
@@ -107,7 +111,7 @@ export class Social {
     this.localId = w.id;
     this.localName = w.name;
     this.remotes.clear();
-    for (const p of w.players) this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null);
+    for (const p of w.players) this.remotes.add(p.id, p.name, p.guest === true, p.look ?? null, p.props ?? []);
     this.localGuest = w.guest;
     this.o.onLocalLook?.(w.look);
     this.o.onLocalName?.(w.name, w.guest);

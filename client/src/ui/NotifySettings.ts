@@ -8,6 +8,8 @@ export interface PushPrefs {
   daily: boolean;
   dailyTime: string;
   prayer: boolean;
+  /** 소품 만료 알림 (M9). */
+  props: boolean;
 }
 
 const DENIED_STEPS: Record<Platform, { title: string; steps: string[] }> = {
@@ -184,6 +186,7 @@ export class NotifySettings {
     const timeRow = el('label', 'notify-time-row');
     timeRow.append(el('span', 'settings-hint', '매일 (한국 시간)'), time);
     const prayer = toggle('notify-prayer', '🤲 내 등불에 기도하기 반응', prefs.prayer, (v) => void save({ prayer: v }));
+    const props = toggle('notify-props', '⏰ 소품 만료 알림 (끝나기 10분 전)', prefs.props !== false, (v) => void save({ props: v }));
 
     const off = button('알림 끄기', 'ghost', async () => {
       off.disabled = true;
@@ -204,6 +207,7 @@ export class NotifySettings {
       daily.row,
       timeRow,
       prayer.row,
+      props.row,
       el('p', 'settings-note', '누가 기도했는지는 알려 드리지 않아요. 알림 설정은 내 계정에 저장돼요.'),
       off,
       this.status,

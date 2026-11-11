@@ -30,7 +30,7 @@ export class SettingsView {
     private readonly openGuide: () => void = () => undefined,
     private readonly install: InstallGuide | null = null,
     private readonly pushEnabled = false,
-    private readonly look: { open: () => void; isAdmin: () => boolean; openAdmin: () => void } | null = null,
+    private readonly look: { open: () => void; isAdmin: () => boolean; openAdmin: (tab?: 'outfits' | 'shop') => void } | null = null,
   ) {
     // beforeinstallprompt may arrive late: refresh the button if settings are open.
     onInstallChange(() => {
@@ -221,7 +221,12 @@ export class SettingsView {
           look.openAdmin();
         });
         a.id = 'settings-admin';
-        box.append(a);
+        const shopAdmin = button('소품 가게 관리', '', () => {
+          this.modal.close();
+          look.openAdmin('shop');
+        });
+        shopAdmin.id = 'settings-admin-shop';
+        box.append(a, shopAdmin);
       }
       body.append(box);
     }
