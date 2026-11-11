@@ -342,11 +342,13 @@ try {
   check('…only once per visit ("나중에" then reload: not shown again)', !(await O.isVisible('#consent-accept')));
   check('still blocked after "나중에"', (await meditate(old, '아직')).status === 403);
   await O.click('#btn-word');
-  const wordOk = await O.waitForSelector('.word-page', { timeout: 15000 }).then(() => true).catch(() => false);
-  check('browsing still works before agreeing (오늘의 말씀 opens)', wordOk);
+  const wordOk = await O.waitForSelector('#book-today .word-body', { timeout: 15000 }).then(() => true).catch(() => false);
+  check('browsing still works before agreeing (말씀 → 오늘 opens)', wordOk);
   await O.keyboard.press('Escape');
-  await until(O, () => !document.querySelector('.word-page'), null, 5000).catch(() => undefined);
+  await until(O, () => !document.querySelector('#book-today'), null, 5000).catch(() => undefined);
   await O.click('#btn-settings');
+  await O.waitForSelector('#settings-nav-account .settings-item-flag');
+  await O.click('#settings-nav-account');
   await O.waitForSelector('#settings-consent');
   await O.click('#settings-consent');
   await O.waitForSelector('#consent-accept');
@@ -427,6 +429,7 @@ try {
 
   // UI: ⚙ 설정 → 계정
   await D.click('#btn-settings');
+  await D.click('#settings-nav-account');
   await D.waitForSelector('#settings-export');
   await D.evaluate(() => document.getElementById('settings-account').scrollIntoView({ block: 'end' }));
   await sleep(1200);

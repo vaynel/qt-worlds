@@ -618,10 +618,6 @@ body.chatting #prompt {
   border-color: rgba(200, 100, 74, 0.6);
 }
 
-.tool.sound[aria-pressed='false'] {
-  color: var(--ink-soft);
-}
-
 #meditate-btn,
 #letter-btn {
   position: absolute;
@@ -1072,13 +1068,6 @@ body.touch .closet-head {
   padding: 1px 8px;
 }
 
-.word-hint {
-  margin: 12px 0 0;
-  font-size: 0.82rem;
-  color: var(--ink-soft);
-  text-align: center;
-}
-
 .word-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1364,17 +1353,6 @@ body.touch .closet-head {
   white-space: nowrap;
 }
 
-body.touch #tools {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  max-width: 62vw;
-}
-
-body.touch .tool {
-  padding: 6px 10px;
-  font-size: 0.76rem;
-}
-
 body.touch .closet-head {
   bottom: calc(var(--safe-bottom) + 78px);
 }
@@ -1526,12 +1504,6 @@ body.touch:not(.in-world) #worship.dock {
 }
 
 /* ---------- settings ---------- */
-
-.tool.gear {
-  font-size: 1rem;
-  line-height: 1;
-  padding: 6px 11px;
-}
 
 .sheet.settings {
   display: flex;
@@ -2465,15 +2437,10 @@ body.touch #worship.size-large .worship-list {
   }
 }
 
-/* Phones: the HUD 찬양 button shows its on/off state by colour. */
+/* The HUD 찬양 button shows its on/off state by colour (the label stays 찬양). */
 .tool[aria-pressed='true'] {
   background: #ffe7b8;
   border-color: rgba(200, 100, 74, 0.5);
-}
-
-body.touch #tools {
-  flex-wrap: nowrap;
-  max-width: none;
 }
 
 /* =================== M4.2: 펼침 / 작게 / 접기 =================== */
@@ -3919,38 +3886,6 @@ body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
   }
 }
 
-/* 꾸미기 HUD button: a small shirt icon (text label on desktop only). */
-.look-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.tool-icon {
-  width: 16px;
-  height: 16px;
-  fill: #e9b9a6;
-  stroke: var(--accent);
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-  flex: none;
-}
-body.touch .look-tool {
-  padding: 6px 9px;
-}
-body.touch .look-tool .tool-label {
-  display: none;
-}
-body.touch #tools {
-  gap: 4px;
-}
-body.touch .tool {
-  padding: 6px 8px;
-}
-
-body.touch .tool.gear {
-  padding: 6px 9px;
-}
-
 /* =================== M9: 나눔 소품 가게 =================== */
 
 .sheet.shop-sheet {
@@ -4306,4 +4241,262 @@ body.touch .shop-chip-sub {
   object-fit: contain;
   vertical-align: -6px;
   margin-right: 4px;
+}
+
+/* =================== M10: 4-button HUD, 말씀 책 [오늘], ⚙ menu =================== */
+
+/* [말씀] [모임] [찬양] [⚙]: the same labels everywhere, ≥40px tap targets. */
+#hud-top .place-card {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+#hud-top .place-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-right {
+  flex: none;
+}
+#tools {
+  gap: 6px;
+}
+.tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 0.86rem;
+}
+.tool.gear {
+  width: 44px;
+  padding: 0;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+/* Unread count sits on the corner so the row never grows. */
+.tool .badge {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  margin: 0;
+  pointer-events: none;
+}
+.tool.has-new::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d9483b;
+  border: 2px solid #fff8ea;
+}
+@media (max-width: 420px) {
+  #tools {
+    gap: 4px;
+  }
+  .tool {
+    padding: 0 10px;
+    font-size: 0.82rem;
+  }
+  .tool.gear {
+    width: 42px;
+  }
+  .place-card {
+    padding: 9px 12px 10px;
+  }
+}
+
+/* 📖 나의 말씀 책: three tabs, the 오늘 page. */
+.book-tabs {
+  flex-wrap: wrap;
+}
+.book-tabs .tab {
+  min-height: 40px;
+}
+.today-page {
+  margin-bottom: 12px;
+}
+.today-page .word-body {
+  margin-top: 4px;
+}
+.today-page .word-body .main {
+  font-size: 1.08rem;
+}
+.today-status {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f6ead2;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.today-status p {
+  margin: 0;
+}
+.today-status.done {
+  background: #e6f1dc;
+}
+.today-done {
+  font-weight: 700;
+  color: #3f6b35;
+}
+.today-preview {
+  margin-top: 4px !important;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.today-none {
+  font-weight: 600;
+}
+.today-hint {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+.today-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.today-actions button {
+  flex: 1 1 140px;
+  min-height: 44px;
+}
+.today-share:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.today-share-box .share-form {
+  margin-top: 12px;
+}
+
+/* ⚙ 설정: level 1 is a list, level 2 a page with ← 뒤로. */
+.sheet.settings {
+  max-height: calc(var(--vvh, 100dvh) - 32px);
+}
+.settings-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  gap: 6px;
+  background: #fffaf0;
+  border-bottom: 1px solid transparent;
+}
+.settings-top .book-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-top button,
+.look-back {
+  min-height: 40px;
+  white-space: nowrap;
+}
+.settings-back {
+  padding: 6px 8px;
+  margin-left: -6px;
+  color: var(--accent);
+}
+.settings-body {
+  padding-bottom: calc(18px + var(--safe-bottom, 0px));
+}
+.settings-page > .settings-account:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.settings-menu,
+.settings-menu-legal {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: #f7ecd7;
+  overflow: hidden;
+}
+.settings-menu-legal {
+  margin-top: 12px;
+}
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  text-decoration: none;
+  font-weight: 600;
+}
+.settings-item + .settings-item {
+  border-top: 1px solid rgba(176, 120, 72, 0.18);
+}
+.settings-item:hover {
+  background: rgba(255, 250, 240, 0.7);
+}
+.settings-item:focus-visible {
+  outline-offset: -2px;
+}
+.settings-link {
+  min-height: 48px;
+  font-weight: 500;
+  font-size: 0.92rem;
+}
+.settings-item-icon {
+  flex: none;
+  width: 28px;
+  font-size: 1.25rem;
+  text-align: center;
+}
+.settings-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-link .settings-item-label {
+  flex: 1;
+}
+.settings-item-hint {
+  font-size: 0.76rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-item-chev {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 1.2rem;
+}
+.settings-item-flag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d9483b;
+  color: #fff;
+  font-size: 0.72rem;
+}
+.settings-section-gap {
+  margin-top: 16px !important;
+}
+.settings-admin-list button {
+  margin-top: 8px;
+}
+.install-offer-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
 }

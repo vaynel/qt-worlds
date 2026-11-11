@@ -53,7 +53,8 @@ export class NotifySettings {
   }
 
   private head(...rest: (HTMLElement | string)[]) {
-    this.root.replaceChildren(el('p', 'settings-section', '🔔 알림'), ...rest);
+    // The ⚙ page header already says 🔔 알림.
+    this.root.replaceChildren(...rest);
   }
 
   private say(text: string) {

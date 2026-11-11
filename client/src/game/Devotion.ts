@@ -6,7 +6,7 @@ import type { MeditationPlace, WordBookStore } from '../storage/WordBook';
 import { Modal } from '../ui/dom';
 import type { Hud } from '../ui/Hud';
 import { MeditationView } from '../ui/MeditationView';
-import { WordBookView } from '../ui/WordBookView';
+import { WordBookView, type BookTab } from '../ui/WordBookView';
 import { WordCard } from '../ui/WordCard';
 import { Letter } from '../world/Letter';
 
@@ -43,13 +43,22 @@ export class Devotion {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private lastSaved: MeditationPlace | null = null;
+  /** The meditation sheet was opened from 말씀 → 오늘: go back there after saving. */
+  private backToBook = false;
 
   constructor(private readonly o: DevotionOptions) {
-    this.book = new WordBookView(o.store, { needLogin: o.needLogin, lanternsChanged: o.lanternsChanged });
+    this.book = new WordBookView(o.store, {
+      needLogin: o.needLogin,
+      lanternsChanged: o.lanternsChanged,
+      word: () => this.word,
+      meditate: () => this.meditateToday(true),
+    });
     this.meditation = new MeditationView(o.store, o.needLogin);
     this.meditation.onSaved((place) => {
       this.lastSaved = place;
       o.hud.toast(`${place}에서의 묵상을 말씀 책에 담았어요.`, o.now(), 4);
+      if (this.backToBook) void this.openBook('today');
+      this.backToBook = false;
     });
   }
 
@@ -117,40 +126,44 @@ export class Devotion {
     await this.o.store.markLetterOpened(this.word.date);
     await this.o.store.saveWord(this.word);
     this.o.audio.page();
-    this.showCard(true);
+    this.card.open(this.word, {
+      meditate: () => this.meditateToday(false),
+      openBook: () => void this.openBook('today'),
+    });
   }
 
-  /** HUD 오늘의 말씀: reopen anytime (also opens a waiting letter). */
+  /**
+   * HUD 말씀: 📖 나의 말씀 책 on the 오늘 tab. A letter that has not been
+   * opened yet counts as read (the envelope only plays when the letter itself is opened).
+   */
   async openWord() {
-    if (!this.word) {
-      this.o.hud.toast('서버와 연결되면 오늘의 말씀을 받을 수 있어요.', this.o.now());
-      return;
-    }
-    if (this.letter) return this.openLetter();
-    if (this.letterState === 'pending') {
+    if (this.word && this.letterState !== 'opened') {
+      this.clearLetter();
       this.letterState = 'opened';
       this.o.hud.setWordNew(false);
       await this.o.store.markLetterOpened(this.word.date);
     }
-    await this.o.store.saveWord(this.word);
+    if (this.word) await this.o.store.saveWord(this.word);
     this.o.audio.page();
-    this.showCard(false);
+    await this.openBook('today');
   }
 
-  private showCard(fromLetter: boolean) {
-    const word = this.word!;
-    this.card.open(
-      word,
-      {
-        meditate: this.o.meditationPlace() ? () => this.meditate() : undefined,
-        openBook: () => void this.openBook(),
-      },
-      fromLetter,
-    );
+  async openBook(tab: BookTab = 'today') {
+    await this.book.open(tab, this.word?.date);
   }
 
-  async openBook(tab: 'mine' | 'saved' = 'mine') {
-    await this.book.open(this.word?.date, tab);
+  /**
+   * ✍️ 묵상하기 from today's word (letter page or 말씀 → 오늘): works anywhere.
+   * The place follows where I am (골방 / 기도의 뜰 mat), otherwise 골방.
+   */
+  meditateToday(fromBook: boolean) {
+    if (!this.word) {
+      this.o.hud.toast('오늘의 말씀이 도착하면 묵상할 수 있어요.', this.o.now());
+      return;
+    }
+    this.backToBook = fromBook;
+    void this.o.store.saveWord(this.word);
+    this.meditation.open(this.word, this.o.meditationPlace() ?? '골방');
   }
 
   meditate() {
@@ -163,8 +176,14 @@ export class Devotion {
       this.o.hud.toast('골방이나 기도의 뜰 자리에 앉으면 묵상할 수 있어요.', this.o.now());
       return;
     }
+    this.backToBook = false;
     void this.o.store.saveWord(this.word);
     this.meditation.open(this.word, place);
+  }
+
+  /** The 말씀 책 tab while it is open (tests). */
+  get bookTab(): BookTab | null {
+    return this.book.currentTab;
   }
 
   describe() {

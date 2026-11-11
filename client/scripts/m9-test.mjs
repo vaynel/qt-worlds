@@ -300,6 +300,7 @@ try {
   const setDef = await admin.json('PUT', '/api/admin/shop/defaults', { item: 'guitar', stock: 3 });
   check('admin: default guitar stock 3 for windows not released yet', setDef.status === 200 && setDef.data.defaults.find((d) => d.item === 'guitar').stock === 3);
   await A.click('#btn-settings');
+  await A.click('#settings-nav-admin');
   await A.click('#settings-admin-shop');
   await A.waitForSelector('#admin-shop');
   await sleep(300);

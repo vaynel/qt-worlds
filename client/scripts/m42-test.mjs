@@ -113,7 +113,7 @@ try {
   const yt = await M.getAttribute('#worship-yt', 'href');
   check('펼침: list drawer + "🎧 YouTube에서 듣기" link to the current song', (await M.isVisible('#worship-list')) && /^https:\/\/music\.youtube\.com\/watch\?v=/.test(yt), yt);
   await M.screenshot({ path: resolve(shotDir, 'm42-mobile-open.png') });
-  await M.tap('#btn-book');
+  await M.tap('#btn-word');
   await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
   await sleep(500);
   check('sheet while 펼침: no overlap', !overlaps(await box(M, '.sheet.book'), await box(M, '#worship')));
@@ -139,7 +139,7 @@ try {
   check('swipe right on the handle → 접기 (tab shown, not playing)', mf.tabVisible && mf.state !== 'playing' && !mf.playedWhileFolded, JSON.stringify({ state: mf.state }));
   await M.screenshot({ path: resolve(shotDir, 'm42-mobile-folded.png') });
   await M.tap('#btn-word');
-  await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '오늘의 말씀');
+  await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
   await sleep(500);
   check('sheet while 접기: tab hidden, nothing overlaps, still not playing', !(await w(M)).tabVisible && (await w(M)).state !== 'playing');
   await M.keyboard.press('Escape');
@@ -214,7 +214,7 @@ try {
   const dHandle = await box(D, '#worship-handle');
   check('desktop 작게: video-only >= 200x200, handle beside it', dFrame.width >= 200 && dFrame.height >= 200 && !overlaps(dHandle, dFrame), `${Math.round(dFrame.width)}x${Math.round(dFrame.height)}`);
   await D.screenshot({ path: resolve(shotDir, 'm42-desktop-mini.png') });
-  await D.click('#btn-book');
+  await D.click('#btn-word');
   await until(D, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
   await sleep(400);
   check('desktop: sheet while 작게 overlaps nothing', !overlaps(await box(D, '.sheet.book'), await box(D, '#worship')));

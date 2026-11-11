@@ -85,6 +85,8 @@ export class CustomizeView {
   private tabBtns = new Map<Tab, HTMLButtonElement>();
   /** An unsaved drawing survives closing the sheet by accident (until the page reloads). */
   private draft: { slot: number; pixels: string } | null = null;
+  /** Opened from ⚙ 설정: "← 설정" goes back to the menu. */
+  private back: (() => void) | null = null;
 
   constructor(private readonly onSaved: (mine: MyLook) => void) {}
 
@@ -92,8 +94,9 @@ export class CustomizeView {
     return this.modal.isOpen;
   }
 
-  async open(tab: Tab = 'color') {
+  async open(tab: Tab = 'color', back?: () => void) {
     this.tab = tab;
+    this.back = back ?? null;
     let mine: MyLook;
     try {
       mine = await api<MyLook>('GET', '/api/me/look');
@@ -170,7 +173,16 @@ export class CustomizeView {
     sheet.replaceChildren();
     this.tabBtns.clear();
     const top = el('header', 'book-top');
-    top.append(el('h2', 'book-title', '꾸미기'), button('닫기', 'ghost look-close', () => this.close()));
+    const toSettings = this.back;
+    if (toSettings) {
+      const b = button('← 설정', 'ghost settings-back look-back', () => {
+        this.close();
+        toSettings();
+      });
+      b.id = 'look-back';
+      top.append(b);
+    }
+    top.append(el('h2', 'book-title', '👕 꾸미기'), button('닫기', 'ghost look-close', () => this.close()));
 
     const stage = el('div', 'look-stage');
     const canvas = el('canvas', 'look-preview');

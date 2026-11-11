@@ -22,7 +22,7 @@ import { InstallGuide } from '../ui/InstallGuide';
 import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
 import { Modal } from '../ui/dom';
-import { SettingsView } from '../ui/SettingsView';
+import { SettingsView, type SettingsPage } from '../ui/SettingsView';
 import type { WorshipPlayer } from '../ui/WorshipPlayer';
 import { Hud } from '../ui/Hud';
 import { LANDMARKS, SPAWN } from '../world/config';
@@ -289,7 +289,7 @@ export class Game {
       this.installGuide,
       session.pushEnabled,
       {
-        open: () => this.openCustomize(),
+        open: (back) => this.openCustomize(undefined, back),
         isAdmin: () => this.isAdmin,
         openAdmin: (tab) => void this.adminView.open(tab ?? 'outfits'),
       },
@@ -306,14 +306,12 @@ export class Game {
     this.hud.bind('meditate', () => this.devotion.meditate());
     this.hud.bind('letter', () => void this.devotion.openLetter());
     this.hud.bind('word', () => void this.devotion.openWord());
-    this.hud.bind('book', () => void this.devotion.openBook());
     this.hud.bind('worship', () => {
       // Folded (paused tab) → bring it back; open → close; closed → open.
       if (this.worship.isOpen && !this.inCloset && this.worship.foldState !== 'folded') this.worship.close();
       else this.worship.open(this.inCloset, true);
     });
     this.hud.bind('settings', () => this.settings.open());
-    this.hud.bind('look', () => this.openCustomize());
     // "함께 N명": who is here (and 🚩 for drawn outfits).
     this.hud.onPeople(() => {
       if (session.net) this.reportView.openList();
@@ -523,12 +521,12 @@ export class Game {
 
   // ------------------------------------------------------------------ 꾸미기 (M8)
 
-  private openCustomize(tab?: 'color' | 'hair' | 'draw') {
+  private openCustomize(tab?: 'color' | 'hair' | 'draw', back?: () => void) {
     if (!this.account) {
       this.loginPrompt.open('로그인하면 내 모습의 색과 머리 모양을 고르고, 옷에 그림을 그려 입을 수 있어요.', '');
       return;
     }
-    this.customize.open(tab).catch((err) => this.hud.toast(err instanceof ApiError ? err.message : '꾸미기를 열지 못했어요.', this.elapsed));
+    this.customize.open(tab, back).catch((err) => this.hud.toast(err instanceof ApiError ? err.message : '꾸미기를 열지 못했어요.', this.elapsed));
   }
 
   /** Right after saving (the server's 'look' message follows with the same data). */
@@ -705,6 +703,8 @@ export class Game {
         return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, z: v.z };
       },
       openCustomize: (tab?: 'color' | 'hair' | 'draw') => this.openCustomize(tab),
+      /** ⚙ 설정 deep link ('menu', 'sound', 'notify', 'account', 'install', 'admin'). */
+      openSettings: (page?: SettingsPage) => this.settings.open(page),
       /** Painter/customize state right now (the debug object lags a few frames). */
       customize: () => this.customize.describe(),
       /** Turn our avatar (screenshots). */
@@ -913,6 +913,10 @@ export class Game {
         renderedRemotes: this.inCloset ? 0 : this.social.remotes.describe().filter((r) => r.visible).length,
         worship: this.worship.describe(),
         audio: this.audio.describe(),
+      },
+      m10: {
+        settingsPage: this.settings.currentPage,
+        bookTab: this.devotion.bookTab,
       },
       m4: {
         account: this.account,

@@ -12,6 +12,7 @@ import {
   freshDb,
   launch,
   loginJoin,
+  openBook,
   of,
   rawClient,
   serverDir,
@@ -130,7 +131,13 @@ try {
   await A.evaluate(async (day) => {
     await fetch('/api/wordbook/meditations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date: day, place: '골방', meditation: '익명으로 나누는 묵상', feeling: '평안', application: '' }) });
   }, DAY);
-  await A.click('#btn-book');
+  await openBook(A, 'mine');
+  // M10: opening 말씀 also files today's (real-date) word, so page back to DAY.
+  await A.waitForSelector('.book-page');
+  for (let i = 0; i < 10 && !(await A.$('.note-share')); i++) {
+    if (await A.isDisabled('.book-nav button:last-child')) break;
+    await A.click('.book-nav button:last-child');
+  }
   await A.waitForSelector('.note-share');
   await A.click('.note-share');
   await A.waitForSelector('#share-anon');

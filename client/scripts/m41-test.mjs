@@ -115,7 +115,7 @@ try {
   // reopen from ⚙
   await A.click('#btn-settings');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
-  await A.click('#settings-guide');
+  await A.click('#settings-nav-guide');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '사용 안내');
   check('guide reopens from ⚙ 설정 → 사용 안내', true);
   await A.click('.guide-skip');
@@ -186,6 +186,7 @@ try {
   await until(A, () => window.__WORLDS_DEBUG__.m3.audio.settings.worship === 30);
   await A.click('#btn-settings');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
+  await A.click('#settings-nav-sound');
   check('a sheet makes the large player compact (no overlap)', (await w(A)).size === 'large' && !overlaps(await box(A, '.sheet.settings'), await box(A, '#worship')));
   check('player slider → ⚙ 찬양 slider', (await A.inputValue('#vol-worship')) === '30');
   await setSlider(A, '#vol-worship', 55);
@@ -266,6 +267,7 @@ try {
   // live rename
   await A.click('#btn-settings');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
+  await A.click('#settings-nav-account');
   await A.fill('#settings-nickname', '하나둘');
   await A.click('.settings-account form button[type=submit]');
   await until(G, () => window.__WORLDS_DEBUG__.net.remotes.some((r) => r.tag === '하나둘'), null, 15000);

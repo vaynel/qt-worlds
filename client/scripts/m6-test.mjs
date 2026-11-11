@@ -181,9 +181,15 @@ const STANDALONE_STUB = () => {
   };
 };
 
-const openSettings = async (page) => {
+// M10: ⚙ is a menu; `sub` opens one of its pages ('notify', 'install', …).
+const openSettings = async (page, sub) => {
   await page.click('#btn-settings');
-  await page.waitForSelector('.settings-body');
+  await page.waitForSelector('.settings-menu');
+  if (sub) await page.click(`#settings-nav-${sub}`);
+};
+const settingsBack = async (page) => {
+  await page.click('#settings-back');
+  await page.waitForSelector('.settings-menu');
 };
 const closeSettings = (page) => page.keyboard.press('Escape');
 
@@ -520,9 +526,9 @@ try {
   await nCtx.addInitScript(PUSH_STUB);
   const N = await nCtx.newPage();
   await loginJoin(N, BASE, 'm6-ui', '알림화면', Q);
-  await openSettings(N);
+  await openSettings(N, 'notify');
   await N.waitForSelector('#notify-enable');
-  check('⚙ 설정 has a 🔔 알림 section with "알림 켜기"', (await N.textContent('#notify-settings')).includes('🔔 알림'));
+  check('⚙ 설정 has a 🔔 알림 page with "알림 켜기"', (await N.textContent('.sheet.settings .book-title')).includes('🔔 알림'));
   await N.click('#notify-enable');
   await N.waitForSelector('#notify-preprompt');
   const asked0 = await N.evaluate(() => window.__permAsked ?? 0);
@@ -539,7 +545,7 @@ try {
   await N.uncheck('#notify-prayer');
   await sleep(500);
   await closeSettings(N);
-  await openSettings(N);
+  await openSettings(N, 'notify');
   await N.waitForSelector('#notify-time');
   const persisted = (await N.inputValue('#notify-time')) === '07:00' && !(await N.isChecked('#notify-prayer'));
   const server2 = await N.evaluate(() => fetch('/api/push/prefs').then((r) => r.json()));
@@ -572,7 +578,8 @@ try {
   check('denied: device-specific help (PC Chrome steps here)', deniedText.includes('차단') && deniedText.includes('Chrome'));
   await N.locator('#notify-settings').scrollIntoViewIfNeeded();
   await shot(N, 'notify-denied-desktop');
-  check('a regular desktop tab with no install event shows no install button', (await N.locator('#settings-install').count()) === 0);
+  await settingsBack(N);
+  check('a regular desktop tab with no install event shows no install item', (await N.locator('#settings-nav-install').count()) === 0);
   await closeSettings(N);
   await nCtx.close();
 
@@ -589,13 +596,15 @@ try {
   await shot(I, 'install-offer-desktop');
   await I.click('#install-offer-no');
   const offered = await I.evaluate(() => localStorage.getItem('worlds.install.offered'));
-  await openSettings(I);
+  await openSettings(I, 'install');
   await I.waitForSelector('#settings-install-btn');
   await I.locator('#settings-install').scrollIntoViewIfNeeded();
   await shot(I, 'install-button-desktop');
   await I.click('#settings-install-btn');
   await until(I, () => window.__bipPrompted === true, null, 5000);
   check('⚙ 설정 → "📲 앱으로 설치하기" opens the browser install prompt; the card is remembered (no nagging)', !!offered);
+  await settingsBack(I);
+  await I.click('#settings-nav-notify');
   check('guests see a login hint in 🔔 알림', (await I.textContent('#notify-settings')).includes('로그인'));
   await closeSettings(I);
   await iCtx.close();
@@ -608,7 +617,7 @@ try {
   await join(A, BASE, '앱손님', Q);
   await sleep(800);
   await openSettings(A);
-  const standaloneHidden = (await A.locator('#settings-install').count()) === 0;
+  const standaloneHidden = (await A.locator('#settings-nav-install').count()) === 0;
   await closeSettings(A);
   check('install UI is hidden when running standalone (matchMedia display-mode override)', standaloneHidden && !(await A.isVisible('#install-offer')));
   await aCtx.close();
@@ -619,11 +628,13 @@ try {
   const oCtx = await browser.newContext({ ...mobile, userAgent: iosUA });
   const O = await oCtx.newPage();
   await loginJoin(O, BASE, 'm6-ios', '아이폰', Q);
-  await openSettings(O);
+  await openSettings(O, 'notify');
   await O.waitForSelector('#notify-ios-install');
   check('iOS (not installed): 🔔 알림 explains 홈 화면에 추가 (iOS 16.4+)', (await O.textContent('#notify-settings')).includes('홈 화면에 추가'));
   await O.locator('#notify-settings').scrollIntoViewIfNeeded();
   await shot(O, 'notify-ios-phone');
+  await settingsBack(O);
+  await O.click('#settings-nav-install');
   await O.click('#settings-install-btn');
   await O.waitForSelector('#ios-install-guide');
   const iosText = await O.textContent('#ios-install-guide');

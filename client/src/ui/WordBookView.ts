@@ -1,7 +1,11 @@
+import type { WordPassage } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { GuestRestricted, type MeditationEntry, type SavedLantern, type WordBookPage, type WordBookStore } from '../storage/WordBook';
 import { button, el, koreanDate, Modal } from './dom';
 import type { GroupInfo } from './GroupsView';
+import { wordPassage } from './WordCard';
+
+export type BookTab = 'today' | 'mine' | 'saved';
 
 const FIELDS: [keyof Pick<MeditationEntry, 'meditation' | 'feeling' | 'application'>, string][] = [
   ['meditation', '묵상'],
@@ -13,18 +17,32 @@ export interface WordBookHooks {
   needLogin: (reason: string) => void;
   /** A lantern was lit or taken down from the book. */
   lanternsChanged: () => void;
+  /** Today's word (null until the server sends it). */
+  word: () => WordPassage | null;
+  /** ✍️ 묵상하기 with today's word (opens the meditation sheet). */
+  meditate: () => void;
+}
+
+/** One line of today's meditation for the 오늘 tab. */
+function preview(m: MeditationEntry): string {
+  const text = (m.meditation || m.feeling || m.application).replace(/\s+/g, ' ').trim();
+  const chars = [...text];
+  return chars.length > 70 ? `${chars.slice(0, 70).join('')}…` : text;
 }
 
 /**
- * 나의 말씀 책: one page per day (newest first) with that day's notes, which
- * the owner can edit, delete or share as a lantern; plus 담아 둔 묵상.
+ * 📖 나의 말씀 책 (the HUD 말씀 button), three tabs:
+ *  - 오늘: today's verse, my meditation status, 묵상하기 and 등불로 나누기
+ *  - 지난 말씀: one page per day (newest first) with that day's notes, which
+ *    the owner can edit, delete or share as a lantern
+ *  - 담아 둔 묵상: lanterns kept with 기록하기
  */
 export class WordBookView {
   private readonly modal = new Modal('book-overlay', '나의 말씀 책');
   private pages: WordBookPage[] = [];
   private saved: SavedLantern[] = [];
   private index = 0;
-  private tab: 'mine' | 'saved' = 'mine';
+  private tab: BookTab = 'today';
   private status: HTMLParagraphElement | null = null;
 
   constructor(
@@ -36,14 +54,18 @@ export class WordBookView {
     return this.modal.isOpen;
   }
 
-  async open(date?: string, tab: 'mine' | 'saved' = 'mine') {
+  get currentTab(): BookTab | null {
+    return this.modal.isOpen ? this.tab : null;
+  }
+
+  async open(tab: BookTab = 'today', date?: string) {
     this.tab = tab;
     await this.reload(date);
     if (!this.modal.isOpen) this.modal.open();
   }
 
   private async reload(date?: string) {
-    const keep = date ?? this.pages[this.index]?.date;
+    const keep = date ?? this.pages[this.index]?.date ?? this.hooks.word()?.date;
     try {
       [this.pages, this.saved] = await Promise.all([this.store.listPages(), this.store.listSaved()]);
     } catch (err) {
@@ -67,32 +89,29 @@ export class WordBookView {
     sheet.replaceChildren();
 
     const top = el('header', 'book-top');
-    top.append(el('h2', 'book-title', '나의 말씀 책'), button('닫기', 'ghost', () => this.modal.close()));
+    const close = button('닫기', 'ghost', () => this.modal.close());
+    close.id = 'book-close';
+    top.append(el('h2', 'book-title', '📖 나의 말씀 책'), close);
     sheet.append(top);
-
-    if (this.store.kind === 'guest') {
-      const empty = el('div', 'book-empty');
-      empty.append(el('p', 'book-empty-title', '로그인하면 나의 말씀 책을 만들 수 있어요.'), el('p', '', '날마다 받은 말씀과 묵상이 내 계정에 한 장씩 쌓여요.'));
-      const login = button('로그인하러 가기', 'primary', () => {
-        this.modal.close();
-        this.hooks.needLogin('로그인하면 묵상을 저장하고 어느 기기에서든 다시 볼 수 있어요.');
-      });
-      empty.append(login);
-      sheet.append(empty);
-      return;
-    }
 
     const tabs = el('div', 'book-tabs');
     tabs.setAttribute('role', 'tablist');
-    const mine = button('나의 묵상', this.tab === 'mine' ? 'tab on' : 'tab', () => this.switchTab('mine'));
-    const saved = button(`담아 둔 묵상 ${this.saved.length}`, this.tab === 'saved' ? 'tab on' : 'tab', () => this.switchTab('saved'));
-    mine.id = 'book-tab-mine';
-    saved.id = 'book-tab-saved';
-    tabs.append(mine, saved);
+    const tab = (id: BookTab, label: string) => {
+      const b = button(label, this.tab === id ? 'tab on' : 'tab', () => this.switchTab(id));
+      b.id = `book-tab-${id}`;
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', this.tab === id ? 'true' : 'false');
+      tabs.append(b);
+    };
+    tab('today', '오늘');
+    tab('mine', '지난 말씀');
+    tab('saved', this.saved.length ? `담아 둔 묵상 ${this.saved.length}` : '담아 둔 묵상');
     sheet.append(tabs);
     if (error) sheet.append(el('p', 'groups-error', error));
 
-    if (this.tab === 'saved') this.renderSaved(sheet);
+    if (this.tab === 'today') this.renderToday(sheet);
+    else if (this.store.kind === 'guest') this.renderGuest(sheet);
+    else if (this.tab === 'saved') this.renderSaved(sheet);
     else this.renderMine(sheet);
 
     this.status = el('p', 'groups-status');
@@ -100,9 +119,74 @@ export class WordBookView {
     sheet.append(this.status);
   }
 
-  private switchTab(tab: 'mine' | 'saved') {
+  private switchTab(tab: BookTab) {
     this.tab = tab;
     this.render();
+  }
+
+  private loginButton(id: string): HTMLButtonElement {
+    const login = button('로그인하러 가기', 'primary', () => {
+      this.modal.close();
+      this.hooks.needLogin('로그인하면 묵상을 저장하고 어느 기기에서든 다시 볼 수 있어요.');
+    });
+    login.id = id;
+    return login;
+  }
+
+  private renderGuest(sheet: HTMLElement) {
+    const empty = el('div', 'book-empty');
+    empty.append(el('p', 'book-empty-title', '로그인하면 나의 말씀 책을 만들 수 있어요.'), el('p', '', '날마다 받은 말씀과 묵상이 내 계정에 한 장씩 쌓여요.'));
+    empty.append(this.loginButton('book-login'));
+    sheet.append(empty);
+  }
+
+  /** 오늘: today's verse, whether I meditated on it today, and what to do next. */
+  private renderToday(sheet: HTMLElement) {
+    const word = this.hooks.word();
+    const paper = el('article', 'book-page today-page');
+    paper.id = 'book-today';
+    sheet.append(paper);
+    if (!word) {
+      paper.append(el('p', 'book-none', '서버와 연결되면 오늘의 말씀을 받을 수 있어요.'));
+      return;
+    }
+    paper.append(el('p', 'book-date', `오늘의 말씀 · ${koreanDate(word.date)}`), ...wordPassage(word));
+
+    const status = el('div', 'today-status');
+    status.id = 'today-status';
+    const page = this.pages.find((p) => p.date === word.date);
+    const latest = page?.meditations[page.meditations.length - 1] ?? null;
+    if (latest) {
+      status.classList.add('done');
+      const count = page!.meditations.length;
+      status.append(el('p', 'today-done', `✓ 오늘 ${latest.place}에서 묵상했어요${count > 1 ? ` · ${count}개` : ''}`), el('p', 'today-preview', preview(latest)));
+    } else if (this.store.kind === 'guest') {
+      status.append(el('p', 'today-none', '로그인하면 오늘의 묵상을 말씀 책에 저장하고 등불로 나눌 수 있어요.'));
+    } else {
+      status.append(el('p', 'today-none', '아직 오늘의 묵상을 적지 않았어요.'), el('p', 'today-hint', '천천히 두세 번 읽고, 마음에 머무는 말을 적어 보세요.'));
+    }
+    paper.append(status);
+
+    const actions = el('div', 'today-actions');
+    const med = button('✍️ 묵상하기', 'primary', () => this.hooks.meditate());
+    med.id = 'today-meditate';
+    actions.append(med);
+    const shareBox = el('div', 'today-share-box');
+    if (this.store.kind === 'server' || this.store.kind === 'guest') {
+      const lit = !!latest?.lanternId;
+      const share = button(lit ? '🏮 등불을 밝혔어요' : '🏮 등불로 나누기', 'today-share');
+      share.id = 'today-share';
+      share.disabled = !latest || lit;
+      if (!latest) share.title = '오늘의 묵상을 담으면 등불로 나눌 수 있어요';
+      share.addEventListener('click', () => {
+        if (!latest) return;
+        share.disabled = true;
+        void this.share(shareBox, latest);
+      });
+      actions.append(share);
+    }
+    if (this.store.kind === 'guest') actions.append(this.loginButton('today-login'));
+    paper.append(actions, shareBox);
   }
 
   private renderSaved(sheet: HTMLElement) {
@@ -141,7 +225,7 @@ export class WordBookView {
   private renderMine(sheet: HTMLElement) {
     if (this.pages.length === 0) {
       const empty = el('div', 'book-empty');
-      empty.append(el('p', 'book-empty-title', '아직 담긴 말씀이 없어요.'), el('p', '', '오늘의 말씀 편지를 열면 이 책에 한 장씩 쌓여요.'));
+      empty.append(el('p', 'book-empty-title', '아직 담긴 말씀이 없어요.'), el('p', '', '오늘의 말씀을 열면 이 책에 날마다 한 장씩 쌓여요.'));
       sheet.append(empty);
       return;
     }

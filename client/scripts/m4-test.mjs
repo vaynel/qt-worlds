@@ -16,6 +16,7 @@ import {
   launch,
   loginJoin,
   mobile,
+  openBook,
   of,
   rawClient,
   shotDir,
@@ -339,8 +340,7 @@ try {
 
   // Device B: same Google sub signs in elsewhere and opens the book.
   await loginJoin(B, BASE, 'erin', '에린', Q());
-  await B.click('#btn-book');
-  await until(B, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
+  await openBook(B, 'mine');
   await B.waitForSelector('.book-page');
   const bookB = await B.textContent('.book');
   check('device B (same sub) sees device A\'s QT', bookB.includes('기기 A에서 쓴 묵상') && bookB.includes('기기 B에서도 보이기'));
@@ -354,7 +354,7 @@ try {
   await B.keyboard.press('Escape');
 
   // Edit and delete in the UI.
-  await B.click('#btn-book');
+  await openBook(B, 'mine');
   await B.waitForSelector('.note-edit');
   await B.click('.note-edit');
   await B.fill('#edit-feeling', '고친 느낌');
@@ -391,8 +391,7 @@ try {
   check('UI: lantern card shows nickname, ref, text and counts', cardText.includes('은혜의 등불') && cardText.includes('모두와 나누는 묵상') && /기도하기 3/.test(cardText), cardText.slice(0, 80));
   await B.screenshot({ path: resolve(shotDir, 'm4-lantern-card-desktop.png') });
   await B.keyboard.press('Escape');
-  await B.click('#btn-book');
-  await B.click('#book-tab-saved');
+  await openBook(B, 'saved');
   await B.waitForSelector('.book-page.saved');
   check('UI: 기록하기 shows up under 담아 둔 묵상', (await B.textContent('.book')).includes('모두와 나누는 묵상'));
   await B.keyboard.press('Escape');
@@ -432,7 +431,7 @@ try {
   await C.screenshot({ path: resolve(shotDir, 'm4-import-mobile.png') });
   await C.tap('#import-confirm');
   await until(C, () => window.__WORLDS_DEBUG__.m3.modal === null);
-  await C.tap('#btn-book');
+  await openBook(C, 'mine');
   await C.waitForSelector('.book-page');
   check('local word book imported into the account', (await C.textContent('.book')).includes('이 기기에만 있던 묵상'));
   await C.screenshot({ path: resolve(shotDir, 'm4-wordbook-mobile.png') });

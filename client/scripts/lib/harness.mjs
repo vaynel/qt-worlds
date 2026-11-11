@@ -167,3 +167,22 @@ export function rawClient(url, hello, headers = {}) {
   });
 }
 export const of = (c, t) => c.inbox.filter((m) => m.t === t);
+
+/**
+ * M10: ⚙ is a two-level menu. Opens it and, with `sub`, one of its pages
+ * ('look' | 'sound' | 'notify' | 'account' | 'install' | 'guide' | 'admin').
+ */
+export async function openSettings(page, sub) {
+  await page.click('#btn-settings');
+  await page.waitForSelector('.settings-menu');
+  if (sub) await page.click(`#settings-nav-${sub}`);
+}
+
+/** M10: HUD 말씀 → 📖 나의 말씀 책, then a tab ('today' | 'mine' (지난 말씀) | 'saved'). */
+export async function openBook(page, tab = 'mine') {
+  await page.click('#btn-word');
+  await until(page, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
+  await page.waitForSelector('#book-tab-today');
+  if (tab !== 'today') await page.click(`#book-tab-${tab}`);
+  await until(page, (t) => window.__WORLDS_DEBUG__.m10.bookTab === t, tab);
+}

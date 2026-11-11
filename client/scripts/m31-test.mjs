@@ -204,6 +204,7 @@ try {
   step('settings');
   await D.click('#btn-settings');
   await until(D, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
+  await D.click('#settings-nav-sound');
   await setSlider(D, 'vol-ambience', 10);
   await setSlider(D, 'vol-ui', 20);
   await setSlider(D, 'vol-master', 50);
@@ -233,6 +234,7 @@ try {
   const a2 = await audioState(D);
   await D.click('#btn-settings');
   await until(D, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
+  await D.click('#settings-nav-sound');
   const sliderVal = await D.inputValue('#vol-ambience');
   check('settings persist across a reload', a2.settings.ambience === 10 && a2.settings.master === 50 && a2.settings.worship === 40 && sliderVal === '10', JSON.stringify(a2.settings));
   await D.keyboard.press('Escape');

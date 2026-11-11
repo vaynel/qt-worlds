@@ -284,7 +284,8 @@ try {
   check('before customizing: others see the hashed default colours (not saved)', before.look.saved === false && before.look.hairStyle === 'short');
   check('own avatar starts with the default look', (await m8(A)).avatar.robe === '#f1e4c8' && (await m8(A)).avatar.hairStyle === 'short');
 
-  await A.click('#btn-look');
+  await A.click('#btn-settings');
+  await A.click('#settings-nav-look');
   await until(A, () => window.__WORLDS_TEST__.customize().open);
   await A.waitForSelector('#look-preview');
   await A.click('.swatch[data-key="r"][data-index="10"]');
@@ -509,6 +510,7 @@ try {
   const item = list.find((o) => o.id === o3);
   check('admin list: reported/hidden drawings with pixels, owner nickname, reporter count and reasons', list.length >= 3 && item?.owner.nickname === '안나' && item.reporters === 3 && item.reasons.inappropriate === 3 && item.hidden && item.pixels.length === 256, JSON.stringify(item ?? list[0]).slice(0, 200));
   await AD.click('#btn-settings');
+  await AD.click('#settings-nav-admin');
   await AD.waitForSelector('#settings-admin');
   await AD.click('#settings-admin');
   await AD.waitForSelector('#admin-list .admin-item');
@@ -535,8 +537,8 @@ try {
   await adctx.close();
   const settingsB = await (async () => {
     await B.click('#btn-settings');
-    await B.waitForSelector('#settings-look-btn');
-    const has = await B.isVisible('#settings-admin');
+    await B.waitForSelector('#settings-nav-look');
+    const has = await B.isVisible('#settings-nav-admin');
     await B.click('.sheet.settings .ghost');
     return has;
   })();
@@ -561,7 +563,8 @@ try {
   watch(M, 'M');
   await loginJoin(M, BASE, 'm8-mia', '미아', `?test=1&shadows=0&time=13:00&date=${DAY}&noguide=1`);
   await until(M, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000).catch(() => undefined);
-  await M.tap('#btn-look');
+  await M.tap('#btn-settings');
+  await M.tap('#settings-nav-look');
   await until(M, () => window.__WORLDS_TEST__.customize().open);
   await sleep(800);
   const worshipOn = await M.evaluate(() => document.body.classList.contains('worship-on'));

@@ -28,11 +28,9 @@ export class Hud {
   private readonly meditateBtn = $<HTMLButtonElement>('meditate-btn');
   private readonly letterBtn = $<HTMLButtonElement>('letter-btn');
   private readonly wordBtn = $<HTMLButtonElement>('btn-word');
-  private readonly bookBtn = $<HTMLButtonElement>('btn-book');
   private readonly worshipBtn = $<HTMLButtonElement>('btn-worship');
   private readonly settingsBtn = $<HTMLButtonElement>('btn-settings');
   private readonly groupsBtn = $<HTMLButtonElement>('btn-groups');
-  private readonly lookBtn = $<HTMLButtonElement>('btn-look');
   private netText = '';
   private actionText: string | null = null;
   private toastUntil = 0;
@@ -50,19 +48,7 @@ export class Hud {
     this.touch = touch;
     document.body.classList.toggle('touch', touch);
     this.hint.textContent = touch ? HINT_TOUCH : HINT_DESKTOP;
-    // Phones: short labels keep the tool row on one line (clear of the chat panel).
-    const labels: [HTMLButtonElement, string, string][] = [
-      [this.wordBtn, '오늘의 말씀', '말씀'],
-      [this.bookBtn, '말씀 책', '책'],
-    ];
-    for (const [b, full, short] of labels) {
-      b.textContent = touch ? short : full;
-      b.setAttribute('aria-label', full);
-    }
-    this.setWorshipOpen(this.worshipOpen);
   }
-
-  private worshipOpen = false;
 
   ready() {
     document.body.classList.add('in-world');
@@ -97,7 +83,6 @@ export class Hud {
     this.actionBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
-  /** Wire a HUD button; taps never leak into camera drags. */
   /** Tap on "함께 N명": who is here. */
   onPeople(fn: () => void) {
     this.netStatus.setAttribute('role', 'button');
@@ -116,16 +101,15 @@ export class Hud {
     });
   }
 
-  bind(which: 'meditate' | 'letter' | 'word' | 'book' | 'worship' | 'settings' | 'groups' | 'look', fn: () => void) {
+  /** Wire a HUD button; taps never leak into camera drags. */
+  bind(which: 'meditate' | 'letter' | 'word' | 'worship' | 'settings' | 'groups', fn: () => void) {
     const btn = {
       meditate: this.meditateBtn,
       letter: this.letterBtn,
       word: this.wordBtn,
-      book: this.bookBtn,
       worship: this.worshipBtn,
       settings: this.settingsBtn,
       groups: this.groupsBtn,
-      look: this.lookBtn,
     }[which];
     btn.addEventListener('pointerdown', (e) => e.stopPropagation());
     btn.addEventListener('click', (e) => {
@@ -145,9 +129,10 @@ export class Hud {
     this.letterBtn.hidden = !visible;
   }
 
-  /** Highlight 오늘의 말씀 until today's letter has been opened. */
+  /** Highlight 말씀 until today's letter has been opened. */
   setWordNew(isNew: boolean) {
     this.wordBtn.classList.toggle('has-new', isNew);
+    this.wordBtn.setAttribute('aria-label', isNew ? '말씀 · 오늘의 말씀이 도착했어요' : '말씀');
   }
 
   /** 🔴 unread group chat messages on the 모임 button. */
@@ -167,12 +152,10 @@ export class Hud {
     this.groupsBtn.setAttribute('aria-label', `모임 · 읽지 않은 메시지 ${n}개`);
   }
 
-  /** 찬양 button shows whether the player is open. */
+  /** 찬양 button shows whether the player is open (by colour; the label stays 찬양). */
   setWorshipOpen(open: boolean) {
-    this.worshipOpen = open;
     this.worshipBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
     this.worshipBtn.setAttribute('aria-label', open ? '찬양 닫기' : '찬양 열기');
-    this.worshipBtn.textContent = this.touch ? '찬양' : open ? '찬양 닫기' : '찬양';
   }
 
   toast(text: string, now: number, seconds = 3.5) {

@@ -3,7 +3,7 @@
 // test flag (5184), and a client preview (5182). Shuts everything down at the end.
 //   cd client && npm run build && (cd ../server && npm run build) && node scripts/m3-test.mjs
 import { chromium } from '@playwright/test';
-import { dropDb, freshDb, loginJoin } from './lib/harness.mjs';
+import { dropDb, freshDb, loginJoin, openBook, openSettings } from './lib/harness.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -219,15 +219,16 @@ try {
   const again = (await debug(A)).m3.letter;
   check('letter does not reappear the same day', again === 'opened' && !(await A.isVisible('#letter-btn')), `letter=${again}`);
   await A.click('#btn-word');
-  await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '오늘의 말씀');
-  check('HUD 오늘의 말씀 reopens the word', true);
+  await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책' && window.__WORLDS_DEBUG__.m10.bookTab === 'today');
+  check('HUD 말씀 reopens today’s word (📖 나의 말씀 책 → 오늘)', (await A.textContent('#book-today')).includes(wa.ref));
   await A.keyboard.press('Escape');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === null);
 
   step('B word');
   // B ignores its letter by opening via the HUD button (it disappears).
   await B.click('#btn-word');
-  await until(B, () => window.__WORLDS_DEBUG__.m3.modal === '오늘의 말씀');
+  await until(B, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
+  check('HUD 말씀 while the letter is out: the letter counts as read', (await debug(B)).m3.letter === 'opened');
   await B.keyboard.press('Escape');
 
   step('closet');
@@ -260,8 +261,7 @@ try {
   await A.click('.med-save');
   await until(A, () => window.__WORLDS_DEBUG__.m3.lastSaved === '골방');
   check('meditation in 골방 saved', true);
-  await A.click('#btn-book');
-  await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
+  await openBook(A, 'mine');
   const bookA = await A.textContent('.book');
   check('word book shows the 골방 meditation', bookA.includes('골방에서') && bookA.includes('가족에게 먼저') && bookA.includes(wa.ref));
   await A.screenshot({ path: resolve(shotDir, 'm3-word-book-desktop.png') });
@@ -295,8 +295,7 @@ try {
   await M.screenshot({ path: resolve(shotDir, 'm3-meditation-mobile.png') });
   await M.tap('.med-save');
   await until(M, () => window.__WORLDS_DEBUG__.m3.lastSaved === '기도의 뜰');
-  await M.tap('#btn-book');
-  await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '나의 말씀 책');
+  await openBook(M, 'mine');
   const bookM = await M.textContent('.book');
   check('meditation on a 기도의 뜰 mat saved to the word book', bookM.includes('기도의 뜰에서') && bookM.includes('조급해하지 않기'));
   await M.screenshot({ path: resolve(shotDir, 'm3-word-book-mobile.png') });
@@ -353,7 +352,7 @@ try {
   step('audio');
   // ---- audio: running after gestures, mute toggles
   const audioBefore = (await debug(A)).m3.audio;
-  await A.click('#btn-settings');
+  await openSettings(A, 'sound');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === '설정');
   await A.click('#vol-muted');
   await until(A, (m) => window.__WORLDS_DEBUG__.m3.audio.muted !== m, audioBefore.muted, 15000).catch(() => undefined);

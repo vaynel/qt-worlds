@@ -62,7 +62,9 @@ export class InstallGuide {
     const card = el('div', 'install-offer card');
     card.id = 'install-offer';
     card.setAttribute('role', 'status');
-    card.append(el('span', 'install-offer-text', '홈 화면에 두고 앱처럼 열 수 있어요'));
+    const text = el('span', 'install-offer-text');
+    text.append(el('span', '', '홈 화면에 두고 앱처럼 열 수 있어요'), el('small', 'install-offer-hint', '설치와 👕 꾸미기는 언제든 ⚙ 설정에 있어요'));
+    card.append(text);
     const close = () => card.remove();
     const yes = button('📲 앱으로 설치하기', 'primary', () => {
       close();
