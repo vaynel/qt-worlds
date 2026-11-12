@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   BENCH_SEAT_HEIGHT,
+  DESK_SEAT_HEIGHT,
   OUTFIT_CELLS,
   OUTFIT_PALETTE,
   OUTFIT_SIZE,
@@ -56,7 +57,7 @@ const SIT_ROBE = 0.75;
 const SIT_ROBE_BOTTOM = ROBE_TOP - ROBE_H * SIT_ROBE;
 /** Where the hips rest for each seat (m above the ground); 0 = kneel on a mat. */
 export function seatHeight(kind: SeatKind): number {
-  return kind === 'log' ? 0.61 : kind === 'bench' ? BENCH_SEAT_HEIGHT + 0.02 : 0;
+  return kind === 'log' ? 0.61 : kind === 'bench' ? BENCH_SEAT_HEIGHT + 0.02 : kind === 'desk' ? DESK_SEAT_HEIGHT + 0.02 : 0;
 }
 
 export interface AvatarColors {
@@ -173,6 +174,9 @@ export class Avatar {
   /** Guitar playing (seated on a log) and reading (open book on a bench) blends. */
   private play = 0;
   private read = 0;
+  /** 이야기 도서관 reading desk: an open library book in both hands. */
+  private deskReading = false;
+  private deskBook: THREE.Mesh | null = null;
   /** Hand prop set down beside the seat while the guitar is played. */
   private handDown = false;
   private readonly lastPrint = new THREE.Vector3(NaN, 0, NaN);
@@ -553,6 +557,11 @@ export class Avatar {
         }
       }
     }
+    if (this.deskBook) {
+      this.deskBook.visible = reading && !r.bible;
+      this.deskBook.position.set(0, 0.8, 0.44);
+      this.deskBook.rotation.set(-0.75, 0, 0);
+    }
     if (r.bible) {
       r.bible.open.visible = reading;
       r.bible.closed.visible = !reading;
@@ -568,7 +577,7 @@ export class Avatar {
     const k = 1 - Math.exp(-6 * dt);
     const seated = this.sitTarget === 1;
     const playTarget = r.guitar && seated && this.sitHeight >= 0.58 ? 1 : 0;
-    const readTarget = r.bible && seated && this.sitHeight < 0.58 ? 1 : 0;
+    const readTarget = (r.bible || this.deskReading) && seated && this.sitHeight < 0.58 ? 1 : 0;
     const wasPlay = this.play > 0.5;
     const wasRead = this.read > 0.5;
     this.play += (playTarget - this.play) * k;
@@ -652,6 +661,25 @@ export class Avatar {
     this.sitTarget = seated && pose === 'sit' ? 1 : 0;
   }
 
+  /** Seated at a library desk: read an open book (the reading pose of the 성경책 prop). */
+  setDeskReading(on: boolean): void {
+    if (on === this.deskReading) return;
+    this.deskReading = on;
+    if (on && !this.deskBook) {
+      this.deskBook = new THREE.Mesh(bookOpenGeo(), propMaterial());
+      this.deskBook.name = 'desk-book';
+      this.deskBook.scale.setScalar(1.25);
+      this.deskBook.visible = false;
+      this.body.add(this.deskBook);
+    }
+    this.placeProps();
+  }
+
+  /** Reading an open book right now (desk or 성경책 on a bench). */
+  get reading(): boolean {
+    return this.read > 0.5;
+  }
+
   /** Current pose for tests: 'pray', 'sit' or 'stand'. */
   get pose(): 'pray' | 'sit' | 'stand' {
     return this.sitTarget ? 'sit' : this.seatedTarget ? 'pray' : 'stand';
@@ -700,7 +728,7 @@ export class Avatar {
     this.legL.position.y = this.legR.position.y = hipY;
     this.body.position.y = bob + breathe - 0.4 * s + (this.sitHeight - SIT_ROBE_BOTTOM) * q;
     this.body.rotation.x = 0.06 * moving + 0.08 * s + (low ? 0.02 : 0.1) * q;
-    if (this.propKey) this.animateProps(dt, speed, elapsed, moving);
+    if (this.propKey || this.deskReading || this.read > 0.001) this.animateProps(dt, speed, elapsed, moving);
   }
 
   dispose(): void {

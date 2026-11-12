@@ -376,7 +376,7 @@ export function securityHeaders(info: RequestInfo): Record<string, string> {
     "default-src 'self'",
     "script-src 'self' https://www.youtube.com https://s.ytimg.com",
     'frame-src https://www.youtube-nocookie.com https://www.youtube.com',
-    "img-src 'self' data: https://i.ytimg.com https://*.ytimg.com",
+    "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     `connect-src 'self' ws://${host} wss://${host}`,

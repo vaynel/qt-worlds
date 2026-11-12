@@ -231,13 +231,26 @@ export class RemotePlayers {
     return this.players.get(id)?.name;
   }
 
+  /** We stepped into another space: forget where everyone was until fresh snapshots arrive. */
+  hideAll(): void {
+    for (const p of this.players.values()) {
+      p.samples.length = 0;
+      p.avatar.root.visible = false;
+      p.bubbleSlot.clear();
+    }
+  }
+
   /** Record a server snapshot (timestamped on arrival, in seconds). */
   applySnapshot(snaps: PlayerSnap[], localId: string, now: number): void {
     for (const s of snaps) {
       if (s.id === localId) continue;
       const p = this.players.get(s.id);
       if (!p) continue;
-      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, kind: s.seatKind ?? 'mat', inside: s.inside === true });
+      const inside = s.inside === true;
+      // Stepping out of (or into) another space: start fresh there, don't glide across.
+      const last = p.samples[p.samples.length - 1];
+      if (last && last.inside !== inside) p.samples.length = 0;
+      p.samples.push({ t: now, x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, seat: s.seat, kind: s.seatKind ?? 'mat', inside });
       if (p.samples.length > MAX_SAMPLES) p.samples.shift();
     }
   }
@@ -285,6 +298,7 @@ export class RemotePlayers {
       p.seat = seat;
       p.kind = kind;
       p.avatar.setSeated(seat >= 0, kind === 'mat' ? 'pray' : 'sit', seatHeight(kind));
+      p.avatar.setDeskReading(seat >= 0 && kind === 'desk');
       p.avatar.animate(dt, speed, elapsed);
       p.bubbleSlot.update(now);
       if (view && p.avatar.root.visible) p.tag.update(view);
@@ -300,6 +314,7 @@ export class RemotePlayers {
     seat: number;
     seatKind: SeatKind | null;
     pose: 'pray' | 'sit' | 'stand';
+    reading: boolean;
     bubble: boolean;
     visible: boolean;
     inside: boolean;
@@ -319,6 +334,7 @@ export class RemotePlayers {
       seat: p.seat,
       seatKind: p.seat < 0 ? null : p.kind,
       pose: p.avatar.pose,
+      reading: p.avatar.reading,
       bubble: p.bubbleSlot.showing,
       visible: p.avatar.root.visible,
       inside: p.inside,

@@ -42,6 +42,10 @@ import { Social } from './Social';
 import { ShopClient } from './Shop';
 import { PropDock, ShopView } from '../ui/ShopView';
 import { PLAZA as PLAZA_CENTRE, PROPS, SHOP_STALL, shopWindowAt } from '../../../shared/protocol';
+import { DESK_SEATS, LIBRARY_DOOR, LIBRARY_SPAWN, SHELVES, type ShelfCounts, type Space } from '../../../shared/protocol';
+import { LibraryInterior, type LibrarySpot } from '../world/Library';
+import { LibraryView } from '../ui/LibraryView';
+import { kstStamp, takePhoto } from './Photo';
 
 export interface GameSession {
   /** null = solo mode ("혼자 둘러보기"). */
@@ -91,6 +95,14 @@ export class Game {
   private readonly audio: AudioEngine;
   private readonly devotion: Devotion;
   private readonly interior = new Interior();
+  /** 이야기 도서관 hall (shared interior). */
+  private readonly library = new LibraryInterior();
+  private inLibrary = false;
+  private libraryView!: LibraryView;
+  private nearSpot: LibrarySpot | null = null;
+  private shooting = false;
+  private lastShot: Record<string, unknown> | null = null;
+  private readonly cameraBtn = document.getElementById('camera-btn') as HTMLButtonElement | null;
   private readonly worship: WorshipPlayer;
   private readonly settings: SettingsView;
   private readonly closetUi = document.getElementById('closet-ui')!;
@@ -192,7 +204,8 @@ export class Game {
       welcome: session.welcome,
       shadows,
       isTouch: () => this.input.isTouch,
-      isInside: () => this.inCloset,
+      space: () => this.space(),
+      onLibrary: (shelves) => this.library.setCounts(shelves),
       onLocalName: (name, guest) => this.setLocalName(name, guest),
       onReconnect: () => this.voice?.rejoinAfterReconnect(),
       tagView: () => this.tagView(),
@@ -268,6 +281,10 @@ export class Game {
       now: () => this.elapsed,
       needLogin,
       lanternsChanged: () => undefined,
+      onLetterOpened: () => {
+        if (this.account) void api('POST', '/api/footprints/letter').catch(() => undefined);
+      },
+      writeDiary: () => this.libraryView.openDiary(),
     });
     if (session.welcome?.word) void this.devotion.setWord(session.welcome.word);
 
@@ -293,7 +310,18 @@ export class Game {
         isAdmin: () => this.isAdmin,
         openAdmin: (tab) => void this.adminView.open(tab ?? 'outfits'),
       },
+      {
+        writeDiary: () => this.libraryView.openDiary(),
+        openMine: () => this.libraryView.openMine(),
+      },
     );
+    this.libraryView = new LibraryView({
+      signedIn: () => !!this.account,
+      needLogin: (reason) => this.loginPrompt.open(reason, ''),
+      toast: (text) => this.hud.toast(text, this.elapsed, 4),
+      changed: () => void this.refreshShelves(),
+    });
+    this.setupCamera();
     // Tapping a 🕊️ notification while the app is open: show today's word.
     window.addEventListener('worlds-notification-click', (e) => {
       // ⏰ prop reminders just bring the app forward (the HUD chip shows the time left).
@@ -342,7 +370,11 @@ export class Game {
     canvas.addEventListener('pointerup', (e) => {
       const s0 = this.tapStart;
       this.tapStart = null;
-      if (!s0 || this.inCloset) return;
+      if (!s0 || this.inCloset || this.transitioning) return;
+      if (Math.hypot(e.clientX - s0.x, e.clientY - s0.y) < 8 && performance.now() - s0.t < 450 && this.inLibrary) {
+        if (!this.tapLibrary(e.clientX, e.clientY)) this.tapPerson(e.clientX, e.clientY);
+        return;
+      }
       if (Math.hypot(e.clientX - s0.x, e.clientY - s0.y) < 8 && performance.now() - s0.t < 450) {
         if (!this.devotion.tap(e.clientX, e.clientY, canvas) && !this.tapLantern(e.clientX, e.clientY)) this.tapPerson(e.clientX, e.clientY);
       }
@@ -365,6 +397,9 @@ export class Game {
     if (e.code === 'KeyE') {
       e.preventDefault();
       this.primaryAction();
+    } else if (e.code === 'KeyP' && !this.inCloset) {
+      e.preventDefault();
+      void this.capture();
     } else if (e.code === 'Enter' && this.chat.isVisible) {
       e.preventDefault();
       this.chat.focus();
@@ -391,7 +426,7 @@ export class Game {
     return {
       camera: this.camera,
       viewportHeight: this.canvas.clientHeight,
-      groundAt: (x, z) => this.world.groundHeight(x, z),
+      groundAt: this.inLibrary ? () => 0 : (x, z) => this.world.groundHeight(x, z),
       elapsed: this.elapsed,
     };
   }
@@ -422,6 +457,15 @@ export class Game {
     return Math.hypot(p.x - door.x, p.z - door.z) < DOOR_REACH;
   }
 
+  private space(): Space {
+    return this.inCloset ? 'room' : this.inLibrary ? 'library' : 'world';
+  }
+
+  private nearLibraryDoor(): boolean {
+    const p = this.player.position;
+    return Math.hypot(p.x - LIBRARY_DOOR.x, p.z - LIBRARY_DOOR.z) < DOOR_REACH;
+  }
+
   private meditationPlace(): MeditationPlace | null {
     if (this.inCloset) return '골방';
     if (this.player.seat >= 0 && this.player.seatKind === 'mat') return '기도의 뜰';
@@ -431,7 +475,9 @@ export class Game {
   /** E key / action button: enter the 골방, sit/stand on a mat, read a lantern, or visit the shop. */
   private primaryAction() {
     if (this.inCloset || this.transitioning) return;
+    if (this.inLibrary) return this.libraryAction();
     if (this.player.seat < 0 && this.nearDoor()) return this.enterCloset();
+    if (this.player.seat < 0 && this.nearLibraryDoor()) return this.enterLibrary();
     if (this.player.seat < 0 && !this.social.seatAction(false) && this.nearLantern !== null) return void this.openLantern(this.nearLantern);
     if (this.player.seat < 0 && !this.social.seatAction(false) && this.nearShop) return this.openShop();
     this.social.toggleSeat();
@@ -636,6 +682,140 @@ export class Game {
     modal.open();
   }
 
+  // ------------------------------------------------------------------ 이야기 도서관 (L-A)
+
+  /** E / action button inside the hall: door, desk chair, shelf, 오늘 꽂힌 책, 쓰는 책상. */
+  private libraryAction() {
+    if (this.player.seat >= 0) return this.social.toggleSeat();
+    const spot = this.nearSpot;
+    if (spot?.kind === 'exit') return this.leaveLibrary();
+    if (this.social.seatAction(false)) return this.social.toggleSeat();
+    if (spot) this.openSpot(spot);
+  }
+
+  private openSpot(spot: LibrarySpot) {
+    if (spot.kind === 'shelf') this.libraryView.openShelf(spot.shelf);
+    else if (spot.kind === 'today') this.libraryView.openShelf('today');
+    else if (spot.kind === 'write') this.libraryView.openDesk();
+    else if (spot.kind === 'exit') this.leaveLibrary();
+  }
+
+  /** Tap on a bookcase, the today table or the writing desk. True when one was hit. */
+  private tapLibrary(clientX: number, clientY: number): boolean {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    if (this.social.remotes.pick(this.raycaster)) return false;
+    const spot = this.library.pick(this.raycaster);
+    if (!spot) return false;
+    this.openSpot(spot);
+    return true;
+  }
+
+  private async refreshShelves() {
+    try {
+      const r = await api<{ shelves: ShelfCounts }>('GET', '/api/library/shelves');
+      this.library.setCounts(r.shelves);
+    } catch {
+      /* offline: keep what we have */
+    }
+  }
+
+  enterLibrary() {
+    if (this.inLibrary || this.inCloset) return;
+    this.input.reset();
+    this.social.forceSend();
+    this.fade(() => {
+      this.inLibrary = true;
+      document.body.classList.add('in-library');
+      // Everyone in the hall shares this scene: our avatar and the other players move in.
+      this.library.scene.add(this.player.avatar.root, this.player.avatar.trail, this.social.remotes.group);
+      this.player.setGround(this.library);
+      this.player.teleport(LIBRARY_SPAWN.x, LIBRARY_SPAWN.z);
+      this.player.yaw = LIBRARY_SPAWN.yaw;
+      this.rig.setIndoor(true, () => 0);
+      this.rig.yaw = 0;
+      this.rig.pitch = 0.42;
+      this.rig.snap(this.player.position);
+      this.social.spaceChanged();
+      void this.refreshShelves();
+    });
+  }
+
+  leaveLibrary() {
+    if (!this.inLibrary) return;
+    if (this.player.seat >= 0) this.social.toggleSeat();
+    this.libraryView.close();
+    this.fade(() => {
+      this.inLibrary = false;
+      document.body.classList.remove('in-library');
+      this.scene.add(this.player.avatar.root, this.player.avatar.trail, this.social.remotes.group);
+      this.player.setGround(this.world);
+      this.rig.setIndoor(false, (x, z) => this.world.groundHeight(x, z));
+      // Out of the door, facing the plaza.
+      const { fx, fz } = LIBRARY_DOOR;
+      this.player.teleport(LIBRARY_DOOR.x + fx * 1.0, LIBRARY_DOOR.z + fz * 1.0);
+      this.player.yaw = Math.atan2(fx, fz);
+      this.rig.yaw = Math.atan2(-fx, -fz);
+      this.rig.snap(this.player.position);
+      this.social.spaceChanged();
+    });
+  }
+
+  // ------------------------------------------------------------------ 📸 photos
+
+  private setupCamera() {
+    const b = this.cameraBtn;
+    if (!b) return;
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      b.blur();
+      void this.capture();
+    });
+  }
+
+  /** Render the 3D view (no HUD, no sheets, no YouTube), stamp it and keep it in 오늘 앨범. */
+  async capture(): Promise<Record<string, unknown> | null> {
+    if (this.shooting || this.inCloset || this.transitioning) return null;
+    if (!this.account) {
+      this.loginPrompt.open('로그인하면 QT 월드의 풍경을 사진으로 남기고 오늘의 일기에 넣을 수 있어요.', '');
+      return null;
+    }
+    this.shooting = true;
+    try {
+      const place = this.inLibrary ? '이야기 도서관' : (this.world.locate(this.player.position.x, this.player.position.z)?.name ?? '들판');
+      const { date, time } = kstStamp();
+      const photo = await takePhoto(
+        this.canvas,
+        () => this.renderer.render(this.inLibrary ? this.library.scene : this.scene, this.camera),
+        { date, time, place, nickname: this.account.nickname },
+      );
+      const flash = document.getElementById('shot-flash');
+      if (flash) {
+        flash.classList.remove('on');
+        void flash.offsetWidth;
+        flash.classList.add('on');
+      }
+      this.lastShot = { bytes: photo.blob.size, type: photo.type, width: photo.width, height: photo.height, quality: photo.quality, stamp: photo.stamp, source: 'webgl-canvas', uploaded: false };
+      const res = await fetch(`/api/shots?place=${encodeURIComponent(place)}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': photo.type }, body: photo.blob });
+      const data = (await res.json().catch(() => ({}))) as { shot?: { id: number }; usedToday?: number; message?: string };
+      if (!res.ok) {
+        this.hud.toast(data.message ?? '사진을 저장하지 못했어요.', this.elapsed, 4);
+        this.lastShot = { ...this.lastShot, error: res.status };
+        return this.lastShot;
+      }
+      this.lastShot = { ...this.lastShot, uploaded: true, id: data.shot?.id ?? null, usedToday: data.usedToday ?? null };
+      this.hud.toast(`📸 오늘 앨범에 담았어요 (${data.usedToday ?? 1}/10) · 나의 서재에서 볼 수 있어요`, this.elapsed, 4);
+      return this.lastShot;
+    } catch (err) {
+      this.hud.toast(err instanceof Error ? err.message : '사진을 찍지 못했어요.', this.elapsed);
+      return null;
+    } finally {
+      this.shooting = false;
+    }
+  }
+
   private fade(midway: () => void) {
     const fade = document.getElementById('fade')!;
     this.transitioning = true;
@@ -736,6 +916,27 @@ export class Game {
         const d = this.world.landmarks.closetDoor;
         return { x: d.x, z: d.z };
       },
+      /** 이야기 도서관 (L-A). */
+      libraryDoor: () => ({ x: LIBRARY_DOOR.x, z: LIBRARY_DOOR.z }),
+      enterLibrary: () => this.enterLibrary(),
+      leaveLibrary: () => this.leaveLibrary(),
+      library: () => ({ desks: DESK_SEATS.map((s) => ({ ...s })), spots: this.library.spots(), fronts: Object.fromEntries((Object.keys(SHELVES) as (keyof typeof SHELVES)[]).map((id) => [id, this.library.shelfFront(id)])) }),
+      libraryOpen: (what: string, arg?: unknown) => {
+        const v = this.libraryView;
+        if (what === 'shelf') v.openShelf(arg as never);
+        else if (what === 'story') v.openStory(arg as number);
+        else if (what === 'mine') v.openMine(arg as never);
+        else if (what === 'write') v.openWrite((arg as number) ?? null);
+        else if (what === 'diary') v.openDiary();
+        else if (what === 'desk') v.openDesk();
+      },
+      capture: () => this.capture(),
+      /** Screen position of a library spot (to tap it like a player would). */
+      libraryScreen: (x: number, y: number, z: number) => {
+        const v = new THREE.Vector3(x, y, z).project(this.camera);
+        const r = this.canvas.getBoundingClientRect();
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+      },
       /** Screen position of the flying letter (to click it like a player would). */
       letterScreen: () => {
         const g = this.scene.getObjectByName('today-letter');
@@ -793,22 +994,25 @@ export class Game {
     // 3. Camera (after the player moved)
     this.rig.update(dt, this.player.position);
 
-    // 4. World streaming, sky, landmark ambience
-    this.world.update(this.elapsed, this.camera, this.player.position);
+    // 4. World streaming, sky, landmark ambience (inside the library the world waits at its door)
+    this.world.update(this.elapsed, this.camera, this.inLibrary ? this.world.landmarks.libraryDoor : this.player.position);
 
     // 5. Today's word, ambience, HUD
-    this.devotion.update(dt, this.elapsed, !this.inCloset && !this.transitioning);
+    this.devotion.update(dt, this.elapsed, !this.inCloset && !this.inLibrary && !this.transitioning);
     this.lanterns.setNight(this.world.dayNight.night);
     this.player.avatar.setNight(this.world.dayNight.night);
     this.social.remotes.setNight(this.world.dayNight.night);
     if (!this.inCloset) this.localTag?.update(this.tagView());
-    this.lanterns.update(this.elapsed, this.inCloset ? null : this.nearLantern);
+    this.lanterns.update(this.elapsed, this.inCloset || this.inLibrary ? null : this.nearLantern);
     this.updateAudio();
     this.updateHud();
 
     if (this.inCloset) {
       this.interior.update(dt, this.elapsed, this.world.dayNight.night);
       this.renderer.render(this.interior.scene, this.interior.camera);
+    } else if (this.inLibrary) {
+      this.library.update(this.camera, this.elapsed, this.world.dayNight.night);
+      if (!this.customize.isOpen || this.frame % 4 === 0) this.renderer.render(this.library.scene, this.camera);
     } else if (!this.customize.isOpen || this.frame % 4 === 0) {
       // The 꾸미기 preview has its own renderer: draw the world behind it less often.
       this.renderer.render(this.scene, this.camera);
@@ -838,10 +1042,11 @@ export class Game {
   private updateAudio() {
     const p = this.player.position;
     const fireD = Math.hypot(p.x - CAMPFIRE.x, p.z - CAMPFIRE.z);
+    const indoor = this.inCloset || this.inLibrary;
     this.audio.setMix({
-      wind: this.inCloset ? 0 : 0.6 + 0.4 * (1 - this.world.dayNight.night * 0.5),
-      fire: this.inCloset ? 0 : THREE.MathUtils.clamp(1 - (fireD - 3) / 22, 0, 1),
-      room: this.inCloset ? 1 : 0,
+      wind: indoor ? 0 : 0.6 + 0.4 * (1 - this.world.dayNight.night * 0.5),
+      fire: indoor ? 0 : THREE.MathUtils.clamp(1 - (fireD - 3) / 22, 0, 1),
+      room: this.inCloset ? 1 : this.inLibrary ? 0.45 : 0,
     });
     this.audio.tick();
   }
@@ -856,12 +1061,14 @@ export class Game {
       this.hud.update(this.elapsed, this.input.hasMoved);
       return;
     }
+    if (this.inLibrary) return this.updateLibraryHud(touch);
     const seatLabel = this.social.seatAction(touch);
     const p0 = this.player.position;
     this.nearLantern = this.player.seat < 0 ? (this.lanterns.nearest(p0.x, p0.z, LANTERN_READ_REACH)?.id ?? null) : null;
     this.nearShop = this.player.seat < 0 && Math.hypot(p0.x - SHOP_STALL.x, p0.z - SHOP_STALL.z) < SHOP_STALL.reach;
     const shopLabel = this.shop.open ? '소품 가게 보기' : '가게 안내 보기';
     if (this.player.seat < 0 && this.nearDoor()) this.hud.setAction(touch ? '골방에 들어가기' : '골방에 들어가기 (E)');
+    else if (this.player.seat < 0 && this.nearLibraryDoor()) this.hud.setAction(touch ? '도서관에 들어가기' : '도서관에 들어가기 (E)');
     else if (!seatLabel && this.nearLantern !== null) this.hud.setAction(touch ? '등불 읽기' : '등불 읽기 (E)');
     else if (!seatLabel && this.nearShop) this.hud.setAction(touch ? shopLabel : `${shopLabel} (E)`);
     else this.hud.setAction(seatLabel);
@@ -878,15 +1085,42 @@ export class Game {
     const door = this.world.landmarks.closetDoor;
     if (Math.hypot(p.x - door.x, p.z - door.z) < 3.2) {
       this.hud.showPrompt('closet-door', '골방 문 앞', '문을 열고 들어가면 나만의 조용한 기도 방이에요.', this.elapsed, true);
+    } else if (Math.hypot(p.x - LIBRARY_DOOR.x, p.z - LIBRARY_DOOR.z) < 3.4) {
+      this.hud.showPrompt('library-door', '이야기 도서관', '들어가면 함께 있는 분들과 조용히 이야기를 읽을 수 있어요.', this.elapsed, true);
     } else if (this.nearShop) {
       this.hud.clearPrompt('closet-door');
+      this.hud.clearPrompt('library-door');
       if (this.shop.open) this.hud.showPrompt('shop-open', '나눔 소품 가게', `모두 무료예요 · ${this.shop.closesLabel()}까지 열려 있어요`, this.elapsed);
       else this.hud.showPrompt('shop-closed', '나눔 소품 가게', `지금은 문을 닫았어요 · ${this.shop.nextOpenLabel()}에 다시 열어요`, this.elapsed);
     } else {
       this.hud.clearPrompt('closet-door');
+      this.hud.clearPrompt('library-door');
       if (here) this.hud.showPrompt(here.id, here.name, here.blurb, this.elapsed);
       else this.hud.clearPrompt();
     }
+    this.hud.update(this.elapsed, this.input.hasMoved);
+  }
+
+  private updateLibraryHud(touch: boolean) {
+    const p = this.player.position;
+    this.nearLantern = null;
+    this.nearShop = false;
+    this.nearSpot = this.player.seat < 0 ? this.library.near(p.x, p.z) : null;
+    const seatLabel = this.social.seatAction(touch);
+    const spot = this.nearSpot;
+    const key = (label: string) => (touch ? label : `${label} (E)`);
+    if (spot?.kind === 'exit') this.hud.setAction(key('밖으로 나가기'));
+    else if (seatLabel) this.hud.setAction(seatLabel);
+    else if (spot?.kind === 'shelf') this.hud.setAction(key(`${SHELVES[spot.shelf].name} 보기`));
+    else if (spot?.kind === 'today') this.hud.setAction(key('오늘 꽂힌 책 보기'));
+    else if (spot?.kind === 'write') this.hud.setAction(key('쓰는 책상'));
+    else this.hud.setAction(null);
+    this.propDock.setNearPlaza(false);
+    this.propDock.update();
+    this.hud.setPlace('이야기 도서관');
+    const dn = this.world.dayNight;
+    this.hud.setClock(dn.formatClock(), dn.phase, dn.night > 0.5);
+    this.hud.showPrompt('library-in', '이야기 도서관', '서가를 누르면 책을 꺼내 읽을 수 있어요. 들어온 문으로 나가요.', this.elapsed);
     this.hud.update(this.elapsed, this.input.hasMoved);
   }
 
@@ -917,6 +1151,16 @@ export class Game {
       m10: {
         settingsPage: this.settings.currentPage,
         bookTab: this.devotion.bookTab,
+      },
+      la: {
+        space: this.space(),
+        inLibrary: this.inLibrary,
+        nearSpot: this.nearSpot,
+        books: this.library.bookCounts,
+        counts: this.library.counts,
+        view: this.libraryView.describe(),
+        lastShot: this.lastShot,
+        renderedRemotes: this.social.remotes.describe().filter((r) => r.visible).map((r) => r.id),
       },
       m4: {
         account: this.account,
@@ -960,6 +1204,7 @@ export class Game {
     window.removeEventListener('keydown', this.onKeyDown);
     this.social.dispose();
     this.interior.dispose();
+    this.library.dispose();
     this.world.chunks.dispose();
     this.player.avatar.dispose();
     this.timer.dispose();

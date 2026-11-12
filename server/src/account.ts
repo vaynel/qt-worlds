@@ -5,6 +5,10 @@ import { LANTERN_DAYS } from './services.js';
 import { RENTAL_KEEP_DAYS } from './shop.js';
 import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
+import type { FootprintService } from './footprints.js';
+import type { LibraryService } from './library.js';
+import type { ShotService } from './shots.js';
+import { FOOTPRINT_KEEP_DAYS } from '../../shared/protocol.js';
 
 const DAY_MS = 86_400_000;
 /** A 내린 lantern's copy is kept this long (the daily limit counts it), then deleted. */
@@ -38,6 +42,7 @@ export class AccountService {
     private readonly db: DB,
     private readonly looks: LookService | null = null,
     private readonly shop: ShopService | null = null,
+    private readonly library: { library: LibraryService; footprints: FootprintService; shots: ShotService } | null = null,
   ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
@@ -206,11 +211,17 @@ export class AccountService {
       },
       appearance: this.looks?.export(userId) ?? null,
       propShop: this.shop?.export(userId) ?? null,
+      // 이야기 도서관: my books (testimonies, diaries), 공감, 책갈피, books read, reports,
+      // the draft, 발자취 (activity log) and my screenshots (images included).
+      library: this.library?.library.export(userId) ?? null,
+      footprints: this.library?.footprints.export(userId) ?? null,
+      screenshots: this.library?.shots.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
       retention: {
         groupMessagesDays: GROUP_CHAT_DAYS,
         lanternDays: LANTERN_DAYS,
         propRentalDays: RENTAL_KEEP_DAYS,
+        footprintAndUnusedScreenshotDays: FOOTPRINT_KEEP_DAYS,
         termsVersionCurrent: TERMS_VERSION,
       },
     };
@@ -230,7 +241,9 @@ export class AccountService {
       if (!typed || typed !== u.nickname_key) throw new HttpError(400, 'confirm_mismatch', '닉네임을 똑같이 적어 주세요.');
     }
 
-    return this.db.transaction((): DeletionResult => {
+    // Screenshot files are deleted from disk once their rows are gone.
+    const shotFiles = this.library?.shots.files(userId) ?? [];
+    const out = this.db.transaction((): DeletionResult => {
       const lanternIds = (this.db.prepare('SELECT id FROM lanterns WHERE user_id = ?').all(userId) as { id: number }[]).map((r) => r.id);
       const reactedLanternIds = (
         this.db.prepare('SELECT DISTINCT lantern_id FROM reactions WHERE user_id = ? AND lantern_id NOT IN (SELECT id FROM lanterns WHERE user_id = ?)').all(userId, userId) as {
@@ -278,12 +291,17 @@ export class AccountService {
       // lanterns (→ their reactions), my reactions, my saved lanterns, memberships,
       // read pointers, push subscriptions and preferences, appearance and strikes
       // (columns on users), my outfit drawings (→ reports about them) and my reports,
-      // prop rentals, their request log and daily counts (stock is not given back).
+      // prop rentals, their request log and daily counts (stock is not given back),
+      // my books (→ their 공감, 책갈피, readers, reports, photo links), my 공감/책갈피/
+      // reads/reports on others' books, my draft, 발자취 and screenshot rows.
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
       const remainingGroups = memberOf.filter((g) => !deletedGroups.includes(g));
       return { lanternIds, reactedLanternIds, transferred, deletedGroups, remainingGroups };
     })();
+    this.library?.shots.removeFiles(shotFiles);
+    this.library?.footprints.forget(userId);
+    return out;
   }
 
   /**
@@ -291,7 +309,7 @@ export class AccountService {
    *  - lantern copies: 내린 ones after a day, expired ones a day after leaving the hill;
    *  - sign-ups that never chose a nickname nor agreed to the terms, after a day.
    */
-  sweep(now = Date.now()): { lanterns: number; signups: number; outfits: number; rentals: number } {
+  sweep(now = Date.now()): { lanterns: number; signups: number; outfits: number; rentals: number; footprints: number; shots: number } {
     const lanterns = this.db
       .prepare('DELETE FROM lanterns WHERE (removed_at IS NOT NULL AND removed_at < ?) OR created_at < ?')
       .run(now - REMOVED_LANTERN_GRACE_MS, now - LANTERN_DAYS * DAY_MS - EXPIRED_LANTERN_GRACE_MS).changes;
@@ -300,6 +318,8 @@ export class AccountService {
       .run(now - ABANDONED_SIGNUP_MS).changes;
     const outfits = this.looks?.sweep(now) ?? 0;
     const rentals = this.shop?.sweep(now) ?? 0;
-    return { lanterns, signups, outfits, rentals };
+    const footprints = this.library?.footprints.sweep(now) ?? 0;
+    const shots = this.library?.shots.sweep(now) ?? 0;
+    return { lanterns, signups, outfits, rentals, footprints, shots };
   }
 }

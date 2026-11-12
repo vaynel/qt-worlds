@@ -247,6 +247,120 @@ const MIGRATIONS: string[] = [
   CREATE INDEX rental_requests_user ON rental_requests(user_id);
   ALTER TABLE push_prefs ADD COLUMN props INTEGER NOT NULL DEFAULT 1;
   `,
+  // v9: 이야기 도서관 (L-A): 발자취 (private activity log: discrete events with a
+  // stable key, and per-minute presence for time spent), in-world screenshots
+  // (files on disk + rows), books (testimonies and diaries) with 공감, 책갈피,
+  // unique readers, reports, one draft per user, and a writing ban.
+  `
+  ALTER TABLE users ADD COLUMN footprints_off INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN story_ban_until INTEGER;
+  CREATE TABLE footprints (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    type TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (user_id, key)
+  );
+  CREATE INDEX footprints_user_date ON footprints(user_id, kst_date);
+  CREATE INDEX footprints_at ON footprints(at);
+  CREATE TABLE footprint_minutes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    minute INTEGER NOT NULL CHECK (minute >= 0 AND minute < 1440),
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, kst_date, kind, minute)
+  ) WITHOUT ROWID;
+  CREATE TABLE screenshots (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file TEXT NOT NULL UNIQUE,
+    kst_date TEXT NOT NULL,
+    place TEXT NOT NULL DEFAULT '',
+    mime TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX screenshots_user_date ON screenshots(user_id, kst_date);
+  CREATE TABLE shot_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (user_id, kst_date)
+  );
+  CREATE TABLE stories (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('testimony', 'diary')),
+    shelf TEXT NOT NULL,
+    title TEXT NOT NULL,
+    parts TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    ref TEXT,
+    verse TEXT,
+    visibility TEXT NOT NULL CHECK (visibility IN ('public', 'group', 'anonymous', 'private')),
+    group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+    kst_date TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    hidden_at INTEGER,
+    review TEXT CHECK (review IS NULL OR review IN ('kept', 'restored')),
+    reviewed_at INTEGER
+  );
+  CREATE UNIQUE INDEX stories_one_diary ON stories(user_id, kst_date) WHERE kind = 'diary';
+  CREATE INDEX stories_shelf ON stories(shelf, created_at);
+  CREATE INDEX stories_user ON stories(user_id, created_at);
+  CREATE TABLE diary_photos (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    shot_id INTEGER NOT NULL REFERENCES screenshots(id) ON DELETE CASCADE,
+    ord INTEGER NOT NULL,
+    PRIMARY KEY (story_id, shot_id)
+  );
+  CREATE INDEX diary_photos_shot ON diary_photos(shot_id);
+  CREATE TABLE story_reactions (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('grace', 'same', 'pray')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (story_id, user_id, type)
+  );
+  CREATE TABLE story_bookmarks (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, story_id)
+  );
+  CREATE TABLE story_reads (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (story_id, user_id)
+  ) WITHOUT ROWID;
+  CREATE TABLE story_reports (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (reason IN ('inappropriate', 'privacy', 'spam', 'other')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (story_id, reporter_id)
+  );
+  CREATE INDEX story_reports_reporter ON story_reports(reporter_id);
+  CREATE TABLE story_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (user_id, kst_date)
+  );
+  CREATE TABLE story_drafts (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    draft TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

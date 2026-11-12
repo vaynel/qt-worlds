@@ -323,6 +323,37 @@ export class DailyWord {
     };
   }
 
+  private positions: Map<string, number> | null = null;
+
+  /**
+   * A user-typed reference ("요한복음 3:16", "시편 23:1-3", up to 10 verses),
+   * checked against the Bible file the same way the curated list is: the book
+   * name must match exactly and every verse must exist. Returns the normalised
+   * reference and its text, or null.
+   */
+  lookup(raw: string): { ref: string; text: string } | null {
+    const m = REF_RE.exec(raw.replace(/\s+/g, ' ').trim());
+    if (!m) return null;
+    let book: number | undefined;
+    for (const [num, name] of this.books) if (name === m[1]) book = num;
+    if (!book) return null;
+    if (!this.positions) {
+      this.positions = new Map();
+      this.verses.forEach((v, i) => this.positions!.set(`${v.book}:${v.chapter}:${v.verse}`, i));
+    }
+    const chapter = Number(m[2]);
+    const start = Number(m[3]);
+    const end = m[4] ? Number(m[4]) : start;
+    if (end < start || end - start > 9) return null;
+    const texts: string[] = [];
+    for (let v = start; v <= end; v++) {
+      const i = this.positions.get(`${book}:${chapter}:${v}`);
+      if (i === undefined || this.verses[i].placeholder) return null;
+      texts.push(this.verses[i].text);
+    }
+    return { ref: `${m[1]} ${chapter}:${start}${end > start ? `-${end}` : ''}`, text: texts.join(' ') };
+  }
+
   get poolSize(): number {
     return this.pool.length;
   }

@@ -11,7 +11,7 @@ export const PROTOCOL_VERSION = 1;
  * Bump it (to the new 시행일) when the texts change materially: every account
  * is then asked to agree again on its next visit.
  */
-export const TERMS_VERSION = '2026-11-11';
+export const TERMS_VERSION = '2026-11-12';
 /** Minimum age for an account (만 14세 이상; PIPA art. 22-2). */
 export const MIN_AGE = 14;
 
@@ -101,8 +101,8 @@ export const MATS: readonly MatSpot[] = Array.from({ length: MAT_COUNT }, (_, in
   return { index, x, z, yaw: Math.atan2(PRAYER_GARDEN.x - x, PRAYER_GARDEN.z - z) };
 });
 
-/** What a player sits on: a prayer mat (기도의 뜰), a campfire log or a plaza bench. */
-export type SeatKind = 'mat' | 'log' | 'bench';
+/** What a player sits on: a prayer mat (기도의 뜰), a campfire log, a plaza bench or a library reading desk. */
+export type SeatKind = 'mat' | 'log' | 'bench' | 'desk';
 
 /**
  * 모닥불 log benches (Landmarks.buildCampfire builds the logs from these
@@ -193,10 +193,65 @@ export const BENCH_SEATS: readonly BenchSeat[] = Array.from({ length: BENCH_SEAT
   return { index, bench: b.index, x: b.x + rx * along - fx * BENCH_SEAT_BACK, z: b.z + rz * along - fz * BENCH_SEAT_BACK, yaw: b.yaw };
 });
 
-const SEAT_COUNTS: Record<SeatKind, number> = { mat: MAT_COUNT, log: LOG_SEAT_COUNT, bench: BENCH_SEAT_COUNT };
+// ------------------------------------------------------------------ 이야기 도서관 (L-A)
+
+/** Interiors: the private 골방 ('room', nobody else is ever seen) and the shared library. */
+export type InteriorId = 'room' | 'library';
+export type Space = 'world' | InteriorId;
+
+/** The library building in the world (between 기도의 뜰 and 등불 언덕), door facing the plaza. */
+export const LIBRARY = { x: -27, z: -45 } as const;
+/** Outside door spot (3.6 m from the building centre toward the plaza). */
+export const LIBRARY_DOOR = (() => {
+  const len = Math.hypot(PLAZA.x - LIBRARY.x, PLAZA.z - LIBRARY.z);
+  const fx = (PLAZA.x - LIBRARY.x) / len;
+  const fz = (PLAZA.z - LIBRARY.z) / len;
+  return { x: LIBRARY.x + fx * 3.6, z: LIBRARY.z + fz * 3.6, fx, fz };
+})();
+/** How close to the outside door you must be to step in (server check, with lag slack). */
+export const LIBRARY_ENTER_REACH = 7;
+
+/**
+ * Library interior, in its own local frame (floor y = 0): a hall HALF_W x HALF_D
+ * either side of the origin, door in the south wall (+z), shelves along the
+ * north wall. Two reading tables with four chairs each (seat kind 'desk').
+ */
+export const LIBRARY_ROOM = { halfW: 9, halfD: 7 } as const;
+export const LIBRARY_SPAWN = { x: 0, z: 4.8, yaw: Math.PI } as const;
+export const LIBRARY_EXIT = { x: 0, z: 6.3, reach: 1.3 } as const;
+export const DESK_COUNT = 2;
+export const DESK_SEATS_PER_DESK = 4;
+export const DESK_SEAT_COUNT = DESK_COUNT * DESK_SEATS_PER_DESK;
+export const DESK_LENGTH = 2.4;
+export const DESK_DEPTH = 1.0;
+export const DESK_HEIGHT = 0.78;
+/** Chair seat height (the reading pose sits the hips here). */
+export const DESK_SEAT_HEIGHT = 0.46;
+export const DESKS: readonly { index: number; x: number; z: number }[] = [
+  { index: 0, x: -3.2, z: 0.6 },
+  { index: 1, x: 3.2, z: 0.6 },
+];
+export interface DeskSeat extends MatSpot {
+  desk: number;
+}
+/** Two chairs on each long side, facing the table. */
+export const DESK_SEATS: readonly DeskSeat[] = Array.from({ length: DESK_SEAT_COUNT }, (_, index) => {
+  const d = DESKS[Math.floor(index / DESK_SEATS_PER_DESK)];
+  const k = index % DESK_SEATS_PER_DESK;
+  const side = k < 2 ? -1 : 1; // -1 = north side (faces +z), +1 = south side (faces -z)
+  const along = (k % 2 === 0 ? -1 : 1) * 0.62;
+  return { index, desk: d.index, x: d.x + along, z: d.z + side * 0.92, yaw: side < 0 ? 0 : Math.PI };
+});
+
+const SEAT_COUNTS: Record<SeatKind, number> = { mat: MAT_COUNT, log: LOG_SEAT_COUNT, bench: BENCH_SEAT_COUNT, desk: DESK_SEAT_COUNT };
 
 export function seatSpot(kind: SeatKind, index: number): MatSpot | undefined {
-  return kind === 'log' ? LOG_SEATS[index] : kind === 'bench' ? BENCH_SEATS[index] : MATS[index];
+  return kind === 'log' ? LOG_SEATS[index] : kind === 'bench' ? BENCH_SEATS[index] : kind === 'desk' ? DESK_SEATS[index] : MATS[index];
+}
+
+/** Interior from a client frame: legacy `true` is the 골방. */
+export function parseInside(raw: unknown): InteriorId | undefined {
+  return raw === true || raw === 'room' ? 'room' : raw === 'library' ? 'library' : undefined;
 }
 
 // ------------------------------------------------------------------ messages
@@ -207,8 +262,8 @@ export interface StatePayload {
   z: number;
   yaw: number;
   speed: number;
-  /** True while inside the private room (골방); others then hide this avatar. */
-  inside?: boolean;
+  /** Which interior the player is in (absent = the open world). Positions are then in that interior's frame. */
+  inside?: InteriorId;
 }
 
 /** One verse line of a passage. */
@@ -266,12 +321,17 @@ export interface PlayerInfo {
   props?: PropWear[];
 }
 
-export interface PlayerSnap extends StatePayload {
+export interface PlayerSnap extends Omit<StatePayload, 'inside'> {
   id: string;
-  /** Seat index while seated (mat, log or bench, see seatKind), else -1. */
+  /** Seat index while seated (mat, log, bench or desk, see seatKind), else -1. */
   seat: number;
-  /** Present when seated on a campfire log or plaza bench ('mat' is implied otherwise). */
-  seatKind?: 'log' | 'bench';
+  /** Present when seated on a campfire log, plaza bench or library desk ('mat' is implied otherwise). */
+  seatKind?: 'log' | 'bench' | 'desk';
+  /**
+   * Not in the viewer's space (another interior, or the world while the viewer is
+   * inside): hide this avatar. Positions of hidden players are not sent (zeros).
+   */
+  inside?: true;
 }
 
 export type ErrorCode =
@@ -341,6 +401,8 @@ export type ServerMessage =
       logs?: (string | null)[];
       /** Plaza bench seat occupancy (BENCH_SEATS order). */
       benches?: (string | null)[];
+      /** Library desk seat occupancy (DESK_SEATS order). */
+      desks?: (string | null)[];
       snapshotHz: number;
       word?: WordPassage | null;
       /** The signed-in account, or null for a guest. */
@@ -381,6 +443,10 @@ export type ServerMessage =
   | { t: 'mats'; mats: (string | null)[] }
   | { t: 'logs'; logs: (string | null)[] }
   | { t: 'benches'; benches: (string | null)[] }
+  /** Library reading desk seat occupancy (DESK_SEATS order). */
+  | { t: 'desks'; desks: (string | null)[] }
+  /** 이야기 도서관: how many books stand on each shelf, as this viewer may see them. */
+  | { t: 'library'; shelves: ShelfCounts }
   /** Someone's borrowed props changed (rented, returned, expired). Also sent for your own id. */
   | { t: 'props'; id: string; props: PropWear[] }
   /** 나눔 소품 가게: open/closed, this window's stock (server clock). */
@@ -475,12 +541,13 @@ export function parseClientMessage(data: string): ClientMessage | null {
     case 'state': {
       if (!finite(m.x, WORLD_LIMIT) || !finite(m.y, 1000) || !finite(m.z, WORLD_LIMIT)) return null;
       if (!finite(m.yaw, 1000) || !finite(m.speed, 100)) return null;
-      return { t: 'state', x: m.x, y: m.y, z: m.z, yaw: m.yaw, speed: Math.max(0, m.speed), inside: m.inside === true };
+      const inside = parseInside(m.inside);
+      return { t: 'state', x: m.x, y: m.y, z: m.z, yaw: m.yaw, speed: Math.max(0, m.speed), ...(inside ? { inside } : {}) };
     }
     case 'chat':
       return typeof m.text === 'string' ? { t: 'chat', text: m.text } : null;
     case 'sit': {
-      if (m.kind === 'log' || m.kind === 'bench') {
+      if (m.kind === 'log' || m.kind === 'bench' || m.kind === 'desk') {
         const n = SEAT_COUNTS[m.kind];
         return Number.isInteger(m.seat) && (m.seat as number) >= 0 && (m.seat as number) < n ? { t: 'sit', kind: m.kind, seat: m.seat as number } : null;
       }
@@ -776,4 +843,111 @@ export function validProps(raw: unknown): PropWear[] {
     if (out.length >= SHOP_MAX_ACTIVE) break;
   }
   return out;
+}
+
+// ------------------------------------------------------------------ 이야기 도서관: books (L-A)
+
+/** 🙏 나의 하나님 이야기 shelves (testimonies), then the 📔 발자취 서가 for diaries. */
+export const TESTIMONY_SHELVES = ['first', 'answer', 'wilderness', 'thanks', 'word'] as const;
+export type TestimonyShelf = (typeof TESTIMONY_SHELVES)[number];
+export const SHELF_IDS = [...TESTIMONY_SHELVES, 'diary'] as const;
+export type ShelfId = (typeof SHELF_IDS)[number];
+export const SHELVES: Record<ShelfId, { emoji: string; name: string; blurb: string }> = {
+  first: { emoji: '🌱', name: '처음 만난 하나님', blurb: '처음 믿게 된 이야기' },
+  answer: { emoji: '🙏', name: '기도 응답', blurb: '기도가 응답된 이야기' },
+  wilderness: { emoji: '🌧️', name: '광야에서', blurb: '힘든 시간에 만난 하나님' },
+  thanks: { emoji: '💌', name: '감사', blurb: '일상의 감사' },
+  word: { emoji: '✨', name: '말씀이 살아날 때', blurb: '말씀이 삶에서 이루어진 순간' },
+  diary: { emoji: '📔', name: '발자취 서가', blurb: '날짜별로 꽂힌 오늘의 일기' },
+};
+export type ShelfCounts = Record<ShelfId, number> & { today: number };
+export const isShelfId = (v: unknown): v is ShelfId => typeof v === 'string' && (SHELF_IDS as readonly string[]).includes(v);
+export const isTestimonyShelf = (v: unknown): v is TestimonyShelf => typeof v === 'string' && (TESTIMONY_SHELVES as readonly string[]).includes(v);
+
+/** The guided form: three questions instead of a blank page. */
+export const STORY_PROMPTS = ['그때 어떤 상황이었나요?', '하나님을 어떻게 만났나요?', '지금 무엇이 달라졌나요?'] as const;
+export const STORY_TITLE_MAX = 40;
+/** All three answers together. */
+export const STORY_BODY_MAX = 3000;
+export const STORIES_PER_DAY = 5;
+/** Diary: lines kept from the generated draft, each at most DIARY_LINE_MAX; plus ✏️ 오늘 한 줄. */
+export const DIARY_LINES_MAX = 40;
+export const DIARY_LINE_MAX = 200;
+export const DIARY_NOTE_MAX = 300;
+export const DIARY_PHOTOS_MAX = 4;
+
+/** 공개 / 모임 / 익명 공개 / 나만. */
+export const STORY_VISIBILITIES = ['public', 'group', 'anonymous', 'private'] as const;
+export type StoryVisibility = (typeof STORY_VISIBILITIES)[number];
+export const VISIBILITY_LABELS: Record<StoryVisibility, string> = { public: '공개', group: '모임', anonymous: '익명 공개', private: '나만' };
+
+/** 💛 공감: one of each per reader, toggled. */
+export const STORY_REACTIONS = ['grace', 'same', 'pray'] as const;
+export type StoryReaction = (typeof STORY_REACTIONS)[number];
+export const STORY_REACTION_LABELS: Record<StoryReaction, string> = { grace: '은혜받았어요', same: '저도 그랬어요', pray: '함께 기도해요' };
+
+export const STORY_REPORT_REASONS = ['inappropriate', 'privacy', 'spam', 'other'] as const;
+export type StoryReportReason = (typeof STORY_REPORT_REASONS)[number];
+export const STORY_REPORT_LABELS: Record<StoryReportReason, string> = { inappropriate: '부적절함', privacy: '개인정보 노출', spam: '광고·도배', other: '기타' };
+/** Distinct reporters that hide a book automatically. */
+export const STORY_HIDE_REPORTS = 3;
+
+/** 📸 In-world screenshots. */
+export const SHOTS_PER_DAY = 10;
+export const SHOT_MAX_DIM = 1280;
+/** Hard upload limit (the client aims for < 150 KB). */
+export const SHOT_MAX_BYTES = 400 * 1024;
+/** 발자취 and unused screenshots are deleted after this many days. */
+export const FOOTPRINT_KEEP_DAYS = 30;
+
+/** Phone numbers, e-mail addresses and resident registration numbers: warn before publishing. */
+const PERSONAL_PATTERNS: [string, RegExp][] = [
+  ['전화번호', /(?:^|[^\d])(?:01[016789]|0[2-6]\d?)[\s.-]?\d{3,4}[\s.-]?\d{4}(?!\d)/],
+  ['이메일', /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
+  ['주민등록번호', /(?:^|[^\d])\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])[\s-]?[1-8]\d{6}(?!\d)/],
+];
+export function personalInfoKinds(text: string): string[] {
+  return PERSONAL_PATTERNS.filter(([, re]) => re.test(text)).map(([k]) => k);
+}
+
+/** One book in a list (never the author's account id; anonymous books never carry the nickname). */
+export interface StoryItem {
+  id: number;
+  kind: 'testimony' | 'diary';
+  shelf: ShelfId;
+  title: string;
+  excerpt: string;
+  /** Display name: the nickname, or ANONYMOUS_NAME for anonymous books (except to their author). */
+  author: string;
+  visibility: StoryVisibility;
+  /** Group name for 모임 books. */
+  group: string | null;
+  /** Diary date (KST) or the day it was written. */
+  date: string;
+  createdAt: string;
+  updatedAt: string;
+  reactions: Record<StoryReaction, number>;
+  readers: number;
+  /** This viewer has opened it before. */
+  read: boolean;
+  bookmarked: boolean;
+  mine: boolean;
+  /** Hidden after reports (only its author and admins see it). */
+  hidden: boolean;
+  photos: number;
+}
+
+export interface StoryDetail extends StoryItem {
+  /** Testimony: the three answers (STORY_PROMPTS order). Diary: its lines. */
+  parts: string[];
+  /** Diary: ✏️ 오늘 한 줄. */
+  note: string;
+  /** Bible reference (testimony: optional; diary: the day's word) and its text. */
+  ref: string | null;
+  verse: string | null;
+  /** Screenshot ids shown inline (diary). */
+  photoIds: number[];
+  myReactions: StoryReaction[];
+  /** Testimony: author-only group id (for editing). */
+  groupId: number | null;
 }

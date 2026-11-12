@@ -3,7 +3,11 @@ import type { WebSocket } from 'ws';
 import {
   CAMPFIRE,
   BENCH_SEAT_COUNT,
+  DESK_SEAT_COUNT,
+  LIBRARY_DOOR,
+  LIBRARY_ENTER_REACH,
   LOG_SEAT_COUNT,
+  type Space,
   MAT_COUNT,
   seatSpot,
   type SeatKind,
@@ -33,6 +37,8 @@ import type { GroupService, LanternService } from './services.js';
 import type { LookService } from './looks.js';
 import type { ShopEvents, ShopService } from './shop.js';
 import { TokenBucket } from './rateLimit.js';
+import type { FootprintService } from './footprints.js';
+import type { LibraryService } from './library.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
 /** Bad or rate-limited frames tolerated per minute before disconnecting. */
@@ -74,6 +80,8 @@ interface Client {
   props: PropWear[];
 }
 
+const spaceOf = (c: Client): Space => c.state.inside ?? 'world';
+
 /** Fastest legit movement (run speed 7.5 m/s) with headroom for lag. */
 const MAX_SPEED = 11;
 const MOVE_SLACK = 2;
@@ -95,6 +103,10 @@ export interface RoomOptions {
   lanterns?: LanternService | null;
   looks?: LookService | null;
   shop?: ShopService | null;
+  library?: LibraryService | null;
+  footprints?: FootprintService | null;
+  /** How often presence minutes (발자취) are sampled. */
+  footprintTickMs?: number;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -111,7 +123,10 @@ export class Room implements RoomEvents, ShopEvents {
   private readonly logs: (string | null)[] = Array(LOG_SEAT_COUNT).fill(null);
   /** 중앙 광장 bench seats (BENCH_SEATS order). */
   private readonly benches: (string | null)[] = Array(BENCH_SEAT_COUNT).fill(null);
+  /** 이야기 도서관 reading desk seats (DESK_SEATS order). */
+  private readonly desks: (string | null)[] = Array(DESK_SEAT_COUNT).fill(null);
   private readonly timer: NodeJS.Timeout;
+  private readonly footprintTimer: NodeJS.Timeout;
   private readonly log: (msg: string) => void;
   private currentDate = seoulDate();
 
@@ -121,6 +136,28 @@ export class Room implements RoomEvents, ShopEvents {
       this.broadcastSnapshot();
       this.checkDayChange();
     }, 1000 / SNAPSHOT_HZ);
+    this.footprintTimer = setInterval(() => this.sampleFootprints(), options.footprintTickMs ?? 20_000);
+  }
+
+  /**
+   * 발자취 presence: once per sample, every signed-in player's minute counts as
+   * time here, and as prayer (on a mat), campfire (with how many others were
+   * there; never what was said), voice room or library time. Stored per minute,
+   * so several tabs or a reconnect never count twice.
+   */
+  private sampleFootprints() {
+    const fp = this.options.footprints;
+    if (!fp) return;
+    let fire = 0;
+    for (const c of this.clients.values()) if (c.joined && this.nearCampfire(c)) fire++;
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.userId === null) continue;
+      fp.minute(c.userId, 'play');
+      if (c.seat >= 0 && c.seatKind === 'mat') fp.minute(c.userId, 'pray');
+      if (this.nearCampfire(c)) fp.minute(c.userId, 'fire', fire - 1);
+      if (c.voiceGroup !== null) fp.minute(c.userId, 'voice');
+      if (spaceOf(c) === 'library') fp.minute(c.userId, 'library');
+    }
   }
 
   get playerCount(): number {
@@ -224,10 +261,24 @@ export class Room implements RoomEvents, ShopEvents {
           // Seated players stay put; walking away (a client that skipped
           // 'stand') stands them up and frees the seat.
           const spot = seatSpot(client.seatKind, client.seat)!;
-          if (Math.hypot(msg.x - spot.x, msg.z - spot.z) <= SEAT_LEAVE_DISTANCE) return;
+          if (Math.hypot(msg.x - spot.x, msg.z - spot.z) <= SEAT_LEAVE_DISTANCE && (msg.inside ?? 'world') === spaceOf(client)) return;
           this.freeSeat(client);
         }
         const now = Date.now();
+        const from = spaceOf(client);
+        const to: Space = msg.inside ?? 'world';
+        if (from !== to) {
+          // Stepping into the library: only from its door (the 골방 keeps the old trust model).
+          if (to === 'library' && from === 'world' && !client.testClient && Math.hypot(client.state.x - LIBRARY_DOOR.x, client.state.z - LIBRARY_DOOR.z) > LIBRARY_ENTER_REACH) {
+            const s0 = client.state;
+            this.send(client, { t: 'correct', x: s0.x, y: s0.y, z: s0.z });
+            return this.strike(client, 'not_near', true);
+          }
+          // A new space has its own coordinates: no speed check across the switch.
+          client.lastStateAt = 0;
+          if (to === 'library' && client.userId !== null) this.options.footprints?.event(client.userId, 'library', `${seoulDate()}:${Math.floor(now / 600_000)}`);
+          if (to === 'library') this.sendLibrary(client);
+        }
         if (client.lastStateAt && !client.testClient) {
           // Speed check: reject teleports and tell the client where it really is.
           const dt = Math.min(5, Math.max(0.05, (now - client.lastStateAt) / 1000));
@@ -239,7 +290,7 @@ export class Room implements RoomEvents, ShopEvents {
           }
         }
         client.lastStateAt = now;
-        client.state = { x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, speed: msg.speed, inside: msg.inside === true };
+        client.state = { x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, speed: msg.speed, ...(msg.inside ? { inside: msg.inside } : {}) };
         return;
       }
       case 'chat': {
@@ -269,7 +320,9 @@ export class Room implements RoomEvents, ShopEvents {
             ? this.error(client, 'mat_taken', '이미 다른 분이 앉아 있어요.')
             : this.error(client, 'seat_taken', '이미 다른 분이 앉아 있어요.');
         }
-        if (client.state.inside || Math.hypot(client.state.x - spot.x, client.state.z - spot.z) > SIT_REACH) {
+        // Desks are inside the library; every other seat is out in the world.
+        const space = spaceOf(client);
+        if (space !== (msg.kind === 'desk' ? 'library' : 'world') || Math.hypot(client.state.x - spot.x, client.state.z - spot.z) > SIT_REACH) {
           return this.error(client, 'not_near', '자리에 조금 더 가까이 가 주세요.');
         }
         if (client.seat >= 0 && (client.seatKind !== msg.kind || client.seat !== msg.seat)) this.freeSeat(client);
@@ -278,6 +331,10 @@ export class Room implements RoomEvents, ShopEvents {
         client.seatKind = msg.kind;
         client.state = { ...client.state, x: spot.x, z: spot.z, yaw: spot.yaw, speed: 0 };
         this.broadcastSeats(msg.kind);
+        if (client.userId !== null && msg.kind !== 'mat') {
+          const now = Date.now();
+          this.options.footprints?.event(client.userId, 'sit', `${msg.kind}:${seoulDate()}:${Math.floor(now / 60_000)}`, { kind: msg.kind }, now);
+        }
         return;
       }
       case 'stand': {
@@ -459,6 +516,7 @@ export class Room implements RoomEvents, ShopEvents {
       mats: [...this.mats],
       logs: [...this.logs],
       benches: [...this.benches],
+      desks: [...this.desks],
       snapshotHz: SNAPSHOT_HZ,
       word: this.wordFor(client),
       account: client.userId !== null && client.accountName ? { id: client.userId, nickname: client.accountName } : null,
@@ -641,6 +699,7 @@ export class Room implements RoomEvents, ShopEvents {
       if (c.userId !== userId) continue;
       if (groups) c.groupIds = groups.groupIds(userId);
       if (c.joined) this.sendLanterns(c);
+      if (c.joined && spaceOf(c) === 'library') this.sendLibrary(c);
       if (c.voiceGroup !== null && !c.groupIds.has(c.voiceGroup)) this.voiceLeave(c, 'removed');
     }
   }
@@ -669,11 +728,12 @@ export class Room implements RoomEvents, ShopEvents {
   }
 
   private seats(kind: SeatKind): (string | null)[] {
-    return kind === 'log' ? this.logs : kind === 'bench' ? this.benches : this.mats;
+    return kind === 'log' ? this.logs : kind === 'bench' ? this.benches : kind === 'desk' ? this.desks : this.mats;
   }
 
   private broadcastSeats(kind: SeatKind): void {
     if (kind === 'log') this.broadcast({ t: 'logs', logs: [...this.logs] });
+    else if (kind === 'desk') this.broadcast({ t: 'desks', desks: [...this.desks] });
     else if (kind === 'bench') this.broadcast({ t: 'benches', benches: [...this.benches] });
     else this.broadcast({ t: 'mats', mats: [...this.mats] });
   }
@@ -698,30 +758,68 @@ export class Room implements RoomEvents, ShopEvents {
     this.log(`leave ${client.name} (${client.id}), players=${this.playerCount}`);
   }
 
+  /**
+   * One snapshot per space: people in the open world see the world, people in
+   * the library see each other, and nobody sees into a 골방. Players outside
+   * the viewer's space are sent only as hidden (`inside`) with no position.
+   */
   private broadcastSnapshot(): void {
     if (this.playerCount === 0) return;
-    const players: PlayerSnap[] = [];
+    const cache = new Map<Space, string>();
+    const frame = (space: Space): string => {
+      let data = cache.get(space);
+      if (data) return data;
+      const players: PlayerSnap[] = [];
+      for (const c of this.clients.values()) {
+        if (!c.joined) continue;
+        const s = c.state;
+        if (space === 'room' || spaceOf(c) !== space) {
+          players.push({ id: c.id, x: 0, y: 0, z: 0, yaw: 0, speed: 0, seat: -1, inside: true });
+          continue;
+        }
+        players.push({
+          id: c.id,
+          x: round(s.x),
+          y: round(s.y),
+          z: round(s.z),
+          yaw: round(s.yaw),
+          speed: round(s.speed),
+          seat: c.seat,
+          ...(c.seat >= 0 && c.seatKind !== 'mat' ? { seatKind: c.seatKind } : {}),
+        });
+      }
+      data = JSON.stringify({ t: 'snap', players } satisfies ServerMessage);
+      cache.set(space, data);
+      return data;
+    };
     for (const c of this.clients.values()) {
-      if (!c.joined) continue;
-      const s = c.state;
-      players.push({
-        id: c.id,
-        x: round(s.x),
-        y: round(s.y),
-        z: round(s.z),
-        yaw: round(s.yaw),
-        speed: round(s.speed),
-        seat: c.seat,
-        ...(c.seat >= 0 && c.seatKind !== 'mat' ? { seatKind: c.seatKind } : {}),
-        ...(s.inside ? { inside: true } : {}),
-      });
+      if (c.joined && c.ws.readyState === c.ws.OPEN) c.ws.send(frame(spaceOf(c)));
     }
-    this.broadcast({ t: 'snap', players });
+  }
+
+  // ---------------------------------------------------------------- 이야기 도서관
+
+  private sendLibrary(c: Client) {
+    const lib = this.options.library;
+    if (lib) this.send(c, { t: 'library', shelves: lib.shelfCounts(c.userId !== null && c.accountName ? c.userId : null) });
+  }
+
+  private libraryTimer: NodeJS.Timeout | null = null;
+
+  /** Books changed: everyone inside gets the shelf counts they may see (coalesced). */
+  libraryChanged() {
+    if (this.libraryTimer) return;
+    this.libraryTimer = setTimeout(() => {
+      this.libraryTimer = null;
+      for (const c of this.clients.values()) if (c.joined && spaceOf(c) === 'library') this.sendLibrary(c);
+    }, 120);
   }
 
   close(): void {
     clearInterval(this.timer);
+    clearInterval(this.footprintTimer);
     if (this.shopTimer) clearTimeout(this.shopTimer);
+    if (this.libraryTimer) clearTimeout(this.libraryTimer);
     for (const c of this.clients.values()) c.ws.close(1001, 'server shutdown');
   }
 }

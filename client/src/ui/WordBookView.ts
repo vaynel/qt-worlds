@@ -21,6 +21,8 @@ export interface WordBookHooks {
   word: () => WordPassage | null;
   /** ✍️ 묵상하기 with today's word (opens the meditation sheet). */
   meditate: () => void;
+  /** 📔 오늘 일기 쓰기 (이야기 도서관). */
+  writeDiary?: () => void;
 }
 
 /** One line of today's meditation for the 오늘 tab. */
@@ -186,6 +188,15 @@ export class WordBookView {
       actions.append(share);
     }
     if (this.store.kind === 'guest') actions.append(this.loginButton('today-login'));
+    if (this.hooks.writeDiary && this.store.kind !== 'guest') {
+      const diary = button('📔 오늘 일기 쓰기', 'today-diary', () => {
+        this.modal.close();
+        this.hooks.writeDiary!();
+      });
+      diary.id = 'today-diary';
+      diary.title = '오늘 QT 월드에서 한 일로 일기가 써져요';
+      actions.append(diary);
+    }
     paper.append(actions, shareBox);
   }
 

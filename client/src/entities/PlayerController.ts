@@ -1,13 +1,19 @@
 import * as THREE from 'three';
 import { MAX_WADE_DEPTH, WATER_LEVEL } from '../world/config';
-import type { World } from '../world/World';
+import type { CircleCollider } from '../world/ChunkManager';
 import type { MoveIntent } from '../systems/Input';
 import type { AvatarState } from '../game/types';
 import type { SeatKind } from '../../../shared/protocol';
 import { Avatar, seatHeight } from './Avatar';
 
-/** Standing up from a log or bench: step this far forward, clear of its colliders. */
-const STEP_OFF: Record<SeatKind, number> = { mat: 0, log: 0.85, bench: 0.8 };
+/** Standing up from a log or bench: step this far forward, clear of its colliders (a desk chair: step back from the table). */
+const STEP_OFF: Record<SeatKind, number> = { mat: 0, log: 0.85, bench: 0.8, desk: -0.75 };
+
+/** What the player walks on: the open world, or an interior (the library hall). */
+export interface Ground {
+  groundHeight(x: number, z: number): number;
+  collidersNear(x: number, z: number): Iterable<CircleCollider>;
+}
 
 const WALK_SPEED = 4.2;
 const RUN_SPEED = 7.5;
@@ -31,10 +37,15 @@ export class PlayerController {
   seatKind: SeatKind = 'mat';
   private readonly wish = new THREE.Vector3();
 
-  constructor(private readonly world: World, x: number, z: number, yaw: number) {
+  constructor(private world: Ground, x: number, z: number, yaw: number) {
     this.position.set(x, world.groundHeight(x, z), z);
     this.yaw = yaw;
     this.syncAvatar();
+  }
+
+  /** Walk somewhere else (entering or leaving the library). */
+  setGround(ground: Ground) {
+    this.world = ground;
   }
 
   get speed(): number {
@@ -53,6 +64,7 @@ export class PlayerController {
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
     this.avatar.setSeated(true, kind === 'mat' ? 'pray' : 'sit', seatHeight(kind));
+    this.avatar.setDeskReading(kind === 'desk');
     this.syncAvatar();
   }
 
@@ -61,7 +73,8 @@ export class PlayerController {
     const step = STEP_OFF[this.seatKind];
     this.seat = -1;
     this.avatar.setSeated(false);
-    if (step > 0) {
+    this.avatar.setDeskReading(false);
+    if (step !== 0) {
       // Step off forward so the seat's colliders don't shove us sideways.
       const x = this.position.x + Math.sin(this.yaw) * step;
       const z = this.position.z + Math.cos(this.yaw) * step;
@@ -74,6 +87,7 @@ export class PlayerController {
   teleport(x: number, z: number) {
     this.seat = -1;
     this.avatar.setSeated(false);
+    this.avatar.setDeskReading(false);
     this.position.set(x, this.world.groundHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.syncAvatar();

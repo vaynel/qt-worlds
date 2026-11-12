@@ -4564,3 +4564,449 @@ body #worship.room.room-sheet .worship-frame {
     max-height: 100%;
   }
 }
+
+/* =================== L-A: 이야기 도서관, 📸 photos =================== */
+
+/* Camera button: bottom-right, below the action button (phones/tablets) and
+   left of the docked worship player (desktop). Never over the joystick (bottom-left). */
+#camera-btn {
+  position: absolute;
+  z-index: 18;
+  right: var(--safe-right);
+  bottom: var(--safe-bottom);
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 250, 240, 0.94);
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(74, 52, 38, 0.22);
+}
+#camera-btn svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+body.in-world #camera-btn {
+  display: flex;
+}
+body.closet #camera-btn,
+body.overlay-open #camera-btn,
+body.chatting #camera-btn {
+  display: none;
+}
+/* Desktop with the docked player (bottom-right): left of it, above the
+   bottom-centre hint and place prompt. */
+body:not(.touch).worship-on:not(.worship-large) #camera-btn {
+  right: calc(var(--safe-right) + 384px);
+  bottom: calc(var(--safe-bottom) + 160px);
+}
+body.touch #camera-btn {
+  bottom: calc(var(--safe-bottom) + 66px);
+  width: 44px;
+  height: 44px;
+}
+/* Short phones with the worship drawer open (펼침): it reaches lower, so the
+   camera drops to the bottom edge, under the drawer and beside the joystick. */
+@media (max-height: 780px) {
+  body.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
+    bottom: calc(var(--safe-bottom) - 6px);
+  }
+}
+#shot-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 26;
+  background: #fffaf0;
+  opacity: 0;
+  pointer-events: none;
+}
+#shot-flash.on {
+  animation: shot-flash 0.45s ease-out;
+}
+@keyframes shot-flash {
+  0% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- library sheets ---------- */
+.sheet.library {
+  display: flex;
+  flex-direction: column;
+}
+.lib-body {
+  padding: 0 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lib-chips .tab {
+  min-height: 36px;
+  padding: 6px 11px;
+}
+.chip.on {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff8ea;
+}
+.lib-blurb,
+.lib-soft {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+.lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lib-book {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px 10px 8px;
+  text-align: left;
+  font-weight: 400;
+  background: #fffdf7;
+  border-radius: 12px;
+}
+.lib-book.read {
+  background: #f8f1e2;
+}
+.lib-spine {
+  flex: none;
+  width: 10px;
+  border-radius: 3px;
+  background: #8c3b2e;
+}
+.lib-spine.shelf-answer {
+  background: #c9a03a;
+}
+.lib-spine.shelf-wilderness {
+  background: #5f7fa6;
+}
+.lib-spine.shelf-thanks {
+  background: #d98a8a;
+}
+.lib-spine.shelf-word {
+  background: #e0b83c;
+}
+.lib-spine.shelf-first {
+  background: #6f9a58;
+}
+.lib-spine.shelf-diary {
+  background: #a0503a;
+}
+.lib-book-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.lib-book-title {
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+.lib-book-meta,
+.lib-book-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.lib-book-excerpt {
+  font-size: 0.85rem;
+  color: var(--ink);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lib-state.new {
+  color: var(--accent);
+  font-weight: 700;
+}
+.lib-state.read {
+  color: #5f8f6b;
+  font-weight: 700;
+}
+.lib-badge {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #efe2c8;
+  color: var(--ink);
+  font-size: 0.74rem;
+}
+.lib-badge.warn {
+  background: #f6d2c8;
+  color: #8a2f20;
+}
+.lib-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 6px;
+}
+.lib-story {
+  margin: 0;
+}
+.lib-story-title {
+  margin: 4px 0 2px;
+  font-size: 1.2rem;
+}
+.lib-story-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.lib-author {
+  font-weight: 700;
+  color: var(--ink);
+}
+.lib-verse {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--glow);
+  background: #fff6e0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.lib-verse cite {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+.lib-prompt {
+  margin: 12px 0 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.lib-part,
+.lib-note {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.lib-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #fff3d6;
+  border-radius: 8px;
+}
+.lib-diary-lines {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.75;
+}
+.lib-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.lib-photo,
+.lib-album-item img,
+.lib-pick-item img {
+  width: 100%;
+  border-radius: 8px;
+  display: block;
+  object-fit: cover;
+  aspect-ratio: 4 / 3;
+  background: #efe2c8;
+}
+.lib-readers {
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.lib-reacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lib-notice,
+.lib-warning {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fbe3da;
+  color: #7a2a1c;
+  font-size: 0.88rem;
+}
+.lib-warning {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lib-warning[hidden] {
+  display: none;
+}
+.lib-warning p {
+  flex: 1 0 100%;
+  margin: 0;
+}
+.lib-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lib-steps {
+  display: flex;
+  gap: 6px;
+}
+.lib-steps span {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: #efe2c8;
+  color: var(--ink-soft);
+}
+.lib-steps span.on {
+  background: var(--accent);
+  color: #fff8ea;
+}
+.lib-steps span.done {
+  background: #cfe0c0;
+  color: #3f6f4a;
+}
+.lib-prompt-big {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+.lib-label {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.lib-textarea,
+.lib-input,
+.lib-group {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--paper-line);
+  border-radius: 10px;
+  background: #fffdf7;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.lib-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.lib-group[hidden] {
+  display: none;
+}
+.lib-count {
+  margin: 0;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.lib-count.over {
+  color: #b03020;
+  font-weight: 700;
+}
+.lib-diary-edit {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lib-diary-edit li {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.lib-line-remove {
+  flex: none;
+  min-width: 40px;
+  min-height: 40px;
+}
+.lib-pick,
+.lib-album {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.lib-pick-item {
+  padding: 3px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: #fffdf7;
+}
+.lib-pick-item.on {
+  border-color: var(--accent);
+}
+.lib-album-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.lib-desk {
+  margin: 0;
+}
+.today-diary {
+  border-color: rgba(125, 90, 126, 0.45);
+}
+.admin-preview summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+.admin-item.admin-story {
+  grid-template-columns: 1fr;
+}
+.admin-story .admin-info {
+  min-width: 0;
+}
+.admin-preview {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff6e4;
+}
+
+.lib-line {
+  resize: none;
+  line-height: 1.45;
+  font-size: 15px;
+  padding: 7px 10px;
+}

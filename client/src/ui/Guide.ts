@@ -26,7 +26,7 @@ function miniMap(): SVGSVGElement {
   svg.setAttribute('viewBox', '0 0 300 220');
   svg.setAttribute('class', 'guide-map');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', '장소 지도: 광장을 가운데로 북쪽 등불 언덕, 서쪽 기도의 뜰, 동쪽 모닥불 모임터, 남서쪽 골방');
+  svg.setAttribute('aria-label', '장소 지도: 광장을 가운데로 북쪽 등불 언덕, 서쪽 기도의 뜰, 북서쪽 이야기 도서관, 동쪽 모닥불 모임터, 남서쪽 골방');
   const add = (tag: string, attrs: Record<string, string>, text?: string) => {
     const n = document.createElementNS(SVG_NS, tag);
     for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
@@ -41,6 +41,7 @@ function miniMap(): SVGSVGElement {
     ['기도의 뜰', 52, 112, '#8fb36a'],
     ['모닥불 모임터', 248, 112, '#e07a4a'],
     ['골방', 78, 190, '#c8644a'],
+    ['이야기 도서관', 98, 70, '#7d5a7e'],
   ];
   for (const [, x, y] of spots) {
     add('path', { d: `M${plaza.x} ${plaza.y} L${x} ${y}`, stroke: '#d8bf8e', 'stroke-width': '7', 'stroke-linecap': 'round', fill: 'none' });
@@ -49,7 +50,7 @@ function miniMap(): SVGSVGElement {
   add('text', { x: String(plaza.x), y: String(plaza.y + 5), 'text-anchor': 'middle', 'font-size': '13', 'font-weight': '700', fill: '#4a3426' }, '광장');
   for (const [name, x, y, color] of spots) {
     add('circle', { cx: String(x), cy: String(y), r: '11', fill: color, stroke: '#fff8ea', 'stroke-width': '3' });
-    const ty = y < 60 ? y - 16 : y + 26;
+    const ty = y < 60 ? y - 16 : name === '이야기 도서관' ? y - 16 : y + 26;
     add('text', { x: String(x), y: String(Math.min(212, ty)), 'text-anchor': 'middle', 'font-size': '12', 'font-weight': '700', fill: '#4a3426' }, name);
   }
   add('text', { x: '282', y: '24', 'text-anchor': 'end', 'font-size': '11', fill: '#8a6a50' }, '↑ 북쪽 (처음 바라보는 쪽)');
@@ -108,6 +109,7 @@ export class Guide {
             ['기도의 뜰', '돗자리에 앉아 함께 조용히 기도해요. 기도하는 모습과 촛불이 보여요'],
             ['모닥불', '가까이 가면 채팅이 열려요. 근처 사람끼리 나눠요'],
             ['등불 언덕', '나눈 묵상이 등불로 밝혀져요. 아멘·기도하기·기록하기'],
+            ['이야기 도서관', '하나님을 만난 이야기와 오늘의 일기를 함께 읽어요. 📸 사진도 일기에 넣을 수 있어요'],
           ]),
         ],
       },

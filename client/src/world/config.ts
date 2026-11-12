@@ -3,7 +3,7 @@
  * everything between them is procedural from the seed.
  */
 
-import { CAMPFIRE, LANTERN_HILL, PLAZA as PLAZA_CENTRE, PRAYER_GARDEN } from '../../../shared/protocol';
+import { CAMPFIRE, LANTERN_HILL, LIBRARY, PLAZA as PLAZA_CENTRE, PRAYER_GARDEN } from '../../../shared/protocol';
 
 export const DEFAULT_SEED = 'worlds-v1';
 
@@ -18,7 +18,7 @@ export const WATER_LEVEL = 0;
 /** Deepest water the player may wade into before being blocked. */
 export const MAX_WADE_DEPTH = 0.35;
 
-export type LandmarkId = 'plaza' | 'prayerGarden' | 'campfire' | 'lanternHill' | 'closet';
+export type LandmarkId = 'plaza' | 'prayerGarden' | 'campfire' | 'lanternHill' | 'closet' | 'library';
 
 export interface LandmarkDef {
   id: LandmarkId;
@@ -85,6 +85,16 @@ export const LANDMARKS: readonly LandmarkDef[] = [
     radius: 8,
     falloff: 12,
     height: 3.5,
+  },
+  {
+    id: 'library',
+    name: '이야기 도서관',
+    blurb: '하나님을 만난 이야기와 오늘의 일기가 꽂혀 있어요. 들어가서 함께 읽어요.',
+    x: LIBRARY.x,
+    z: LIBRARY.z,
+    radius: 8,
+    falloff: 12,
+    height: 4,
   },
 ];
 

@@ -25,6 +25,10 @@ export interface DevotionOptions {
   now: () => number;
   needLogin: (reason: string) => void;
   lanternsChanged: () => void;
+  /** Today's letter was opened (발자취). */
+  onLetterOpened?: (date: string) => void;
+  /** 📔 오늘 일기 쓰기 from the 오늘 tab. */
+  writeDiary?: () => void;
 }
 
 /**
@@ -52,6 +56,7 @@ export class Devotion {
       lanternsChanged: o.lanternsChanged,
       word: () => this.word,
       meditate: () => this.meditateToday(true),
+      writeDiary: o.writeDiary,
     });
     this.meditation = new MeditationView(o.store, o.needLogin);
     this.meditation.onSaved((place) => {
@@ -123,6 +128,7 @@ export class Devotion {
     this.clearLetter();
     this.letterState = 'opened';
     this.o.hud.setWordNew(false);
+    this.o.onLetterOpened?.(this.word.date);
     await this.o.store.markLetterOpened(this.word.date);
     await this.o.store.saveWord(this.word);
     this.o.audio.page();
@@ -141,6 +147,7 @@ export class Devotion {
       this.clearLetter();
       this.letterState = 'opened';
       this.o.hud.setWordNew(false);
+      this.o.onLetterOpened?.(this.word.date);
       await this.o.store.markLetterOpened(this.word.date);
     }
     if (this.word) await this.o.store.saveWord(this.word);

@@ -19,13 +19,14 @@ const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
 ];
 
 /** Level-2 pages of ⚙ 설정 ('menu' is level 1). */
-export type SettingsPage = 'menu' | 'sound' | 'notify' | 'account' | 'install' | 'admin';
+export type SettingsPage = 'menu' | 'sound' | 'notify' | 'account' | 'footprints' | 'install' | 'admin';
 
 const TITLES: Record<SettingsPage, string> = {
   menu: '설정',
   sound: '🔊 소리',
   notify: '🔔 알림',
   account: '👤 계정',
+  footprints: '📔 발자취',
   install: '📲 앱 설치',
   admin: '🛠️ 관리',
 };
@@ -34,7 +35,13 @@ export interface SettingsLook {
   /** 👕 꾸미기; `back` returns to this menu. */
   open: (back: () => void) => void;
   isAdmin: () => boolean;
-  openAdmin: (tab?: 'outfits' | 'shop') => void;
+  openAdmin: (tab?: 'outfits' | 'shop' | 'library') => void;
+}
+
+/** 이야기 도서관 entry points from ⚙. */
+export interface SettingsLibrary {
+  writeDiary: () => void;
+  openMine: () => void;
 }
 
 /**
@@ -56,6 +63,7 @@ export class SettingsView {
     private readonly install: InstallGuide | null = null,
     private readonly pushEnabled = false,
     private readonly look: SettingsLook | null = null,
+    private readonly library: SettingsLibrary | null = null,
   ) {
     // beforeinstallprompt may arrive late: refresh the menu / install page if open.
     onInstallChange(() => {
@@ -139,6 +147,8 @@ export class SettingsView {
         return [new NotifySettings(!!this.account(), this.install!).root];
       case 'account':
         return [this.accountPage()];
+      case 'footprints':
+        return [this.footprintsPage()];
       case 'install':
         return this.installPage();
       case 'admin':
@@ -179,6 +189,7 @@ export class SettingsView {
     list.append(this.item('sound', '🔊', '소리', '음량과 모든 소리 끄기', () => this.go('sound')));
     if (this.available('notify')) list.append(this.item('notify', '🔔', '알림', '오늘의 말씀, 기도 알림', () => this.go('notify')));
     const needs = acc && consent.needed ? el('span', 'settings-item-flag', '동의 필요') : undefined;
+    if (this.library) list.append(this.item('footprints', '📔', '발자취', '오늘의 일기, 나의 서재, 기록 끄기·지우기', () => this.go('footprints')));
     list.append(this.item('account', '👤', '계정', acc ? `${acc.nickname} · 닉네임, 내 데이터, 로그아웃` : '로그인하기', () => this.go('account'), needs));
     if (this.canInstall()) list.append(this.item('install', '📲', '앱 설치', '홈 화면에서 앱처럼 열기', () => this.go('install')));
     list.append(
@@ -187,7 +198,7 @@ export class SettingsView {
         this.openGuide();
       }),
     );
-    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '옷 그림 관리, 소품 가게 관리', () => this.go('admin')));
+    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '옷 그림, 소품 가게, 도서관 관리', () => this.go('admin')));
 
     const legal = el('div', 'settings-menu-legal');
     const link = (href: string, text: string, id: string) => {
@@ -325,6 +336,92 @@ export class SettingsView {
     return box;
   }
 
+  /** 📔 발자취: what is recorded for the auto diary, switch it off, clear today. */
+  private footprintsPage(): HTMLElement {
+    const box = el('div', 'settings-account settings-footprints');
+    box.id = 'settings-footprints';
+    const lib = this.library;
+    if (!this.account()) {
+      box.append(el('p', 'settings-note', '로그인하면 QT 월드에서 보낸 하루가 발자취로 남고, 그 발자취로 오늘의 일기가 써져요.'));
+      return box;
+    }
+    const status = el('p', 'groups-status');
+    status.setAttribute('role', 'status');
+    const summary = el('p', 'settings-note');
+    summary.id = 'footprints-summary';
+    const toggle = el('label', 'settings-toggle');
+    const box2 = el('input');
+    box2.type = 'checkbox';
+    box2.id = 'footprints-on';
+    box2.disabled = true;
+    toggle.append(box2, el('span', '', '발자취 기록하기'));
+    const show = (s: { enabled: boolean; recording?: boolean; events: number; minutes: Record<string, number> }) => {
+      box2.checked = s.enabled;
+      box2.disabled = false;
+      const play = s.minutes.play ?? 0;
+      summary.textContent = !s.enabled
+        ? '지금은 기록하지 않아요. 켜면 그때부터 다시 기록해요.'
+        : s.recording === false
+          ? '바뀐 이용약관과 개인정보처리방침에 동의하면 기록을 시작해요 (⚙ → 👤 계정).'
+          : `오늘 기록: 활동 ${s.events}개, 머문 시간 ${play}분.`;
+    };
+    const load = async () => {
+      try {
+        show(await api('GET', '/api/footprints'));
+      } catch (err) {
+        status.textContent = err instanceof ApiError ? err.message : '불러오지 못했어요.';
+      }
+    };
+    box2.addEventListener('change', async () => {
+      try {
+        show(await api('PUT', '/api/footprints/settings', { enabled: box2.checked }));
+        status.textContent = box2.checked ? '발자취를 기록해요.' : '발자취 기록을 껐어요.';
+      } catch (err) {
+        status.textContent = err instanceof ApiError ? err.message : '바꾸지 못했어요.';
+      }
+    });
+    const clear = button('오늘 기록 지우기', 'ghost danger', async () => {
+      if (!window.confirm('오늘의 발자취를 모두 지울까요? 이미 꽂은 일기는 그대로 남아요.')) return;
+      try {
+        const r = await api<{ removed: number; enabled: boolean; events: number; minutes: Record<string, number> }>('DELETE', '/api/footprints/today');
+        show(r);
+        status.textContent = '오늘의 발자취를 지웠어요.';
+      } catch (err) {
+        status.textContent = err instanceof ApiError ? err.message : '지우지 못했어요.';
+      }
+    });
+    clear.id = 'footprints-clear';
+    const row = el('div', 'settings-legal-row');
+    if (lib) {
+      const diary = button('📔 오늘 일기 쓰기', 'primary', () => {
+        this.modal.close();
+        lib.writeDiary();
+      });
+      diary.id = 'footprints-diary';
+      const mine = button('📚 나의 서재', '', () => {
+        this.modal.close();
+        lib.openMine();
+      });
+      mine.id = 'footprints-mine';
+      row.append(diary, mine);
+    }
+    box.append(
+      row,
+      el('p', 'settings-section settings-section-gap', '발자취 기록'),
+      toggle,
+      summary,
+      el(
+        'p',
+        'settings-note',
+        '머문 시간, 편지를 연 때, 묵상한 곳, 기도의 뜰·모닥불·음성 기도방에 있던 시간, 읽은 등불과 남긴 반응, 앉은 자리, 빌린 소품, 도서관에서 읽은 책, 찍은 사진을 나만 볼 수 있게 기록해요. 다른 분의 이름이나 모닥불에서 나눈 말은 기록하지 않아요. 일기에 쓰이지 않은 기록은 30일 뒤 지워져요.',
+      ),
+      clear,
+      status,
+    );
+    void load();
+    return box;
+  }
+
   /** 📲 앱으로 설치하기 (only listed when installable and not already installed). */
   private installPage(): HTMLElement[] {
     const install = this.install;
@@ -352,7 +449,19 @@ export class SettingsView {
       look.openAdmin('shop');
     });
     shopAdmin.id = 'settings-admin-shop';
-    box.append(a, el('p', 'settings-note', '신고된 옷 그림을 보고 숨김·복구·그림 금지를 정해요.'), shopAdmin, el('p', 'settings-note', '소품 가게의 시간대별 수량을 정해요.'));
+    const libAdmin = button('도서관 관리', '', () => {
+      this.modal.close();
+      look.openAdmin('library');
+    });
+    libAdmin.id = 'settings-admin-library';
+    box.append(
+      a,
+      el('p', 'settings-note', '신고된 옷 그림을 보고 숨김·복구·그림 금지를 정해요.'),
+      shopAdmin,
+      el('p', 'settings-note', '소품 가게의 시간대별 수량을 정해요.'),
+      libAdmin,
+      el('p', 'settings-note', '신고되거나 숨겨진 도서관 책을 보고 복구·숨김 유지·삭제·글쓰기 금지를 정해요.'),
+    );
     return [box];
   }
 }

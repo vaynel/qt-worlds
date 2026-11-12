@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { MAX_FRAME_BYTES, MAX_PLAYERS } from '../../shared/protocol.js';
 import { AccountService } from './account.js';
@@ -12,6 +12,9 @@ import { PushService } from './push.js';
 import { LookService } from './looks.js';
 import { Room } from './Room.js';
 import { ShopService } from './shop.js';
+import { FootprintService } from './footprints.js';
+import { LibraryService } from './library.js';
+import { ShotService } from './shots.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
@@ -65,7 +68,14 @@ const push = new PushService(db, dailyWord, {
   testMode: TEST_MODE,
 });
 const shop = new ShopService(db, push);
-const accounts = new AccountService(db, looks, shop);
+const footprints = new FootprintService(db);
+// 📸 Screenshots live next to the database (/data/screenshots in Docker), so they
+// survive container rebuilds with the volume. WORLDS_SHOTS_DIR overrides it.
+const shotsDir = process.env.WORLDS_SHOTS_DIR ?? resolve(dirname(dbPath), 'screenshots');
+const shots = new ShotService(db, shotsDir);
+const library = new LibraryService(db, groups, dailyWord, footprints, shots);
+log(`screenshots: ${shotsDir}`);
+const accounts = new AccountService(db, looks, shop, { library, footprints, shots });
 if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
 else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
@@ -97,11 +107,14 @@ const room = new Room({
   lanterns,
   looks,
   shop,
+  library,
+  footprints,
+  footprintTickMs: Number(process.env.WORLDS_FOOTPRINT_TICK_MS ?? 20_000),
 });
 shop.events = room;
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, footprints, shots, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -172,8 +185,10 @@ const sweep = () => {
   sessions.sweep();
   chat.purge();
   const gone = accounts.sweep();
-  if (gone.lanterns || gone.signups || gone.outfits || gone.rentals)
-    log(`sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings, ${gone.rentals} old rental records deleted`);
+  if (gone.lanterns || gone.signups || gone.outfits || gone.rentals || gone.footprints || gone.shots)
+    log(
+      `sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings, ${gone.rentals} old rental records, ${gone.footprints} old 발자취 records, ${gone.shots} unused screenshots deleted`,
+    );
 };
 const sweeper = setInterval(sweep, 3_600_000);
 sweep();

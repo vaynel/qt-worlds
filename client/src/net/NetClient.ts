@@ -18,6 +18,7 @@ import {
   type PropId,
   type PropWear,
   type ShopStatus,
+  type ShelfCounts,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -32,6 +33,8 @@ export interface Welcome {
   logs: (string | null)[];
   /** Plaza bench seats (empty from servers older than M5.4). */
   benches: (string | null)[];
+  /** Library desk seats (empty from servers older than L-A). */
+  desks: (string | null)[];
   /** Today's word (absent on servers older than M3). */
   word: WordPassage | null;
   account: AccountInfo | null;
@@ -49,6 +52,9 @@ export interface NetHandlers {
   mats(mats: (string | null)[]): void;
   logs(logs: (string | null)[]): void;
   benches(benches: (string | null)[]): void;
+  desks(desks: (string | null)[]): void;
+  /** 이야기 도서관: shelf counts this viewer may see (while inside). */
+  library(shelves: ShelfCounts): void;
   error(code: ErrorCode, message: string): void;
   status(status: NetStatus): void;
   word(word: WordPassage): void;
@@ -187,6 +193,12 @@ export class NetClient {
       case 'benches':
         this.handlers.benches?.(msg.benches);
         break;
+      case 'desks':
+        this.handlers.desks?.(msg.desks);
+        break;
+      case 'library':
+        this.handlers.library?.(msg.shelves);
+        break;
       case 'lanterns':
         this.handlers.lanterns?.(msg.lanterns);
         break;
@@ -309,6 +321,7 @@ export class NetClient {
             mats: msg.mats ?? [],
             logs: Array.isArray(msg.logs) ? msg.logs : [],
             benches: Array.isArray(msg.benches) ? msg.benches : [],
+            desks: Array.isArray(msg.desks) ? msg.desks : [],
             word: msg.word ?? null,
             account: msg.account ?? null,
             guest: msg.guest ?? !msg.account,
@@ -355,6 +368,12 @@ export class NetClient {
           break;
         case 'benches':
           if (Array.isArray(msg.benches)) this.dispatch(msg);
+          break;
+        case 'desks':
+          if (Array.isArray(msg.desks)) this.dispatch(msg);
+          break;
+        case 'library':
+          if (msg.shelves && typeof msg.shelves === 'object') this.dispatch(msg);
           break;
         case 'lanterns':
           if (Array.isArray(msg.lanterns)) this.dispatch(msg);
@@ -437,7 +456,7 @@ export class NetClient {
   }
 
   sendState(s: StatePayload): void {
-    this.raw({ t: 'state', x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, ...(s.inside ? { inside: true } : {}) });
+    this.raw({ t: 'state', x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: s.speed, ...(s.inside ? { inside: s.inside } : {}) });
   }
 
   sendChat(text: string): void {

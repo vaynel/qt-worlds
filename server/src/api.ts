@@ -8,7 +8,10 @@ import type { PushService } from './push.js';
 import type { AccountService } from './account.js';
 import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
-import { TERMS_VERSION } from '../../shared/protocol.js';
+import { kstDateOf, SHOT_MAX_BYTES, TERMS_VERSION } from '../../shared/protocol.js';
+import type { FootprintService } from './footprints.js';
+import type { LibraryService } from './library.js';
+import { readBody, type ShotService } from './shots.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -23,6 +26,8 @@ export interface RoomEvents {
   lookChanged(userId: number): void;
   /** 회원 탈퇴: take the lanterns down for everyone and drop that account's connections. */
   accountDeleted(userId: number, lanternIds: number[]): void;
+  /** 이야기 도서관: books were added, removed, hidden or restored (shelf counts for people inside). */
+  libraryChanged(): void;
 }
 
 /** ICE servers for WebRTC: short-lived Cloudflare TURN credentials, minted server-side. */
@@ -106,6 +111,9 @@ export interface ApiDeps {
   accounts: AccountService;
   looks: LookService;
   shop: ShopService;
+  library: LibraryService;
+  footprints: FootprintService;
+  shots: ShotService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -149,6 +157,9 @@ export class Api {
   private readonly outfitLimit = new RateLimiter(Number(process.env.OUTFIT_RATE_LIMIT ?? 20), 3_600_000);
   private readonly reportLimit = new RateLimiter(30, 3_600_000);
   private readonly shopLimit = new RateLimiter(Number(process.env.SHOP_RATE_LIMIT ?? 60), 600_000);
+  private readonly storyReportLimit = new RateLimiter(Number(process.env.STORY_REPORT_RATE_LIMIT ?? 30), 3_600_000);
+  private readonly libraryWriteLimit = new RateLimiter(Number(process.env.LIBRARY_RATE_LIMIT ?? 240), 3_600_000);
+  private readonly shotLimit = new RateLimiter(60, 3_600_000);
   private readonly admins = adminEmails();
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
@@ -242,6 +253,7 @@ export class Api {
       if (!u.nickname && !agree) throw new HttpError(400, 'consent_required', '만 14세 이상인지 확인하고 이용약관과 개인정보처리방침에 동의해 주세요.');
       const nickname = d.users.setNickname(u.id, body.nickname);
       if (agree) d.users.recordConsent(u.id);
+      d.footprints.forget(u.id);
       d.room.nicknameChanged(u.id, nickname);
       sendJson(res, 200, { user: { id: u.id, nickname } });
     });
@@ -252,6 +264,7 @@ export class Api {
         const u = this.signedIn(user, false);
         if ((await readJson(req)).agree !== true) throw new HttpError(400, 'consent_required', '만 14세 이상인지 확인하고 동의해 주세요.');
         d.users.recordConsent(u.id);
+        d.footprints.forget(u.id);
         sendJson(res, 200, { ok: true, termsVersion: TERMS_VERSION });
       },
       open,
@@ -282,6 +295,7 @@ export class Api {
         }
         d.push.forget(u.id);
         d.ice.forget(u.id);
+        d.room.libraryChanged();
         this.chatBuckets.delete(u.id);
         console.log(`account deleted: user ${u.id} (${out.lanternIds.length} lanterns, ${out.transferred.length} groups handed over, ${out.deletedGroups.length} groups removed)`);
         sendJson(res, 200, { ok: true, deletedGroups: out.deletedGroups.length, transferredGroups: out.transferred.length }, { 'set-cookie': d.sessions.clearCookie(info) });
@@ -357,6 +371,7 @@ export class Api {
       const body = await readJson(req);
       this.limit(this.shopLimit, `user:${u.id}`);
       const out = d.shop.rent(u.id, body.requestId, body.item);
+      if (out.ok && !out.replayed) d.footprints.event(u.id, 'rent', String(out.rental.id), { item: out.rental.item });
       const extra = { shop: d.shop.status(), mine: d.shop.mine(u.id), replayed: out.replayed };
       if (out.ok) sendJson(res, 200, { ok: true, rental: out.rental, ...extra });
       else sendJson(res, out.status, { error: out.error, message: out.message, ...extra });
@@ -417,7 +432,12 @@ export class Api {
     });
     r('POST', '/api/wordbook/meditations', async ({ req, res, user }) => {
       const u = this.signedIn(user);
-      sendJson(res, 201, d.wordbook.addMeditation(u.id, await readJson(req)));
+      const m = d.wordbook.addMeditation(u.id, await readJson(req));
+      // 발자취: where, and the first ~40 characters of my own words.
+      const text = (m.meditation || m.feeling || m.application).replace(/\s+/g, ' ').trim();
+      const chars = [...text];
+      d.footprints.event(u.id, 'meditation', String(m.id), { place: m.place, excerpt: chars.length > 40 ? `${chars.slice(0, 40).join('')}…` : text });
+      sendJson(res, 201, m);
     });
     r('GET', '/api/wordbook/meditations/:id', ({ res, user, params }) => sendJson(res, 200, d.wordbook.get(this.signedIn(user).id, id(params[0]))));
     r('PATCH', '/api/wordbook/meditations/:id', async ({ req, res, user, params }) => {
@@ -594,6 +614,153 @@ export class Api {
       open,
     );
 
+    // ---------------- 이야기 도서관 (L-A). Reading is open to everyone (visibility is
+    // enforced in LibraryService); writing needs an account, a nickname and consent.
+    const lib = d.library;
+    const viewer = (user: SessionUser | null) => (user?.nickname ? user.id : null);
+    r('GET', '/api/library/shelves', ({ res, user }) => sendJson(res, 200, { shelves: lib.shelfCounts(viewer(user)) }));
+    r('GET', '/api/library/shelves/:shelf', ({ res, user, params, query }) => sendJson(res, 200, lib.list(viewer(user), params[0], query.get('page'))));
+    r('GET', '/api/library/today', ({ res, user }) => sendJson(res, 200, { items: lib.today(viewer(user)) }));
+    r('GET', '/api/library/popular', ({ res, user }) => sendJson(res, 200, { items: lib.popular(viewer(user)) }));
+    r('GET', '/api/library/mine', ({ res, user }) => sendJson(res, 200, lib.mine(this.signedIn(user).id)));
+    r('GET', '/api/library/stories/:id', ({ res, user, params }) => sendJson(res, 200, lib.detail(id(params[0]), viewer(user), isAdmin(user, this.admins))));
+    r('POST', '/api/library/stories', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      const story = lib.createTestimony(u.id, await readJson(req));
+      d.room.libraryChanged();
+      sendJson(res, 201, story);
+    });
+    r('PUT', '/api/library/stories/:id', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      const story = lib.updateTestimony(u.id, id(params[0]), await readJson(req));
+      d.room.libraryChanged();
+      sendJson(res, 200, story);
+    });
+    r('DELETE', '/api/library/stories/:id', ({ res, user, params }) => {
+      lib.delete(this.signedIn(user).id, id(params[0]));
+      d.room.libraryChanged();
+      sendJson(res, 200, { ok: true });
+    });
+    r('POST', '/api/library/stories/:id/reactions', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      sendJson(res, 200, lib.react(u.id, id(params[0]), (await readJson(req)).type));
+    });
+    r('POST', '/api/library/stories/:id/bookmark', ({ res, user, params }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      sendJson(res, 200, lib.bookmark(u.id, id(params[0])));
+    });
+    r('POST', '/api/library/stories/:id/report', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const sid = id(params[0]);
+      const body = await readJson(req);
+      this.limit(this.storyReportLimit, `user:${u.id}`);
+      const out = lib.report(u.id, sid, body.reason);
+      if (out.changed) {
+        console.log(`story ${sid} hidden after reports`);
+        d.room.libraryChanged();
+      }
+      sendJson(res, 200, { ok: true, duplicate: out.duplicate });
+    });
+    r('GET', '/api/library/draft', ({ res, user }) => sendJson(res, 200, lib.getDraft(this.signedIn(user).id)));
+    r('PUT', '/api/library/draft', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      sendJson(res, 200, lib.saveDraft(u.id, await readJson(req)));
+    });
+    r('DELETE', '/api/library/draft', ({ res, user }) => {
+      lib.deleteDraft(this.signedIn(user).id);
+      sendJson(res, 200, { ok: true });
+    });
+    // 📔 오늘의 일기: the template draft (only my own 발자취), and publish/replace today's diary.
+    r('GET', '/api/diary/draft', ({ res, user }) => sendJson(res, 200, lib.diaryDraft(this.signedIn(user).id)));
+    r('POST', '/api/diary', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      this.limit(this.libraryWriteLimit, `user:${u.id}`);
+      const story = lib.publishDiary(u.id, await readJson(req));
+      d.room.libraryChanged();
+      sendJson(res, 200, story);
+    });
+    // 발자취 settings (private to the account).
+    r('GET', '/api/footprints', ({ res, user }) => sendJson(res, 200, d.footprints.summary(this.signedIn(user).id, kstDateOf(d.footprints.now()))));
+    r(
+      'PUT',
+      '/api/footprints/settings',
+      async ({ req, res, user }) => {
+        const u = this.signedIn(user);
+        d.footprints.setEnabled(u.id, (await readJson(req)).enabled === true);
+        sendJson(res, 200, d.footprints.summary(u.id, kstDateOf(d.footprints.now())));
+      },
+      open,
+    );
+    r('DELETE', '/api/footprints/today', ({ res, user }) => {
+      const u = this.signedIn(user);
+      const removed = d.footprints.clearDay(u.id, kstDateOf(d.footprints.now()));
+      sendJson(res, 200, { removed, ...d.footprints.summary(u.id, kstDateOf(d.footprints.now())) });
+    });
+    r('POST', '/api/footprints/letter', ({ res, user }) => {
+      const u = this.signedIn(user);
+      const now = d.footprints.now();
+      sendJson(res, 200, { recorded: d.footprints.event(u.id, 'letter', kstDateOf(now), {}, now) });
+    });
+    // 📸 screenshots: owner-only until a published diary shows them.
+    r('POST', '/api/shots', async ({ req, res, user, query }) => {
+      const u = this.signedIn(user);
+      this.limit(this.shotLimit, `user:${u.id}`);
+      const type = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+      if (type !== 'image/webp' && type !== 'image/jpeg') throw new HttpError(415, 'bad_type', 'WebP나 JPEG 사진만 올릴 수 있어요.');
+      const buf = await readBody(req, SHOT_MAX_BYTES);
+      const shot = d.shots.upload(u.id, buf, type, query.get('place'));
+      d.footprints.event(u.id, 'shot', String(shot.id), { shotId: shot.id });
+      sendJson(res, 201, { shot, usedToday: d.shots.usedToday(u.id) });
+    });
+    r('GET', '/api/shots', ({ res, user, query }) => {
+      const u = this.signedIn(user);
+      const date = query.get('date');
+      sendJson(res, 200, { shots: d.shots.list(u.id, date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined), usedToday: d.shots.usedToday(u.id) });
+    });
+    r('GET', '/api/shots/:id', ({ res, user, params }) => {
+      const sid = id(params[0]);
+      const row = d.shots.row(sid);
+      if (!row || !lib.canSeeShot(sid, row.user_id, viewer(user) ?? user?.id ?? null, isAdmin(user, this.admins))) throw new HttpError(404, 'not_found', '사진을 찾을 수 없어요.');
+      const data = d.shots.read(row);
+      if (!data) throw new HttpError(404, 'not_found', '사진을 찾을 수 없어요.');
+      res.writeHead(200, { 'content-type': row.mime, 'content-length': data.length, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+      res.end(data);
+    });
+    r('DELETE', '/api/shots/:id', ({ res, user, params }) => {
+      const u = this.signedIn(user);
+      const sid = id(params[0]);
+      d.shots.delete(u.id, sid);
+      d.footprints.forgetEvent(u.id, 'shot', String(sid));
+      d.room.libraryChanged();
+      sendJson(res, 200, { ok: true });
+    });
+    r('GET', '/api/admin/library', ({ res, user }) => {
+      this.admin(user);
+      sendJson(res, 200, { stories: lib.adminList() });
+    }, open);
+    r('POST', '/api/admin/library/:id', async ({ req, res, user, params }) => {
+      const u = this.admin(user);
+      const sid = id(params[0]);
+      const body = await readJson(req);
+      lib.adminAction(sid, body.action, body.days);
+      d.room.libraryChanged();
+      console.log(`admin ${u.id}: story ${sid} ${String(body.action).slice(0, 10)}`);
+      sendJson(res, 200, { ok: true });
+    }, open);
+    if (d.testMode) {
+      // Test-only: run the 발자취/screenshot 파기 as if the clock were `days` later.
+      r('POST', '/api/test/library/sweep', async ({ req, res }) => {
+        const days = Number((await readJson(req)).days) || 0;
+        const at = Date.now() + days * 86_400_000;
+        sendJson(res, 200, { footprints: d.footprints.sweep(at), shots: d.shots.sweep(at) });
+      });
+    }
+
     // ---------------- lanterns (visibility enforced in LanternService)
     r('GET', '/api/lanterns', ({ res, user }) => sendJson(res, 200, { lanterns: d.lanterns.listFor(user?.id ?? null) }));
     r('POST', '/api/lanterns', async ({ req, res, user }) => {
@@ -602,7 +769,13 @@ export class Api {
       d.room.lanternChanged(lid);
       sendJson(res, 201, d.lanterns.detail(lid, u.id));
     });
-    r('GET', '/api/lanterns/:id', ({ res, user, params }) => sendJson(res, 200, d.lanterns.detail(id(params[0]), user?.id ?? null)));
+    r('GET', '/api/lanterns/:id', ({ res, user, params }) => {
+      const lid = id(params[0]);
+      const detail = d.lanterns.detail(lid, user?.id ?? null);
+      // 발자취: which lantern (an id only; never whose it was).
+      if (user?.nickname && !detail.mine) d.footprints.event(user.id, 'lantern_read', `${kstDateOf(Date.now())}:${lid}`, { lanternId: lid });
+      sendJson(res, 200, detail);
+    });
     r('DELETE', '/api/lanterns/:id', ({ res, user, params }) => {
       const lid = id(params[0]);
       d.lanterns.remove(this.signedIn(user).id, lid);
@@ -615,6 +788,9 @@ export class Api {
       const type = (await readJson(req)).type;
       const detail = d.lanterns.toggle(u.id, lid, type);
       d.room.lanternChanged(lid);
+      if (typeof type === 'string' && detail.myReactions.includes(type as never) && !detail.mine) {
+        d.footprints.event(u.id, 'lantern_react', `${kstDateOf(Date.now())}:${lid}:${type}`, { lanternId: lid, type });
+      }
       // 🤲 to the lantern's author (never who prayed; throttled and batched in PushService).
       if (type === 'pray' && detail.myReactions.includes('pray')) void d.push.prayed(lid, u.id).catch((e) => console.error('push prayed', e));
       sendJson(res, 200, detail);

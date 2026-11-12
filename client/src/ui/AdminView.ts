@@ -1,4 +1,4 @@
-import { PROPS, REPORT_LABELS, SHOP_STOCK_MAX, type PropId, type ReportReason } from '../../../shared/protocol';
+import { PROPS, REPORT_LABELS, SHELVES, SHOP_STOCK_MAX, STORY_PROMPTS, STORY_REPORT_LABELS, VISIBILITY_LABELS, type PropId, type ReportReason, type StoryDetail, type StoryReportReason } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { button, el, Modal } from './dom';
 import { drawThumb } from './OutfitPainter';
@@ -44,12 +44,26 @@ interface ShopOverview {
   defaults: { item: PropId; stock: number; base: number }[];
 }
 
+interface AdminStory extends StoryDetail {
+  anonymous: boolean;
+  reporters: number;
+  reasons: Partial<Record<StoryReportReason, number>>;
+  review: 'kept' | 'restored' | null;
+  authorBanUntil: number | null;
+}
+
+export type AdminTab = 'outfits' | 'shop' | 'library';
+
 export class AdminView {
   private readonly modal = new Modal('admin-overlay', '운영 관리');
   private status: HTMLElement | null = null;
-  private tab: 'outfits' | 'shop' = 'outfits';
+  private tab: AdminTab = 'outfits';
 
-  async open(tab: 'outfits' | 'shop' = this.tab) {
+  get currentTab(): AdminTab | null {
+    return this.modal.isOpen ? this.tab : null;
+  }
+
+  async open(tab: AdminTab = this.tab) {
     this.tab = tab;
     this.modal.sheet.className = 'sheet admin-sheet';
     this.modal.sheet.replaceChildren(el('p', 'settings-note admin-loading', '불러오는 중…'));
@@ -62,7 +76,7 @@ export class AdminView {
   }
 
   private reload() {
-    return this.tab === 'shop' ? this.loadShop() : this.load();
+    return this.tab === 'shop' ? this.loadShop() : this.tab === 'library' ? this.loadLibrary() : this.load();
   }
 
   /** Header with the two admin areas. */
@@ -72,6 +86,7 @@ export class AdminView {
     for (const [key, label] of [
       ['outfits', '옷 그림'],
       ['shop', '소품 가게'],
+      ['library', '도서관'],
     ] as const) {
       const b = button(label, 'chip', () => void this.open(key));
       b.id = `admin-tab-${key}`;
@@ -236,6 +251,82 @@ export class AdminView {
     banWrap.append(days, ban);
     actions.append(keep, restore, banWrap);
     li.append(thumb, info, actions);
+    return li;
+  }
+
+  // ------------------------------------------------------------------ 도서관 관리
+
+  private async loadLibrary(note = '') {
+    let list: AdminStory[];
+    try {
+      list = (await api<{ stories: AdminStory[] }>('GET', '/api/admin/library')).stories;
+    } catch (err) {
+      this.modal.sheet.replaceChildren(el('p', 'settings-note', err instanceof ApiError ? err.message : '불러오지 못했어요.'));
+      return;
+    }
+    if (!this.modal.isOpen) return;
+    const sheet = this.modal.sheet;
+    sheet.replaceChildren();
+    this.status = el('p', 'groups-status');
+    this.status.setAttribute('role', 'status');
+    this.status.textContent = note;
+    const body = el('div', 'admin-body admin-library');
+    body.append(
+      el('p', 'settings-note', '신고되거나 숨겨진 도서관 책이에요. 서로 다른 3명이 신고하면 자동으로 숨겨져요. 익명 책의 작성자는 여기에서만 보여요.'),
+      this.status,
+    );
+    const ul = el('ul', 'admin-list');
+    ul.id = 'admin-library-list';
+    if (list.length === 0) body.append(el('p', 'settings-note', '살펴볼 책이 없어요.'));
+    for (const s of list) ul.append(this.storyCard(s));
+    body.append(ul);
+    sheet.append(this.top('도서관 관리'), body);
+  }
+
+  private storyCard(s: AdminStory): HTMLElement {
+    const li = el('li', 'admin-item admin-story');
+    li.dataset.id = String(s.id);
+    const info = el('div', 'admin-info');
+    const state = s.hidden ? (s.review === 'kept' ? '숨김 (유지)' : '숨김') : s.review === 'restored' ? '보임 (복구됨)' : '보임';
+    info.append(
+      el('strong', 'admin-owner', `${s.title}`),
+      el('span', '', `${SHELVES[s.shelf].emoji} ${SHELVES[s.shelf].name} · ${s.kind === 'diary' ? '일기' : '이야기'} · ${VISIBILITY_LABELS[s.visibility]} · 작성자 ${s.author}${s.anonymous ? ' (익명)' : ''}`),
+      el('span', `admin-state ${s.hidden ? 'hidden' : ''}`, state),
+      el('span', '', `신고 ${s.reporters}명 · ${Object.entries(s.reasons).map(([k, n]) => `${STORY_REPORT_LABELS[k as StoryReportReason] ?? k} ${n}`).join(', ') || '-'}${s.authorBanUntil ? ` · ${day(s.authorBanUntil)}까지 글쓰기 금지` : ''}`),
+    );
+    const preview = el('details', 'admin-preview');
+    preview.append(el('summary', '', '미리 보기'));
+    s.parts.forEach((p, i) => {
+      if (!p) return;
+      if (s.kind === 'testimony') preview.append(el('p', 'lib-prompt', STORY_PROMPTS[i] ?? ''));
+      preview.append(el('p', 'lib-part', p));
+    });
+    if (s.note) preview.append(el('p', 'lib-note', s.note));
+    info.append(preview);
+    const actions = el('div', 'admin-actions');
+    const act = async (action: 'hide' | 'restore' | 'delete' | 'ban', days?: number) => {
+      if (action === 'delete' && !window.confirm('이 책을 삭제할까요? 되돌릴 수 없어요.')) return;
+      try {
+        await api('POST', `/api/admin/library/${s.id}`, { action, days });
+        await this.loadLibrary(action === 'hide' ? '숨김을 유지해요.' : action === 'restore' ? '복구했어요.' : action === 'delete' ? '삭제했어요.' : `${days}일 동안 도서관에 글을 쓸 수 없게 했어요.`);
+      } catch (err) {
+        if (this.status) this.status.textContent = err instanceof ApiError ? err.message : '처리하지 못했어요.';
+      }
+    };
+    const keep = button(s.hidden ? '숨김 유지' : '숨기기', 'chip admin-hide', () => void act('hide'));
+    const restore = button('복구', 'chip admin-restore', () => void act('restore'));
+    const del = button('삭제', 'chip admin-delete', () => void act('delete'));
+    const days = el('input', 'admin-days');
+    days.type = 'number';
+    days.min = '1';
+    days.max = '365';
+    days.value = '7';
+    days.setAttribute('aria-label', '글쓰기 금지 일수');
+    const ban = button('일 글쓰기 금지', 'chip admin-ban', () => void act('ban', Number(days.value)));
+    const banWrap = el('span', 'admin-ban-wrap');
+    banWrap.append(days, ban);
+    actions.append(keep, restore, del, banWrap);
+    li.append(info, actions);
     return li;
   }
 }

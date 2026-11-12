@@ -4,6 +4,8 @@ const MIN_PITCH = 0.08;
 const MAX_PITCH = 1.25;
 const MIN_DIST = 3.5;
 const MAX_DIST = 16;
+/** Inside the library hall: closer, so the camera stays within the room. */
+const INDOOR = { min: 2.4, max: 8, normal: 5.6, portrait: 6.4 };
 
 /**
  * Third-person orbit camera. Yaw/pitch come from drag input, follow is
@@ -19,12 +21,35 @@ export class CameraRig {
   private readonly desired = new THREE.Vector3();
   private readonly probe = new THREE.Vector3();
 
+  private minDist = MIN_DIST;
+  private maxDist = MAX_DIST;
+  private indoor = false;
+  private portrait = false;
+  private outdoorDistance = 10;
+
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
-    private readonly groundAt: (x: number, z: number) => number,
+    private groundAt: (x: number, z: number) => number,
     initialYaw: number,
   ) {
     this.yaw = initialYaw;
+  }
+
+  /** Indoors (the library) or out: what the arm avoids and how far it may reach. */
+  setIndoor(indoor: boolean, groundAt: (x: number, z: number) => number) {
+    if (indoor === this.indoor) return;
+    this.groundAt = groundAt;
+    this.indoor = indoor;
+    if (indoor) {
+      this.outdoorDistance = this.targetDistance;
+      this.minDist = INDOOR.min;
+      this.maxDist = INDOOR.max;
+      this.targetDistance = this.portrait ? INDOOR.portrait : INDOOR.normal;
+    } else {
+      this.minDist = MIN_DIST;
+      this.maxDist = MAX_DIST;
+      this.targetDistance = this.outdoorDistance;
+    }
   }
 
   /** Radians per dragged pixel; touch is a little faster on small screens. */
@@ -35,13 +60,14 @@ export class CameraRig {
   }
 
   applyZoom(delta: number) {
-    this.targetDistance = THREE.MathUtils.clamp(this.targetDistance + delta, MIN_DIST, MAX_DIST);
+    this.targetDistance = THREE.MathUtils.clamp(this.targetDistance + delta, this.minDist, this.maxDist);
   }
 
   /** Portrait screens see less sideways, so back the camera off a little. */
   setPortrait(portrait: boolean) {
-    const d = portrait ? 11.5 : 10;
-    this.targetDistance = d;
+    this.portrait = portrait;
+    if (this.indoor) this.targetDistance = portrait ? INDOOR.portrait : INDOOR.normal;
+    else this.targetDistance = portrait ? 11.5 : 10;
   }
 
   snap(target: THREE.Vector3) {
@@ -69,7 +95,7 @@ export class CameraRig {
       const z = lookAt.z + Math.cos(this.yaw) * cp * d;
       const y = lookAt.y + Math.sin(this.pitch) * d;
       if (y < this.groundAt(x, z) + 0.45) {
-        dist = Math.max(MIN_DIST * 0.6, d * 0.85);
+        dist = Math.max(this.minDist * 0.6, d * 0.85);
         break;
       }
     }

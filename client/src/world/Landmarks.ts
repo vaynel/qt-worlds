@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BENCHES, BENCH_DEPTH, BENCH_LENGTH, BENCH_SEAT_HEIGHT, LOG_ANGLE0, LOG_COUNT, LOG_LENGTH, LOG_RADIUS, LOG_RING_RADIUS, MATS } from '../../../shared/protocol';
+import { BENCHES, BENCH_DEPTH, BENCH_LENGTH, BENCH_SEAT_HEIGHT, LIBRARY_DOOR, LOG_ANGLE0, LOG_COUNT, LOG_LENGTH, LOG_RADIUS, LOG_RING_RADIUS, MATS } from '../../../shared/protocol';
 import { LANDMARKS, PALETTE, type LandmarkDef, type LandmarkId } from './config';
 import type { CircleCollider } from './ChunkManager';
 import type { Heightfield } from './Heightfield';
@@ -49,6 +49,8 @@ export class Landmarks {
 
   /** Door position of the private room, used by the proximity prompt. */
   readonly closetDoor = new THREE.Vector3();
+  /** Outside door of 이야기 도서관 (shared numbers: the server checks it too). */
+  readonly libraryDoor = new THREE.Vector3();
   /** 나눔 소품 가게 (M9) on the plaza. */
   private shopStall!: ShopStall;
 
@@ -61,6 +63,7 @@ export class Landmarks {
     this.buildCampfire(by('campfire'));
     this.buildLanternHill(by('lanternHill'));
     this.buildCloset(by('closet'));
+    this.buildLibrary(by('library'));
   }
 
   // ---------------------------------------------------------------- helpers
@@ -358,6 +361,73 @@ export class Landmarks {
     this.closetDoor.set(l.x + door.x, h, l.z + door.z);
 
     this.label(l, l.name, '나만의 기도 방 (입구)', h + 5.0);
+  }
+
+  /** 📚 이야기 도서관: a small stone hall with a gabled roof, warm arched windows and a book sign. */
+  private buildLibrary(l: LandmarkDef) {
+    const h = l.height;
+    const hall = new THREE.Group();
+    hall.position.set(l.x, h, l.z);
+    const facing = Math.atan2(-l.x, -l.z); // door faces the plaza
+    hall.rotation.y = facing;
+    const stone = lambert(0xd9cdb4);
+    const stoneDark = lambert(0xb9a98a);
+    const roof = lambert(0x6f5a4a);
+    const wood = lambert(PALETTE.woodDark);
+
+    this.add(new THREE.BoxGeometry(7.6, 0.35, 6.6), stoneDark, 0, 0.17, 0, { parent: hall });
+    this.add(new THREE.BoxGeometry(7, 3.2, 6), stone, 0, 1.95, 0, { parent: hall });
+    // Corner stones, a little darker.
+    for (const [x, z] of [[-3.5, -3], [3.5, -3], [-3.5, 3], [3.5, 3]]) this.add(new THREE.BoxGeometry(0.5, 3.3, 0.5), stoneDark, x, 1.95, z, { parent: hall });
+    // Gabled roof: a stone attic (triangular prism along x) under two sloping roof boards.
+    const gable = new THREE.Shape([new THREE.Vector2(-3, 0), new THREE.Vector2(3, 0), new THREE.Vector2(0, 1.5)]);
+    const attic = new THREE.ExtrudeGeometry(gable, { depth: 7, bevelEnabled: false });
+    attic.rotateY(Math.PI / 2);
+    attic.translate(-3.5, 0, 0);
+    this.add(attic, stone, 0, 3.55, 0, { parent: hall });
+    const slope = Math.atan2(1.6, 3.3);
+    for (const side of [-1, 1]) {
+      this.add(new THREE.BoxGeometry(7.8, 0.22, 3.75), roof, 0, 3.55 + 0.82, side * 1.62, { parent: hall, rx: side * slope });
+    }
+    this.add(new THREE.BoxGeometry(7.9, 0.2, 0.3), stoneDark, 0, 5.2, 0, { parent: hall });
+    // Arched door with a step and a book sign above it.
+    this.add(new THREE.BoxGeometry(1.4, 2.2, 0.12), wood, 0, 1.45, 3.02, { parent: hall });
+    this.add(new THREE.CylinderGeometry(0.7, 0.7, 0.12, 12, 1, false, 0, Math.PI), wood, 0, 2.55, 3.02, { parent: hall, rx: Math.PI / 2, rz: Math.PI / 2 });
+    this.add(new THREE.SphereGeometry(0.07, 6, 4), lambert(PALETTE.lantern), 0.45, 1.4, 3.12, { parent: hall, cast: false });
+    this.add(new THREE.BoxGeometry(2.2, 0.18, 0.8), stoneDark, 0, 0.42, 3.4, { parent: hall });
+    const sign = new THREE.Group();
+    sign.position.set(0, 3.25, 3.06);
+    this.add(new THREE.BoxGeometry(1.5, 0.55, 0.08), wood, 0, 0, 0, { parent: sign });
+    this.add(new THREE.BoxGeometry(0.42, 0.34, 0.06), lambert(0xc8644a), -0.22, 0, 0.06, { parent: sign, rz: 0.08 });
+    this.add(new THREE.BoxGeometry(0.42, 0.34, 0.06), lambert(0x5f8f6b), 0.22, 0, 0.06, { parent: sign, rz: -0.08 });
+    this.add(new THREE.BoxGeometry(0.06, 0.36, 0.08), lambert(PALETTE.cream), 0, 0, 0.08, { parent: sign });
+    hall.add(sign);
+    // Warm windows (glow at night), two on the front, three on each side.
+    const win = this.glow(0xffd28a, 0.25, 1.6);
+    for (const x of [-2.2, 2.2]) {
+      this.add(new THREE.BoxGeometry(0.9, 1.2, 0.08), win, x, 2.0, 3.02, { parent: hall, cast: false });
+      this.add(new THREE.BoxGeometry(1.1, 0.12, 0.2), stoneDark, x, 1.35, 3.08, { parent: hall });
+    }
+    for (const side of [-1, 1]) {
+      for (const z of [-1.8, 0, 1.8]) this.add(new THREE.BoxGeometry(0.08, 1.2, 0.8), win, side * 3.52, 2.1, z, { parent: hall, cast: false });
+    }
+    // Stepping stones toward the plaza.
+    for (let i = 0; i < 4; i++) this.add(new THREE.CylinderGeometry(0.42, 0.46, 0.1, 7), lambert(PALETTE.stone), (i % 2) * 0.3 - 0.15, 0.05, 4.4 + i * 1.0, { parent: hall, cast: false });
+    this.group.add(hall);
+
+    // Two lamps either side of the steps.
+    for (const sx of [-2.1, 2.1]) {
+      const v = new THREE.Vector3(sx, 0, 4.1).applyAxisAngle(new THREE.Vector3(0, 1, 0), facing);
+      this.lampPost(l.x + v.x, l.z + v.z, h, 2.0);
+    }
+    this.pointLight(0xffc98a, LIBRARY_DOOR.x, h + 2.6, LIBRARY_DOOR.z, 9, 0, 3);
+
+    for (const [ox, oz] of [[0, -1.2], [0, 1.2], [-2.3, -1.2], [-2.3, 1.2], [2.3, -1.2], [2.3, 1.2]]) {
+      const v = new THREE.Vector3(ox, 0, oz).applyAxisAngle(new THREE.Vector3(0, 1, 0), facing);
+      this.colliders.push({ x: l.x + v.x, z: l.z + v.z, r: 1.75 });
+    }
+    this.libraryDoor.set(LIBRARY_DOOR.x, h, LIBRARY_DOOR.z);
+    this.label(l, l.name, '함께 읽는 이야기', h + 6.4);
   }
 
   // ---------------------------------------------------------------- runtime

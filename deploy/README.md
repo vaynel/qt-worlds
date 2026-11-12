@@ -53,6 +53,8 @@ curl -s http://127.0.0.1:5190/health # {"ok":true} (nginx-proxied callers never 
 - **Fixed settings:** `docker-compose.yml` hard-sets `NODE_ENV=production` and `SERVE_CLIENT=1`, and forces the test-only switches (`WORLDS_AUTH_MOCK`, `WORLDS_TEST_MODE`, `WORLDS_ALLOW_TEST_DATES`) to `0`. The server also refuses to start if any of them is `1` while `NODE_ENV=production`.
 - **Bible text:** `data/bible-krv.json` (about 6 MB, read-only) is **baked into the image**. Rebuild the image if it changes.
 - **Database:** the SQLite DB lives in the named volume `qt-worlds-data`, at `/data/worlds.db`. Backups go to `/data/backups/`.
+- **Screenshots (L-A, 📸):** in-world photos are files next to the database, in **`/data/screenshots/`** (same volume, so they survive `docker compose build`/`up -d`). Names are random (`<32 hex>.webp|jpg`), one DB row each (`screenshots` table). Override the folder with `WORLDS_SHOTS_DIR` (keep it inside the volume). Size: at most 10 photos per account per day, usually < 150 KB each (hard limit 400 KB); photos not used in a published diary are deleted after 30 days by the hourly sweep, and files are removed on 회원 탈퇴. The startup log prints the folder (`screenshots: /data/screenshots`).
+- **발자취 / 이야기 도서관 data** is only in the database (tables `footprints`, `footprint_minutes`, `stories`, `story_*`, `diary_photos`, `shot_days`), so the normal DB backup covers it.
 
 ## 3. Update
 
@@ -85,6 +87,8 @@ docker cp qt-worlds:/data/backups/. ./deploy/backups/
 - run the backup **once a day**: more often shortens the window, less often lengthens it;
 - if you change `BACKUP_KEEP` (`docker exec -e BACKUP_KEEP=7 qt-worlds node server/scripts/backup.mjs`), update the policy text in `client/src/legal/pages.ts` too;
 - copies you take out of the volume (`./deploy/backups/` above) are not pruned. Delete them yourself after 14 days, or don't keep them.
+
+**Screenshots are not in the DB backup.** `backup.mjs` copies only `worlds.db`; the image files in `/data/screenshots/` are not backed up (the 개인정보처리방침 says so). After a restore, photos whose file is missing simply answer 404 (the diary text is intact). If you want them too, copy the folder yourself (e.g. `docker cp qt-worlds:/data/screenshots ./deploy/backups/screenshots-$(date +%F)`) and delete those copies within 14 days, like the DB copies.
 
 To restore (this stops the service briefly):
 
