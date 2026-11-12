@@ -1283,7 +1283,12 @@ export class Game {
       this.pathGlow.dispose();
       this.pathGlow = null;
     }
-    this.publishDebug();
+    try {
+      this.publishDebug();
+    } catch (err) {
+      // Debug state is best-effort; never let it stop the animation loop.
+      if (this.frame % 600 === 0) console.warn('debug publish failed', err);
+    }
   };
 
   private updateAudio() {

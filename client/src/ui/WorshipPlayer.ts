@@ -11,7 +11,8 @@ interface YTPlayer {
   setVolume(v: number): void;
   mute(): void;
   unMute(): void;
-  getVideoData?(): { video_id?: string };
+  getVideoData?(): { video_id?: string } | undefined;
+  getPlayerState?(): number;
   cueVideoById(id: string): void;
 }
 interface YTNamespace {
@@ -315,7 +316,16 @@ export class WorshipPlayer {
   }
 
   private pauseForBackground() {
-    const active = this.state === STATE.PLAYING || this.state === STATE.BUFFERING;
+    // Ask the player itself: autoplay can start before our state listener sees
+    // a 'playing' event, so this.state alone may still say "none".
+    let live = this.state;
+    try {
+      const s = this.player && this.ready ? this.player.getPlayerState?.() : undefined;
+      if (typeof s === 'number') live = s;
+    } catch {
+      /* ignore */
+    }
+    const active = live === STATE.PLAYING || live === STATE.BUFFERING || this.state === STATE.PLAYING || this.state === STATE.BUFFERING;
     if (active) this.pausedForBackground = true;
     window.clearTimeout(this.graceTimer);
     if (this.player && this.ready && active) {
@@ -907,7 +917,7 @@ export class WorshipPlayer {
       index: this.index,
       title: this.videos[this.index]?.title ?? null,
       /** What the YouTube player itself reports as loaded. */
-      videoId: (this.ready && this.player?.getVideoData?.().video_id) || null,
+      videoId: (this.ready && this.player?.getVideoData?.()?.video_id) || null,
       tracks: this.videos.length,
       listOpen: this.listOpen,
       volume: this.volume,
