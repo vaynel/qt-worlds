@@ -350,7 +350,7 @@ export class WordBookView {
       /* public only */
     }
     const form = el('form', 'share-form');
-    form.append(el('p', 'book-note-head', '등불로 나누기 · 7일 동안 등불 언덕을 밝혀요'));
+    form.append(el('p', 'book-note-head', '등불로 나누기 · 3일 동안 등불 언덕을 밝혀요 (하루 3개까지)'));
     const pub = el('label', 'share-option');
     const pubInput = el('input');
     pubInput.type = 'radio';

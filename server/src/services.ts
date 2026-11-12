@@ -21,7 +21,9 @@ import { HttpError } from './http.js';
 
 const DAY_MS = 86_400_000;
 /** Lanterns stay on the hill this long. */
-export const LANTERN_DAYS = 7;
+export const LANTERN_DAYS = 3;
+/** Lanterns one person can light per KST day. */
+export const LANTERNS_PER_DAY = 3;
 export const LANTERN_CAP = 120;
 const TEXT_MAX = 2000;
 const PLACES = ['골방', '기도의 뜰'] as const;
@@ -421,7 +423,7 @@ export class LanternService {
     const existing = this.db.prepare('SELECT id FROM lanterns WHERE meditation_id = ? AND removed_at IS NULL AND created_at >= ?').get(meditationId, this.since());
     if (existing) throw new HttpError(409, 'exists', '이미 등불로 나눈 묵상이에요.');
     const today = (this.db.prepare('SELECT COUNT(*) n FROM lanterns WHERE user_id = ? AND created_at >= ?').get(userId, Date.now() - DAY_MS) as { n: number }).n;
-    if (today >= 10) throw new HttpError(429, 'too_many', '하루에 등불은 10개까지 밝힐 수 있어요.');
+    if (today >= LANTERNS_PER_DAY) throw new HttpError(429, 'too_many', `하루에 등불은 ${LANTERNS_PER_DAY}개까지 밝힐 수 있어요.`);
     const page = this.db.prepare('SELECT word_json FROM wordbook_pages WHERE user_id = ? AND date = ?').get(userId, m.date) as { word_json: string } | undefined;
     if (!page) throw new HttpError(400, 'no_page', '말씀을 찾을 수 없어요.');
     const word = JSON.parse(page.word_json) as WordPassage;

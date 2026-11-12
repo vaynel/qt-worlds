@@ -16,7 +16,7 @@ import { PRIVACY_PATH, TERMS_PATH, type LegalConfig } from '../config/legal';
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** Lanterns stay on the hill this many days (server/src/services.ts LANTERN_DAYS). */
-const LANTERN_DAYS = 7;
+const LANTERN_DAYS = 3;
 /** A replaced or emptied drawing that was reported is kept this long after its last report (server/src/looks.ts). */
 const REPORTED_OUTFIT_KEEP_DAYS = 30;
 /** Same as RENTAL_KEEP_DAYS in server/src/shop.ts. */

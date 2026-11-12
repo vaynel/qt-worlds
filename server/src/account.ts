@@ -7,7 +7,7 @@ import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
 
 const DAY_MS = 86_400_000;
-/** A 내린 lantern's copy is kept this long (the 10-a-day limit counts it), then deleted. */
+/** A 내린 lantern's copy is kept this long (the daily limit counts it), then deleted. */
 export const REMOVED_LANTERN_GRACE_MS = DAY_MS;
 /** An expired lantern (off the hill after LANTERN_DAYS) is deleted a day later. */
 export const EXPIRED_LANTERN_GRACE_MS = DAY_MS;
