@@ -415,6 +415,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE push_prefs ADD COLUMN diary_time INTEGER NOT NULL DEFAULT 1260;
   ALTER TABLE push_prefs ADD COLUMN last_diary_date TEXT;
   `,
+  // Library with two bookcases (🙏 하나님 이야기 = every testimony, 📔 일기 = every
+  // diary): lists go by kind now. stories.shelf stays as it was (old topics kept).
+  `
+  CREATE INDEX IF NOT EXISTS stories_kind ON stories(kind, created_at);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

@@ -49,20 +49,55 @@ const touchCapable = window.matchMedia('(pointer: coarse)').matches || navigator
 const isTablet = touchCapable && Math.min(screen.width, screen.height) >= 600;
 document.body.classList.toggle('tablet', isTablet);
 
+/**
+ * P1-3: phones held sideways get their own layout (body.phone-land): sheets on
+ * the left at full height, the worship player in a column on the right. The
+ * orientation comes from the screen, not the viewport, so the on-screen
+ * keyboard (which makes a portrait viewport wide and short) never flips it.
+ */
+function isLandscape(): boolean {
+  const type = screen.orientation?.type;
+  if (type) return type.startsWith('landscape');
+  return window.innerWidth > window.innerHeight;
+}
+/** Below this visible height (keyboard up in landscape) a 200 px video can't be fully shown. */
+const SQUEEZE_PX = 216;
+
 function syncViewport() {
   const vv = window.visualViewport;
   const root = document.documentElement.style;
-  root.setProperty('--vvh', `${vv ? vv.height : window.innerHeight}px`);
+  const vvh = vv ? vv.height : window.innerHeight;
+  root.setProperty('--vvh', `${vvh}px`);
   root.setProperty('--vvtop', `${vv ? vv.offsetTop : 0}px`);
   // How much of the layout viewport the on-screen keyboard covers (iOS keeps the
   // layout viewport and shrinks only the visual one; Android usually resizes both).
   const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
   root.setProperty('--kb', `${Math.round(kb)}px`);
+  const phoneLand = touchCapable && !isTablet && isLandscape();
+  document.body.classList.toggle('phone-land', phoneLand);
+  // Keyboard up on a sideways phone: the video would be cut off, so it pauses
+  // (and comes back when the keyboard goes away). Never shown half-hidden.
+  worship.setSqueezed(phoneLand && vvh < SQUEEZE_PX);
+  // ...and the sheets drop their extras so the field being typed in gets the room.
+  document.body.classList.toggle('land-typing', phoneLand && vvh < 260);
+}
+/** Keep the field being typed into visible when the keyboard resizes the view. */
+function keepFocusedVisible() {
+  const a = document.activeElement;
+  if (!(a instanceof HTMLElement) || !a.matches('input, textarea') || !a.closest('.overlay')) return;
+  requestAnimationFrame(() => a.scrollIntoView({ block: 'nearest' }));
 }
 syncViewport();
-window.visualViewport?.addEventListener('resize', syncViewport);
+window.visualViewport?.addEventListener('resize', () => {
+  syncViewport();
+  keepFocusedVisible();
+});
 window.visualViewport?.addEventListener('scroll', syncViewport);
-window.addEventListener('resize', syncViewport);
+window.addEventListener('resize', () => {
+  syncViewport();
+  keepFocusedVisible();
+});
+screen.orientation?.addEventListener?.('change', syncViewport);
 
 const params = new URLSearchParams(location.search);
 // Results of the OAuth redirect (?login=ok|nickname, ?login_error=code): read, then tidy the URL.

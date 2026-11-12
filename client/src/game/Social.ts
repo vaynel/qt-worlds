@@ -14,7 +14,7 @@ import {
   seatSpot,
   type PlayerSnap,
   type SeatKind,
-  type ShelfCounts,
+  type BookcaseCounts,
   type Space,
 } from '../../../shared/protocol';
 import type { PlayerController } from '../entities/PlayerController';
@@ -39,7 +39,7 @@ export interface SocialOptions {
   /** Where the local player is: the open world, the 골방 ('room') or the library. */
   space: () => Space;
   /** 이야기 도서관 shelf counts pushed by the server. */
-  onLibrary?: (shelves: ShelfCounts) => void;
+  onLibrary?: (shelves: BookcaseCounts) => void;
   onWord?: (word: import('../../../shared/protocol').WordPassage) => void;
   /** Our own display name (welcome / live rename). */
   onLocalName?: (name: string, guest: boolean) => void;

@@ -18,7 +18,7 @@ import {
   type PropId,
   type PropWear,
   type ShopStatus,
-  type ShelfCounts,
+  type BookcaseCounts,
 } from '../../../shared/protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'reconnecting' | 'closed';
@@ -54,7 +54,7 @@ export interface NetHandlers {
   benches(benches: (string | null)[]): void;
   desks(desks: (string | null)[]): void;
   /** 이야기 도서관: shelf counts this viewer may see (while inside). */
-  library(shelves: ShelfCounts): void;
+  library(shelves: BookcaseCounts): void;
   error(code: ErrorCode, message: string): void;
   status(status: NetStatus): void;
   word(word: WordPassage): void;

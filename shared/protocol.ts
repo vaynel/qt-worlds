@@ -213,8 +213,8 @@ export const LIBRARY_ENTER_REACH = 7;
 
 /**
  * Library interior, in its own local frame (floor y = 0): a hall HALF_W x HALF_D
- * either side of the origin, door in the south wall (+z), shelves along the
- * north wall. Two reading tables with four chairs each (seat kind 'desk').
+ * either side of the origin, door in the south wall (+z), the two bookcases
+ * along the north wall. Two reading tables with four chairs each (seat kind 'desk').
  */
 export const LIBRARY_ROOM = { halfW: 9, halfD: 7 } as const;
 export const LIBRARY_SPAWN = { x: 0, z: 4.8, yaw: Math.PI } as const;
@@ -446,7 +446,7 @@ export type ServerMessage =
   /** Library reading desk seat occupancy (DESK_SEATS order). */
   | { t: 'desks'; desks: (string | null)[] }
   /** 이야기 도서관: how many books stand on each shelf, as this viewer may see them. */
-  | { t: 'library'; shelves: ShelfCounts }
+  | { t: 'library'; shelves: BookcaseCounts }
   /** Someone's borrowed props changed (rented, returned, expired). Also sent for your own id. */
   | { t: 'props'; id: string; props: PropWear[] }
   /** 나눔 소품 가게: open/closed, this window's stock (server clock). */
@@ -852,22 +852,21 @@ export function validProps(raw: unknown): PropWear[] {
 
 // ------------------------------------------------------------------ 이야기 도서관: books (L-A)
 
-/** 🙏 나의 하나님 이야기 shelves (testimonies), then the 📔 발자취 서가 for diaries. */
-export const TESTIMONY_SHELVES = ['first', 'answer', 'wilderness', 'thanks', 'word'] as const;
-export type TestimonyShelf = (typeof TESTIMONY_SHELVES)[number];
-export const SHELF_IDS = [...TESTIMONY_SHELVES, 'diary'] as const;
-export type ShelfId = (typeof SHELF_IDS)[number];
-export const SHELVES: Record<ShelfId, { emoji: string; name: string; blurb: string }> = {
-  first: { emoji: '🌱', name: '처음 만난 하나님', blurb: '처음 믿게 된 이야기' },
-  answer: { emoji: '🙏', name: '기도 응답', blurb: '기도가 응답된 이야기' },
-  wilderness: { emoji: '🌧️', name: '광야에서', blurb: '힘든 시간에 만난 하나님' },
-  thanks: { emoji: '💌', name: '감사', blurb: '일상의 감사' },
-  word: { emoji: '✨', name: '말씀이 살아날 때', blurb: '말씀이 삶에서 이루어진 순간' },
-  diary: { emoji: '📔', name: '발자취 서가', blurb: '날짜별로 꽂힌 오늘의 일기' },
+/**
+ * The library has two bookcases (2026-11-13): 🙏 하나님 이야기 holds every
+ * testimony, 📔 일기 every diary. Testimonies written before kept a topic in
+ * stories.shelf (first/answer/wilderness/thanks/word); it stays in the DB but
+ * nothing reads it. New testimonies store 'story', diaries 'diary'.
+ */
+export const BOOKCASE_IDS = ['testimony', 'diary'] as const;
+export type BookcaseId = (typeof BOOKCASE_IDS)[number];
+export const BOOKCASES: Record<BookcaseId, { emoji: string; name: string; blurb: string }> = {
+  testimony: { emoji: '🙏', name: '하나님 이야기', blurb: '하나님을 만난 이야기, 기도 응답, 감사를 직접 쓴 책' },
+  diary: { emoji: '📔', name: '일기', blurb: 'QT 월드에서 보낸 하루가 날짜별로 꽂혀 있어요' },
 };
-export type ShelfCounts = Record<ShelfId, number> & { today: number };
-export const isShelfId = (v: unknown): v is ShelfId => typeof v === 'string' && (SHELF_IDS as readonly string[]).includes(v);
-export const isTestimonyShelf = (v: unknown): v is TestimonyShelf => typeof v === 'string' && (TESTIMONY_SHELVES as readonly string[]).includes(v);
+/** How many books stand in each bookcase, as one viewer may see them. */
+export type BookcaseCounts = Record<BookcaseId, number>;
+export const isBookcaseId = (v: unknown): v is BookcaseId => typeof v === 'string' && (BOOKCASE_IDS as readonly string[]).includes(v);
 
 /** The guided form: three questions instead of a blank page. */
 export const STORY_PROMPTS = ['그때 어떤 상황이었나요?', '하나님을 어떻게 만났나요?', '지금 무엇이 달라졌나요?'] as const;
@@ -925,7 +924,6 @@ export interface DiaryLineMeta {
 export interface StoryItem {
   id: number;
   kind: 'testimony' | 'diary';
-  shelf: ShelfId;
   title: string;
   excerpt: string;
   /** Display name: the nickname, or ANONYMOUS_NAME for anonymous books (except to their author). */

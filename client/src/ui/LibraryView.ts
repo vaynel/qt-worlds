@@ -1,9 +1,9 @@
 import {
+  BOOKCASE_IDS,
+  BOOKCASES,
   DIARY_NOTE_MAX,
   LETTER_MAX,
   DIARY_PHOTOS_MAX,
-  SHELF_IDS,
-  SHELVES,
   STORY_BODY_MAX,
   STORY_PROMPTS,
   STORY_REACTIONS,
@@ -11,18 +11,17 @@ import {
   STORY_REPORT_LABELS,
   STORY_REPORT_REASONS,
   STORY_TITLE_MAX,
-  TESTIMONY_SHELVES,
   VISIBILITY_LABELS,
+  type BookcaseCounts,
+  type BookcaseId,
   type InboxItem,
   type LetterMessage,
   type LettersOfBook,
   type LetterThread,
-  type ShelfId,
   type StoryDetail,
   type StoryItem,
   type StoryReportReason,
   type StoryVisibility,
-  type TestimonyShelf,
 } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { button, el, koreanDate, Modal } from './dom';
@@ -53,12 +52,12 @@ interface DiaryDraft {
 interface TestimonyDraft {
   title: string;
   parts: string[];
-  shelf: TestimonyShelf | null;
   ref: string;
   step: number;
 }
 
-export type LibraryList = ShelfId | 'today' | 'popular';
+/** The two bookcases: 'testimony' (🙏 하나님 이야기) and 'diary' (📔 일기). */
+export type LibraryList = BookcaseId;
 export type MineTab = 'stories' | 'diaries' | 'bookmarks' | 'album' | 'inbox';
 
 type Page =
@@ -118,8 +117,8 @@ const newRequestId = () => {
 };
 const PHOTO_LINE = /^오늘의 풍경을 사진 \d+장에 담았어요 📸$/;
 
-const LIST_TITLES: Record<'today' | 'popular', string> = { today: '🆕 오늘 꽂힌 책', popular: '💛 이번 주 많이 공감받은 책' };
-const listTitle = (l: LibraryList) => (l === 'today' || l === 'popular' ? LIST_TITLES[l] : `${SHELVES[l].emoji} ${SHELVES[l].name}`);
+const listTitle = (l: LibraryList) => `${BOOKCASES[l].emoji} ${BOOKCASES[l].name}`;
+const emptyDraft = (): TestimonyDraft => ({ title: '', parts: ['', '', ''], ref: '', step: 0 });
 const shortDate = (iso: string) => {
   const d = new Date(Date.parse(iso) + 9 * 3600_000);
   return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
@@ -127,9 +126,10 @@ const shortDate = (iso: string) => {
 const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
 
 /**
- * 📚 이야기 도서관 sheets, one modal with pages: a shelf list (paged), the book
+ * 📚 이야기 도서관 sheets, one modal with pages: the top (the two bookcases,
+ * the two ways to write, 나의 서재), a bookcase list (paged), the book
  * reader (공감, 책갈피, 신고, readers), 나의 서재 (my stories, my diaries,
- * bookmarks, 오늘 앨범), the ✍️ 쓰는 책상, the guided testimony form (draft
+ * bookmarks, 오늘 앨범, 받은 편지), the guided testimony form (draft
  * autosaved on the server) and the 📔 오늘의 일기 editor. Every text is set
  * with textContent; the server decides who may see what.
  */
@@ -143,7 +143,7 @@ export class LibraryView {
   private listPage = 0;
   private hasMore = false;
   private story: StoryDetail | null = null;
-  private draft: TestimonyDraft = { title: '', parts: ['', '', ''], shelf: null, ref: '', step: 0 };
+  private draft: TestimonyDraft = emptyDraft();
   private draftTimer = 0;
   private draftSavedAt: string | null = null;
   private diary: DiaryDraft | null = null;
@@ -219,9 +219,10 @@ export class LibraryView {
     } else this.modal.close();
   }
 
-  openShelf(shelf: LibraryList) {
+  /** A bookcase's list. From the library top it can go back there; tapped in the hall it starts fresh. */
+  openShelf(shelf: LibraryList, fromTop = false) {
     this.listPage = 0;
-    this.show({ kind: 'shelf', shelf }, false);
+    this.show({ kind: 'shelf', shelf }, fromTop && this.modal.isOpen);
   }
 
   /** Open a book; `letter` scrolls to that letter's thread (notification taps). */
@@ -251,7 +252,7 @@ export class LibraryView {
     if (editId !== null) this.editLoaded = null;
     else if (this.editLoaded !== null) {
       // Leaving an edit: start the new story from the saved draft, not the edited book.
-      this.draft = { title: '', parts: ['', '', ''], shelf: null, ref: '', step: 0 };
+      this.draft = emptyDraft();
       this.draftDirty = false;
       this.editLoaded = null;
     }
@@ -310,8 +311,8 @@ export class LibraryView {
           await this.renderMine(body, page.tab);
           break;
         case 'desk':
-          sheet.replaceChildren(this.header('✍️ 쓰는 책상'), body, this.status);
-          this.renderDesk(body);
+          sheet.replaceChildren(this.header('📚 이야기 도서관'), body, this.status);
+          await this.renderDesk(body);
           break;
         case 'write':
           sheet.replaceChildren(this.header(page.editId ? '🙏 이야기 고치기' : '🙏 나의 하나님 이야기'), body, this.status);
@@ -333,14 +334,18 @@ export class LibraryView {
 
   // ------------------------------------------------------------------ lists
 
+  /** The two bookcases as tabs (switch without going back). */
   private chips(current: LibraryList): HTMLElement {
     const row = el('div', 'lib-chips');
     row.setAttribute('role', 'tablist');
-    const all: LibraryList[] = ['today', ...SHELF_IDS, 'popular'];
-    for (const id of all) {
-      const label = id === 'today' ? '🆕 오늘' : id === 'popular' ? '💛 이번 주' : `${SHELVES[id].emoji} ${SHELVES[id].name}`;
-      const b = button(label, current === id ? 'tab on' : 'tab', () => this.openShelf(id));
+    for (const id of BOOKCASE_IDS) {
+      const b = button(listTitle(id), current === id ? 'tab on' : 'tab', () => {
+        this.listPage = 0;
+        this.page = { kind: 'shelf', shelf: id };
+        void this.render();
+      });
       b.id = `lib-chip-${id}`;
+      b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', String(current === id));
       row.append(b);
     }
@@ -350,7 +355,7 @@ export class LibraryView {
   private bookCard(s: StoryItem): HTMLElement {
     const card = button('', `lib-book${s.read ? ' read' : ''}${s.hidden ? ' hidden-book' : ''}`, () => this.openStory(s.id));
     card.dataset.id = String(s.id);
-    const spine = el('span', `lib-spine shelf-${s.shelf}`);
+    const spine = el('span', `lib-spine kind-${s.kind}`);
     spine.setAttribute('aria-hidden', 'true');
     const text = el('span', 'lib-book-text');
     text.append(el('span', 'lib-book-title', s.title));
@@ -374,21 +379,14 @@ export class LibraryView {
   }
 
   private async renderShelf(body: HTMLElement, shelf: LibraryList) {
-    body.append(this.chips(shelf));
-    if (shelf !== 'today' && shelf !== 'popular') body.append(el('p', 'lib-blurb', SHELVES[shelf].blurb));
+    body.append(this.chips(shelf), el('p', 'lib-blurb', BOOKCASES[shelf].blurb));
     const list = el('div', 'lib-list');
     list.id = 'lib-list';
     body.append(list);
-    if (shelf === 'today' || shelf === 'popular') {
-      const r = await api<{ items: StoryItem[] }>('GET', `/api/library/${shelf}`);
-      this.items = r.items;
-      this.hasMore = false;
-    } else {
-      const r = await api<{ items: StoryItem[]; hasMore: boolean }>('GET', `/api/library/shelves/${shelf}?page=${this.listPage}`);
-      this.items = this.listPage === 0 ? r.items : [...this.items, ...r.items];
-      this.hasMore = r.hasMore;
-    }
-    if (!this.items.length) list.append(el('p', 'book-none', shelf === 'popular' ? '이번 주에 공감받은 책이 아직 없어요.' : '아직 꽂힌 책이 없어요. 첫 이야기를 꽂아 보세요.'));
+    const r = await api<{ items: StoryItem[]; hasMore: boolean }>('GET', `/api/library/shelves/${shelf}?page=${this.listPage}`);
+    this.items = this.listPage === 0 ? r.items : [...this.items, ...r.items];
+    this.hasMore = r.hasMore;
+    if (!this.items.length) list.append(el('p', 'book-none', shelf === 'diary' ? '아직 꽂힌 일기가 없어요. 오늘 하루를 일기로 꽂아 보세요.' : '아직 꽂힌 이야기가 없어요. 첫 이야기를 꽂아 보세요.'));
     for (const s of this.items) list.append(this.bookCard(s));
     if (this.hasMore) {
       const more = button('더 보기', '', () => {
@@ -399,11 +397,18 @@ export class LibraryView {
       body.append(more);
     }
     const actions = el('div', 'lib-actions');
-    const write = button('✍️ 이야기 쓰기', 'primary', () => this.openWrite());
-    write.id = 'lib-write';
+    if (shelf === 'diary') {
+      const d = button('📔 오늘 일기 쓰기', 'primary', () => this.openDiary());
+      d.id = 'lib-diary';
+      actions.append(d);
+    } else {
+      const write = button('✍️ 하나님 이야기 쓰기', 'primary', () => this.openWrite());
+      write.id = 'lib-write';
+      actions.append(write);
+    }
     const mine = button('📚 나의 서재', '', () => this.openMine());
     mine.id = 'lib-mine';
-    actions.append(write, mine);
+    actions.append(mine);
     body.append(actions);
   }
 
@@ -423,7 +428,7 @@ export class LibraryView {
       paper.append(n);
     }
     const head = el('header', 'lib-reader-head');
-    head.append(el('p', 'lib-reader-shelf', `${SHELVES[s.shelf].emoji} ${SHELVES[s.shelf].name} · ${s.kind === 'diary' ? koreanDate(s.date) : shortDate(s.createdAt)}`));
+    head.append(el('p', 'lib-reader-shelf', `${listTitle(s.kind)} · ${s.kind === 'diary' ? koreanDate(s.date) : shortDate(s.createdAt)}`));
     head.append(el('h3', 'lib-story-title', s.title));
     const by = el('p', 'lib-story-by');
     by.append(el('span', 'lib-author', s.visibility === 'anonymous' && !s.mine ? '익명' : s.author));
@@ -954,7 +959,7 @@ export class LibraryView {
     body.append(list);
     const actions = el('div', 'lib-actions');
     if (tab === 'stories') {
-      const w = button('✍️ 이야기 쓰기', 'primary', () => this.openWrite());
+      const w = button('✍️ 하나님 이야기 쓰기', 'primary', () => this.openWrite());
       w.id = 'lib-write';
       actions.append(w);
     } else if (tab === 'diaries') {
@@ -1040,21 +1045,42 @@ export class LibraryView {
 
   // ------------------------------------------------------------------ 쓰는 책상
 
-  private renderDesk(body: HTMLElement) {
-    body.append(el('p', 'settings-note', '조용한 책상에 앉아 이야기를 남겨 보세요.'));
-    const list = el('div', 'settings-menu lib-desk');
-    const item = (id: string, icon: string, label: string, hint: string, fn: () => void) => {
-      const b = button('', 'settings-item', fn);
-      b.id = id;
-      const t = el('span', 'settings-item-text');
-      t.append(el('span', 'settings-item-label', label), el('span', 'settings-item-hint', hint));
-      b.append(el('span', 'settings-item-icon', icon), t, el('span', 'settings-item-chev', '›'));
-      list.append(b);
+  /**
+   * The library's top (the ✍️ 쓰는 책상 opens it too): the two bookcases, each
+   * with its way to write, and 나의 서재.
+   */
+  private async renderDesk(body: HTMLElement) {
+    const counts = await api<{ shelves: BookcaseCounts }>('GET', '/api/library/shelves')
+      .then((r) => r.shelves)
+      .catch(() => null);
+    const cases = el('div', 'lib-cases');
+    const write: Record<LibraryList, [string, string, () => void]> = {
+      testimony: ['lib-desk-write', '✍️ 하나님 이야기 쓰기', () => this.openWrite()],
+      diary: ['lib-desk-diary', '📔 오늘 일기 쓰기', () => this.openDiary()],
     };
-    item('lib-desk-write', '🙏', '나의 하나님 이야기 쓰기', '세 가지 질문을 따라 간증을 써요', () => this.openWrite());
-    item('lib-desk-diary', '📔', '오늘 일기 쓰기', '오늘의 발자취로 일기가 써져요. 고치고 한 줄 덧붙여요', () => this.openDiary());
-    item('lib-desk-mine', '📚', '나의 서재', '내 이야기, 내 일기, 책갈피, 오늘 앨범', () => this.openMine());
-    item('lib-desk-today', '🆕', '오늘 꽂힌 책', '오늘 도서관에 새로 꽂힌 책', () => this.openShelf('today'));
+    for (const id of BOOKCASE_IDS) {
+      const c = BOOKCASES[id];
+      const card = el('section', `lib-case kind-${id}`);
+      const open = button('', 'lib-case-open', () => this.openShelf(id, true));
+      open.id = `lib-case-${id}`;
+      const text = el('span', 'settings-item-text');
+      const n = counts?.[id];
+      text.append(el('span', 'settings-item-label', `${c.name} 책장${n ? ` · ${n}권` : ''}`), el('span', 'settings-item-hint', c.blurb));
+      open.append(el('span', 'settings-item-icon', c.emoji), text, el('span', 'settings-item-chev', '›'));
+      const [wid, label, fn] = write[id];
+      const w = button(label, id === 'testimony' ? 'primary' : '', fn);
+      w.id = wid;
+      card.append(open, w);
+      cases.append(card);
+    }
+    body.append(cases);
+    const list = el('div', 'settings-menu lib-desk');
+    const mine = button('', 'settings-item', () => this.openMine());
+    mine.id = 'lib-desk-mine';
+    const t = el('span', 'settings-item-text');
+    t.append(el('span', 'settings-item-label', '나의 서재'), el('span', 'settings-item-hint', '내 이야기와 일기, 책갈피, 오늘 앨범, 받은 편지'));
+    mine.append(el('span', 'settings-item-icon', '📚'), t, el('span', 'settings-item-chev', '›'));
+    list.append(mine);
     body.append(list);
   }
 
@@ -1124,13 +1150,13 @@ export class LibraryView {
     if (editId && this.editLoaded !== editId) {
       const s = await api<StoryDetail>('GET', `/api/library/stories/${editId}`);
       this.editLoaded = editId;
-      this.draft = { title: s.title, parts: [...s.parts, '', '', ''].slice(0, 3), shelf: s.shelf === 'diary' ? null : s.shelf, ref: s.ref ?? '', step: 0 };
+      this.draft = { title: s.title, parts: [...s.parts, '', '', ''].slice(0, 3), ref: s.ref ?? '', step: 0 };
       this.visibility = s.visibility;
       this.groupId = s.groupId;
     } else if (!editId) {
       const d = await api<{ draft: TestimonyDraft | null; updatedAt: string | null }>('GET', '/api/library/draft').catch(() => ({ draft: null, updatedAt: null }));
       if (d.draft && !this.draftDirty) {
-        this.draft = { title: d.draft.title ?? '', parts: [...(d.draft.parts ?? []), '', '', ''].slice(0, 3), shelf: d.draft.shelf ?? null, ref: d.draft.ref ?? '', step: d.draft.step ?? 0 };
+        this.draft = { title: d.draft.title ?? '', parts: [...(d.draft.parts ?? []), '', '', ''].slice(0, 3), ref: d.draft.ref ?? '', step: d.draft.step ?? 0 };
         this.draftSavedAt = d.updatedAt;
       }
       if (!this.visibilityTouched) this.visibility = 'public';
@@ -1199,17 +1225,7 @@ export class LibraryView {
         d.title = title.value;
         this.scheduleDraft();
       });
-      body.append(el('p', 'lib-label', '제목'), title, el('p', 'lib-label', '어느 서가에 꽂을까요?'));
-      const shelves = el('div', 'lib-chips');
-      for (const id of TESTIMONY_SHELVES) {
-        const b = button(`${SHELVES[id].emoji} ${SHELVES[id].name}`, d.shelf === id ? 'chip on' : 'chip', () => {
-          d.shelf = id;
-          for (const c of shelves.children) c.classList.toggle('on', c === b);
-          this.scheduleDraft();
-        });
-        b.id = `lib-shelf-${id}`;
-        shelves.append(b);
-      }
+      body.append(el('p', 'lib-label', '제목'), title);
       const ref = el('input', 'lib-input');
       ref.id = 'lib-ref';
       ref.placeholder = '관련 성경 구절 (선택, 예: 시편 23:1-3)';
@@ -1218,23 +1234,22 @@ export class LibraryView {
         d.ref = ref.value;
         this.scheduleDraft();
       });
-      body.append(shelves, el('p', 'lib-label', '관련 성경 구절 (선택)'), ref);
+      body.append(el('p', 'lib-label', '관련 성경 구절 (선택)'), ref);
       const picker = this.visibilityPicker('익명 공개는 다른 분께 "익명의 성도"로 보여요. 모임은 그 모임 사람만, 나만은 나만 볼 수 있어요.');
       picker.addEventListener('click', () => (this.visibilityTouched = true));
       body.append(picker, counter);
     }
     const publish = async (confirmPersonal: boolean) => {
-      if (!d.shelf) return this.say('꽂을 서가를 골라 주세요.');
       try {
-        const payload = { title: d.title, parts: d.parts, shelf: d.shelf, ref: d.ref, visibility: this.visibility, groupId: this.groupId, confirmPersonal };
+        const payload = { title: d.title, parts: d.parts, ref: d.ref, visibility: this.visibility, groupId: this.groupId, confirmPersonal };
         const s = editId ? await api<StoryDetail>('PUT', `/api/library/stories/${editId}`, payload) : await api<StoryDetail>('POST', '/api/library/stories', payload);
         window.clearTimeout(this.draftTimer);
         this.draftTimer = 0;
-        this.draft = { title: '', parts: ['', '', ''], shelf: null, ref: '', step: 0 };
+        this.draft = emptyDraft();
         this.draftDirty = false;
         this.visibilityTouched = false;
         this.lastPublished = s.id;
-        this.hooks.toast(editId ? '이야기를 고쳤어요.' : `📚 ${SHELVES[s.shelf].name} 서가에 이야기를 꽂았어요.`);
+        this.hooks.toast(editId ? '이야기를 고쳤어요.' : '📚 🙏 하나님 이야기 책장에 이야기를 꽂았어요.');
         this.hooks.changed();
         this.history = [];
         this.show({ kind: 'story', id: s.id }, false);
@@ -1435,7 +1450,7 @@ export class LibraryView {
           confirmPersonal,
         });
         this.lastPublished = s.id;
-        this.hooks.toast('📔 오늘의 일기를 발자취 서가에 꽂았어요.');
+        this.hooks.toast('📔 오늘의 일기를 일기 책장에 꽂았어요.');
         this.hooks.changed();
         this.history = [];
         this.show({ kind: 'story', id: s.id }, false);

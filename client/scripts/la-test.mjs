@@ -1,4 +1,4 @@
-// L-A test: 이야기 도서관 (shared interior, desks, books), 발자취, 📸 photos,
+// L-A test: 이야기 도서관 (shared interior, desks, the two bookcases), 발자취, 📸 photos,
 // 🙏 testimonies, 📔 the template diary, 공감/책갈피/readers, reports + admin,
 // the personal-info warning, export/deletion (incl. photo files), and the
 // worship player inside the library with sheets open.
@@ -207,6 +207,8 @@ function bigWebp() {
 
 let browser;
 const shotPath = (name) => resolve(shotDir, `la-${name}.png`);
+/** Screenshots of the two-bookcase library (docs/screenshots/lib2-*). */
+const lib2Path = (name) => resolve(shotDir, `lib2-${name}.png`);
 try {
   rmSync(SHOTS, { recursive: true, force: true });
   mkdirSync(SHOTS, { recursive: true });
@@ -240,10 +242,10 @@ try {
   const T = {};
   if (run('api') || run('day') || run('account') || run('library')) {
     step('testimony api');
-    const base = { title: '광야에서 들은 소리', parts: ['몹시 힘든 한 해였어요. 일도 사람도 다 떠났어요.', '새벽에 시편을 읽다가 울었어요.', '이제는 매일 아침 감사로 시작해요.'], shelf: 'wilderness' };
+    // No shelf (topic) any more: two bookcases, testimonies all go to 🙏 하나님 이야기.
+    const base = { title: '광야에서 들은 소리', parts: ['몹시 힘든 한 해였어요. 일도 사람도 다 떠났어요.', '새벽에 시편을 읽다가 울었어요.', '이제는 매일 아침 감사로 시작해요.'] };
     check('guest cannot write (401)', (await guest.json('POST', '/api/library/stories', { ...base, visibility: 'public' })).status === 401);
     const bad = [
-      [{ ...base, shelf: 'diary', visibility: 'public' }, 400, 'diary is not a testimony shelf'],
       [{ ...base, parts: ['짧', '', ''], visibility: 'public' }, 400, 'too short'],
       [{ ...base, parts: ['가'.repeat(1500), '나'.repeat(1501), ''], visibility: 'public' }, 400, '> 3000 chars'],
       [{ ...base, parts: ['a', 'b'], visibility: 'public' }, 400, 'two parts'],
@@ -258,23 +260,30 @@ try {
     const pub = await A.json('POST', '/api/library/stories', { ...base, ref: '  요한복음   3:16 ', visibility: 'public' });
     T.pub = pub.data.id;
     check('public testimony: ref normalised and verse text from the Bible file', pub.status === 201 && pub.data.ref === '요한복음 3:16' && /하나님이 세상을/.test(pub.data.verse ?? ''), `${pub.status} ${pub.data?.ref} ${pub.data?.verse?.slice(0, 20)}`);
+    // An older client still sends a topic: accepted, and ignored.
     T.group = (await A.json('POST', '/api/library/stories', { ...base, title: '모임 이야기', shelf: 'answer', visibility: 'group', groupId: g.id })).data.id;
-    T.anon = (await A.json('POST', '/api/library/stories', { ...base, title: '익명으로 쓰는 감사', shelf: 'thanks', visibility: 'anonymous' })).data.id;
-    T.priv = (await A.json('POST', '/api/library/stories', { ...base, title: '나만 보는 기도', shelf: 'first', visibility: 'private' })).data.id;
-    check('each visibility published', [T.pub, T.group, T.anon, T.priv].every(Number.isInteger), JSON.stringify(T));
+    T.anon = (await A.json('POST', '/api/library/stories', { ...base, title: '익명으로 쓰는 감사', visibility: 'anonymous' })).data.id;
+    T.priv = (await A.json('POST', '/api/library/stories', { ...base, title: '나만 보는 기도', visibility: 'private' })).data.id;
+    check('each visibility published (no shelf needed)', [T.pub, T.group, T.anon, T.priv].every(Number.isInteger), JSON.stringify(T));
+    check("new testimonies carry no topic (stored as 'story', also when an old client sends one)", count("SELECT COUNT(*) n FROM stories WHERE kind = 'testimony' AND shelf = 'story'") === 4);
+    check('book JSON has no shelf/topic field', !('shelf' in pub.data) && !('shelf' in (await A.json('GET', `/api/library/stories/${T.group}`)).data));
 
     const see = async (agent, id) => (await agent.json('GET', `/api/library/stories/${id}`)).status;
     check('guest: public 200, group 404, anonymous 200, private 404', (await see(guest, T.pub)) === 200 && (await see(guest, T.group)) === 404 && (await see(guest, T.anon)) === 200 && (await see(guest, T.priv)) === 404);
     check('member B sees the group book', (await see(B, T.group)) === 200);
     check('non-member C: group 404, private 404', (await see(C, T.group)) === 404 && (await see(C, T.priv)) === 404);
     check('author A sees all four', (await Promise.all([T.pub, T.group, T.anon, T.priv].map((id) => see(A, id)))).every((s) => s === 200));
-    const shelfC = await C.json('GET', '/api/library/shelves/answer');
-    check('shelf list (C): no group book', shelfC.status === 200 && !shelfC.data.items.some((i) => i.id === T.group));
-    const shelfB = await B.json('GET', '/api/library/shelves/answer');
-    check('shelf list (B): group book listed with its group', shelfB.data.items.some((i) => i.id === T.group && i.group === '새벽 모임'));
+    const shelfC = await C.json('GET', '/api/library/shelves/testimony');
+    check('🙏 bookcase list (C): public + anonymous, no group or private book', shelfC.status === 200 && shelfC.data.items.some((i) => i.id === T.pub) && shelfC.data.items.some((i) => i.id === T.anon) && !shelfC.data.items.some((i) => i.id === T.group || i.id === T.priv));
+    const shelfB = await B.json('GET', '/api/library/shelves/testimony');
+    check('🙏 bookcase list (B): group book listed with its group', shelfB.data.items.some((i) => i.id === T.group && i.group === '새벽 모임'));
+    const shelfA = (await A.json('GET', '/api/library/shelves/testimony')).data.items.map((i) => i.id);
+    check('🙏 bookcase list: every visible testimony, newest first', JSON.stringify(shelfA) === JSON.stringify([T.priv, T.anon, T.group, T.pub]), JSON.stringify(shelfA));
+    check('📔 bookcase list: diaries only (none yet)', (await A.json('GET', '/api/library/shelves/diary')).data.items.length === 0);
+    check('old topic shelves and 오늘/이번 주 lists are gone (404)', (await A.json('GET', '/api/library/shelves/answer')).status === 404 && (await A.json('GET', '/api/library/today')).status === 404 && (await A.json('GET', '/api/library/popular')).status === 404);
     const countsC = (await C.json('GET', '/api/library/shelves')).data.shelves;
     const countsA = (await A.json('GET', '/api/library/shelves')).data.shelves;
-    check('shelf counts follow visibility (C 0 on 기도 응답, A 1)', countsC.answer === 0 && countsA.answer === 1 && countsA.first === 1 && countsC.first === 0, `${JSON.stringify(countsC)} / ${JSON.stringify(countsA)}`);
+    check('bookcase counts: exactly 🙏 testimony + 📔 diary, following visibility (C 2, A 4)', JSON.stringify(Object.keys(countsA).sort()) === '["diary","testimony"]' && countsC.testimony === 2 && countsA.testimony === 4 && countsA.diary === 0, `${JSON.stringify(countsC)} / ${JSON.stringify(countsA)}`);
 
     // Anonymous deep scan: nothing that could identify A reaches anyone else.
     // No account ids anywhere; and wherever the anonymous book appears (detail or any list), not A's nickname.
@@ -283,7 +292,7 @@ try {
     const scans = [];
     let seenAnon = 0;
     for (const [who, agent] of [['guest', guest], ['C', C], ['B', B]]) {
-      for (const path of [`/api/library/stories/${T.anon}`, '/api/library/shelves/thanks', '/api/library/today', '/api/library/popular', '/api/library/shelves']) {
+      for (const path of [`/api/library/stories/${T.anon}`, '/api/library/shelves/testimony', '/api/library/shelves/testimony?page=0', '/api/library/shelves']) {
         const r = await agent.json('GET', path);
         if (idLeak(r.text)) scans.push(`${who} ${path} (id)`);
         for (const it of anonItems(r.data)) {
@@ -299,9 +308,18 @@ try {
     const anonC = (await C.json('GET', `/api/library/stories/${T.anon}`)).data;
     check('others see 익명의 성도', anonC.author === P.ANONYMOUS_NAME && anonC.mine === false);
 
-    // Edit and delete.
+    // Edit and delete. A book from before the two bookcases keeps its old topic in the DB.
+    {
+      const w = new Database(DB);
+      w.prepare("UPDATE stories SET shelf = 'wilderness' WHERE id = ?").run(T.pub);
+      w.close();
+    }
     const edit = await A.json('PUT', `/api/library/stories/${T.pub}`, { ...base, title: '광야에서 들은 세미한 소리', visibility: 'public' });
     check('author edits a testimony', edit.status === 200 && edit.data.title === '광야에서 들은 세미한 소리');
+    const legacy = db();
+    const kept = legacy.prepare('SELECT shelf FROM stories WHERE id = ?').get(T.pub).shelf;
+    legacy.close();
+    check('an old book keeps its topic in the DB after editing, and still lists in 🙏', kept === 'wilderness' && (await C.json('GET', '/api/library/shelves/testimony')).data.items.some((i) => i.id === T.pub), kept);
     check('others cannot edit (404)', (await B.json('PUT', `/api/library/stories/${T.pub}`, { ...base, visibility: 'public' })).status === 404);
     check('others cannot delete (404)', (await B.json('DELETE', `/api/library/stories/${T.priv}`)).status === 404);
     check('author deletes', (await A.json('DELETE', `/api/library/stories/${T.priv}`)).status === 200 && (await see(A, T.priv)) === 404);
@@ -318,10 +336,10 @@ try {
     check('stories: 5 per day (6th → 429, deleted ones still count)', sixth.status === 429, `${sixth.status}`);
 
     // Draft autosave (one per user).
-    const d1 = await C.json('PUT', '/api/library/draft', { draft: { title: '쓰다 만', parts: ['처음', '', ''], shelf: 'first', ref: '', step: 1 } });
+    const d1 = await C.json('PUT', '/api/library/draft', { draft: { title: '쓰다 만', parts: ['처음', '', ''], ref: '', step: 1 } });
     await C.json('PUT', '/api/library/draft', { draft: { title: '쓰다 만 이야기', parts: ['처음 만난 날', '', ''], shelf: 'first', ref: '', step: 1 } });
     const d2 = await C.json('GET', '/api/library/draft');
-    check('draft: saved server-side, one per user (latest wins)', d1.status === 200 && d2.data.draft.title === '쓰다 만 이야기' && count('SELECT COUNT(*) n FROM story_drafts WHERE user_id = ?', C.id) === 1);
+    check('draft: saved server-side, one per user (latest wins), no shelf kept', d1.status === 200 && d2.data.draft.title === '쓰다 만 이야기' && !('shelf' in d2.data.draft) && count('SELECT COUNT(*) n FROM story_drafts WHERE user_id = ?', C.id) === 1);
 
     // 공감, 책갈피, readers.
     const r1 = await B.json('POST', `/api/library/stories/${T.pub}/reactions`, { type: 'grace' });
@@ -342,8 +360,8 @@ try {
     await guest.json('GET', `/api/library/stories/${T.pub}`);
     const readers = (await guest.json('GET', `/api/library/stories/${T.pub}`)).data.readers;
     check('📖 readers: unique and idempotent (B twice, C once; author and guests not counted) = 2', readers === 2, `${readers}`);
-    const listB = (await B.json('GET', '/api/library/shelves/wilderness')).data.items.find((i) => i.id === T.pub);
-    const listD = (await D.json('GET', '/api/library/shelves/wilderness')).data.items.find((i) => i.id === T.pub);
+    const listB = (await B.json('GET', '/api/library/shelves/testimony')).data.items.find((i) => i.id === T.pub);
+    const listD = (await D.json('GET', '/api/library/shelves/testimony')).data.items.find((i) => i.id === T.pub);
     check('reading state per viewer (B: read, D: new)', listB?.read === true && listD?.read === false);
 
     // Reports → auto-hide → admin.
@@ -550,7 +568,6 @@ try {
         await s.json('POST', '/api/library/stories', {
           title: titles[i % titles.length],
           parts: ['그때는 앞이 보이지 않았어요.', '조용히 기도하던 밤, 마음에 평안이 찾아왔어요.', '지금은 하루하루를 감사로 시작해요.'],
-          shelf: P.TESTIMONY_SHELVES[i % 5],
           visibility: i % 4 === 3 ? 'anonymous' : 'public',
         });
       }
@@ -623,14 +640,21 @@ try {
     const taken = await pa.evaluate(() => document.getElementById('action-btn').textContent);
     check('taken chair is not offered to A', !/책상에 앉아/.test(taken) || (await debug(pa)).net.desks[0] === bId, taken);
 
-    step('books on shelves');
+    step('books in the two bookcases');
     const countsA = (await A.json('GET', '/api/library/shelves')).data.shelves;
     await until(pa, () => !!window.__WORLDS_DEBUG__.la.counts, null, 10000);
     const books = (await la(pa)).books;
-    check('3D spines = this viewer\'s books per shelf', ['first', 'answer', 'wilderness', 'thanks', 'word', 'diary'].every((k) => books[k] === Math.min(countsA[k], 72)), `${JSON.stringify(books)} vs ${JSON.stringify(countsA)}`);
+    check('exactly two bookcases in the hall (🙏 testimony, 📔 diary), no 오늘 꽂힌 책 table', JSON.stringify(Object.keys(books).sort()) === '["diary","testimony"]', JSON.stringify(books));
+    check('3D spines = this viewer\'s books per bookcase', ['testimony', 'diary'].every((k) => books[k] === Math.min(countsA[k], 160)) && books.testimony > 0, `${JSON.stringify(books)} vs ${JSON.stringify(countsA)}`);
     const booksB = (await la(pb)).books;
     const countsB = (await B.json('GET', '/api/library/shelves')).data.shelves;
-    check('…and for B (different visibility)', ['answer', 'wilderness', 'thanks'].every((k) => booksB[k] === countsB[k]), `${JSON.stringify(booksB)} vs ${JSON.stringify(countsB)}`);
+    check('…and for B (different visibility)', ['testimony', 'diary'].every((k) => booksB[k] === countsB[k]) && countsB.testimony !== countsA.testimony, `${JSON.stringify(booksB)} vs ${JSON.stringify(countsB)}`);
+    // The hall with its two bookcases (wide view from the door side).
+    await teleport(pa, { x: 0, z: 0.4 });
+    await pa.evaluate(() => window.__WORLDS_TEST__.face(Math.PI));
+    await pa.evaluate(() => window.__WORLDS_TEST__.view(0, 0.32, 4));
+    await sleep(1800);
+    await pa.screenshot({ path: lib2Path('interior-two-bookcases') });
     // Interior screenshot: two players, one seated reading.
     await teleport(pa, { x: P.DESKS[0].x + 1.35, z: P.DESKS[0].z + 0.2 });
     await pa.evaluate(() => window.__WORLDS_TEST__.face(-Math.PI / 2));
@@ -638,28 +662,75 @@ try {
     await sleep(1500);
     await pa.screenshot({ path: shotPath('interior-two-players') });
 
-    // Shelf list via the action button (tap-equivalent), on the phone.
-    step('shelf list (phone)');
+    // Bookcase list via the action button (tap-equivalent), on the phone.
+    step('bookcase list (phone)');
     await pb.tap('#action-btn'); // stand up
     await until(pb, () => window.__WORLDS_DEBUG__.net.seat === -1);
-    const front = lib.fronts.wilderness;
+    check('fronts: exactly the two bookcases', JSON.stringify(Object.keys(lib.fronts).sort()) === '["diary","testimony"]', JSON.stringify(lib.fronts));
+    const front = lib.fronts.testimony;
     await teleport(pb, front);
-    await until(pb, () => /광야에서 보기/.test(document.getElementById('action-btn').textContent));
+    await until(pb, () => /하나님 이야기 책장 보기/.test(document.getElementById('action-btn').textContent));
     await pb.tap('#action-btn');
     await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'shelf' && window.__WORLDS_DEBUG__.la.view.items.length > 0, null, 15000);
     const v = (await la(pb)).view;
-    check('shelf list opens from the shelf (광야에서) with reading state', v.list === 'wilderness' && v.items.some((i) => i.id === T.pub && i.read === true), JSON.stringify(v.items));
+    const apiPage = (await B.json('GET', '/api/library/shelves/testimony')).data;
+    const pick = (items) => JSON.stringify(items.map((i) => [i.id, i.read]));
+    check(
+      '🙏 하나님 이야기 list opens from its bookcase: every visible testimony, newest first (paged), with reading state',
+      v.list === 'testimony' && pick(v.items) === pick(apiPage.items) && v.hasMore === apiPage.hasMore && apiPage.hasMore && v.items.length === 20,
+      `${pick(v.items)} vs ${pick(apiPage.items)}`,
+    );
+    // Page 2 (더 보기) reaches the older books, including the one B read.
+    await pb.tap('#lib-more');
+    await until(pb, () => window.__WORLDS_DEBUG__.la.view.items.length > 20, null, 10000);
+    check('더 보기 loads the next page (B\'s read book shows as read)', (await la(pb)).view.items.some((i) => i.id === T.pub && i.read === true));
+    await pb.evaluate(() => (document.querySelector('.overlay.shown .sheet').scrollTop = 0));
+    check('the list offers ✍️ 하나님 이야기 쓰기 and 나의 서재', (await pb.textContent('#lib-write')).includes('하나님 이야기 쓰기') && (await pb.isVisible('#lib-mine')));
     await sleep(600);
     await pb.screenshot({ path: shotPath('shelf-list-phone') });
+    await pb.screenshot({ path: lib2Path('list-testimony-phone') });
+    // Switch to the 📔 일기 case from the same sheet.
+    await pb.tap('#lib-chip-diary');
+    await until(pb, () => window.__WORLDS_DEBUG__.la.view.list === 'diary', null, 10000);
+    check('📔 일기 tab: the diary list with 📔 오늘 일기 쓰기', (await pb.textContent('#lib-diary')).includes('오늘 일기 쓰기'));
     await pb.keyboard.press('Escape');
     await modalIs(pb, null);
+    await teleport(pb, lib.fronts.diary);
+    const diaryAction = await until(pb, () => /일기 책장 보기/.test(document.getElementById('action-btn').textContent), null, 8000).then(() => true, () => false);
+    check('standing at the 📔 bookcase offers 일기 책장 보기', diaryAction);
     // Tap a bookcase in the 3D view (ray pick).
     await pb.evaluate(() => window.__WORLDS_TEST__.view(Math.PI * 0.0, 0.35));
     await sleep(500);
-    const pos = await pb.evaluate(({ x, z }) => window.__WORLDS_TEST__.libraryScreen(x, 1.3, z - 1.1), front);
+    const pos = await pb.evaluate(({ x, z }) => window.__WORLDS_TEST__.libraryScreen(x, 1.3, z - 1.1), lib.fronts.diary);
     await pb.touchscreen.tap(pos.x, pos.y);
     await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'shelf', null, 8000).catch(() => undefined);
     check('tapping a bookcase opens its list', (await la(pb)).view.page === 'shelf', JSON.stringify(pos));
+    await pb.keyboard.press('Escape');
+    await modalIs(pb, null);
+
+    // The library top (also what the ✍️ 쓰는 책상 opens): two bookcases, two ways to write, 나의 서재.
+    step('library top (phone)');
+    await pb.evaluate(() => window.__WORLDS_TEST__.libraryOpen('desk'));
+    await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'desk' && document.getElementById('lib-case-testimony'), null, 10000);
+    const top = await pb.evaluate(() => ({
+      ids: [...document.querySelectorAll('.overlay.shown .lib-body button')].map((b) => b.id),
+      text: document.querySelector('.overlay.shown .sheet').textContent,
+    }));
+    check(
+      'library top: 🙏 / 📔 bookcases, ✍️ 하나님 이야기 쓰기, 📔 오늘 일기 쓰기, 나의 서재 and nothing else',
+      JSON.stringify(top.ids) === JSON.stringify(['lib-case-testimony', 'lib-desk-write', 'lib-case-diary', 'lib-desk-diary', 'lib-desk-mine']) &&
+        top.text.includes('하나님 이야기 쓰기') &&
+        top.text.includes('오늘 일기 쓰기') &&
+        !/오늘 꽂힌|공감받은|서가/.test(top.text),
+      JSON.stringify(top.ids),
+    );
+    await sleep(500);
+    await pb.screenshot({ path: lib2Path('sheet-top-phone') });
+    await pb.tap('#lib-case-diary');
+    await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'shelf' && window.__WORLDS_DEBUG__.la.view.list === 'diary', null, 10000);
+    await pb.tap('#lib-back');
+    await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'desk', null, 10000);
+    check('a bookcase opened from the top goes back to the top', true);
     await pb.keyboard.press('Escape');
     await modalIs(pb, null);
 
@@ -680,7 +751,7 @@ try {
     await pb.tap('#lib-next');
     await pb.waitForSelector('#lib-title');
     await pb.fill('#lib-title', '시편 23편이 찾아온 날');
-    await pb.tap('#lib-shelf-first');
+    check('no shelf picker in the testimony form', (await pb.locator('[id^="lib-shelf-"]').count()) === 0 && !(await pb.textContent('.overlay.shown .sheet')).includes('서가'));
     await pb.fill('#lib-ref', '시편 23:1');
     await pb.tap('#lib-vis-group');
     await pb.tap('#lib-publish');
@@ -691,7 +762,7 @@ try {
     await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'story', null, 10000);
     const published = (await la(pb)).view.lastPublished;
     const story = (await B.json('GET', `/api/library/stories/${published}`)).data;
-    check('그래도 올리기 → the testimony is on the 처음 만난 하나님 shelf, 모임 only, with 시편 23:1', story.shelf === 'first' && story.visibility === 'group' && story.ref === '시편 23:1' && story.parts.length === 3);
+    check('그래도 올리기 → the testimony is in the 🙏 하나님 이야기 case, 모임 only, with 시편 23:1', story.kind === 'testimony' && story.visibility === 'group' && story.ref === '시편 23:1' && story.parts.length === 3 && (await B.json('GET', '/api/library/shelves/testimony')).data.items[0]?.id === published);
     check('draft cleared after publishing', (await B.json('GET', '/api/library/draft')).data.draft === null);
     check('C (not in the group) cannot open it', (await C.json('GET', `/api/library/stories/${published}`)).status === 404);
     await pb.keyboard.press('Escape');
@@ -774,10 +845,10 @@ try {
   // ================================================================ admin list screenshot, ban
   if (run('api') || run('account')) {
     step('admin ban');
-    const cStory = await C.json('POST', '/api/library/stories', { title: '다솜의 이야기', parts: ['처음 교회에 간 날이었어요', '찬양이 마음을 울렸어요', '지금은 매주 기다려요'], shelf: 'first', visibility: 'public' });
+    const cStory = await C.json('POST', '/api/library/stories', { title: '다솜의 이야기', parts: ['처음 교회에 간 날이었어요', '찬양이 마음을 울렸어요', '지금은 매주 기다려요'], visibility: 'public' });
     for (const r of [A, B, R1]) await r.json('POST', `/api/library/stories/${cStory.data.id}/report`, { reason: 'spam' });
     await ADM.json('POST', `/api/admin/library/${cStory.data.id}`, { action: 'ban', days: 3 });
-    const banned = await C.json('POST', '/api/library/stories', { title: '금지 중', parts: ['쓸 수 없어야 해요 정말로', '', ''], shelf: 'first', visibility: 'public' });
+    const banned = await C.json('POST', '/api/library/stories', { title: '금지 중', parts: ['쓸 수 없어야 해요 정말로', '', ''], visibility: 'public' });
     check('admin 글쓰기 금지: C cannot write for 3 days (403)', banned.status === 403 && banned.data.error === 'story_banned');
     check('…nor publish a diary', (await C.json('POST', '/api/diary', { lines: ['금지'] })).status === 403);
     // Admin list screenshot (desktop admin browser).
@@ -817,7 +888,7 @@ try {
       await p.evaluate(() => window.__WORLDS_TEST__.worshipFold('open'));
       await until(p, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000).catch(() => undefined);
       const sheets = [
-        ['shelf', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('shelf', 'wilderness'))],
+        ['shelf', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('shelf', 'testimony'))],
         ['story', () => p.evaluate((id) => window.__WORLDS_TEST__.libraryOpen('story', id), T.pub)],
         ['mine', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('mine', 'album'))],
         ['write', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('write'))],

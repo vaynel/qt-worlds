@@ -4692,23 +4692,47 @@ body.touch #camera-btn {
   border-radius: 3px;
   background: #8c3b2e;
 }
-.lib-spine.shelf-answer {
+.lib-spine.kind-testimony {
   background: #c9a03a;
 }
-.lib-spine.shelf-wilderness {
-  background: #5f7fa6;
+.lib-spine.kind-diary {
+  background: #7d9a5a;
 }
-.lib-spine.shelf-thanks {
-  background: #d98a8a;
+/* Library top: the two bookcases, each with its way to write. */
+.lib-cases {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.lib-spine.shelf-word {
-  background: #e0b83c;
+.lib-case {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 4px 10px;
+  border-radius: 14px;
+  background: #fffdf7;
+  border: 1px solid rgba(176, 120, 72, 0.22);
+  border-left: 6px solid #c9a03a;
 }
-.lib-spine.shelf-first {
-  background: #6f9a58;
+.lib-case.kind-diary {
+  border-left-color: #7d9a5a;
 }
-.lib-spine.shelf-diary {
-  background: #a0503a;
+.lib-case-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.lib-case > button:not(.lib-case-open) {
+  align-self: flex-start;
+  margin-left: 12px;
+  min-height: 40px;
 }
 .lib-book-text {
   display: flex;
@@ -5656,4 +5680,345 @@ body.in-library .library-exit {
 .lib-letters,
 .lib-letter {
   scroll-margin-top: 72px;
+}
+
+/* =================== P1-3: phones held sideways (body.phone-land) =================== */
+/* main.ts sets body.phone-land on touch phones (not tablets) whose screen is
+   landscape. The screen is only ~360-412 px tall, so the portrait rules (player
+   docked above the sheet, chat under the HUD) leave no room. Instead:
+   - the HUD is one row (place card · clock · tools);
+   - the worship player lives in a column on the right, under the tool row;
+   - an open sheet takes the left part at full height and the HUD tool row stays
+     visible and tappable on the right, with the video (video only) under it;
+   - action + camera buttons sit at the bottom right, the campfire chat at the
+     bottom between the joystick and them;
+   - with the keyboard up there is no room for a 200 px video: WorshipPlayer is
+     told it is squeezed and pauses (resuming afterwards). */
+body.phone-land {
+  --land-top: calc(var(--safe-top) + 68px);
+  /* Right column with a sheet open: the tool row is 228 px wide. */
+  --land-tools-w: 228px;
+  --land-video-w: 228px;
+}
+@media (min-width: 900px) {
+  body.phone-land {
+    --land-video-w: 356px;
+  }
+}
+
+/* HUD: clock and tools side by side, so the right column starts higher. */
+body.phone-land .hud-right {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- the player in the world (no sheet) ---- */
+body.phone-land.in-world #worship.dock.mini {
+  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
+  bottom: auto;
+  right: var(--safe-right);
+  left: auto;
+  transform: none;
+}
+/* 펼침: video and the drawer (volume, song list) side by side, under the tool row. */
+body.phone-land.in-world.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
+  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 262px));
+  bottom: auto;
+  right: var(--safe-right);
+  left: auto;
+  transform: none;
+  width: 412px;
+}
+body.phone-land.in-world:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-body {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+body.phone-land.in-world.touch:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-frame {
+  flex: none;
+  width: 200px;
+  height: 200px;
+  aspect-ratio: auto;
+}
+body.phone-land.in-world:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-side {
+  flex: 1;
+  max-height: 200px;
+  overflow: hidden;
+}
+body.phone-land.in-world.touch:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-list {
+  max-height: 130px;
+}
+body.phone-land .worship-tab {
+  top: var(--land-top);
+}
+
+/* ---- action, camera, chat, chips ---- */
+body.phone-land #action-btn {
+  left: auto;
+  right: calc(var(--safe-right) + 52px);
+  bottom: var(--safe-bottom);
+  transform: none;
+}
+body.phone-land.touch #camera-btn,
+body.phone-land.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
+  right: var(--safe-right);
+  bottom: calc(var(--safe-bottom) + 3px);
+}
+/* 펼침 reaches down to the bottom: the two buttons stack left of it. */
+body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #action-btn {
+  right: calc(var(--safe-right) + 422px);
+}
+body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #camera-btn {
+  right: calc(var(--safe-right) + 422px);
+  bottom: calc(var(--safe-bottom) + 58px);
+}
+/* Campfire chat: bottom, right of the joystick and left of the action row. */
+:root body.phone-land.touch:not(.tablet) #chat {
+  top: auto;
+  right: auto;
+  left: calc(var(--safe-left) + 140px);
+  bottom: calc(var(--kb, 0px) + var(--safe-bottom));
+  width: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 140px - 232px));
+}
+:root body.phone-land.touch:not(.tablet) #chat-log {
+  max-height: clamp(22px, calc(var(--vvh, 100vh) - 300px), 96px);
+}
+/* Typing (keyboard up): the input first, a line or two of the log if it fits. */
+:root body.phone-land.touch.chatting:not(.tablet) .chat-head {
+  display: none;
+}
+:root body.phone-land.touch.chatting:not(.tablet) #chat-log {
+  max-height: clamp(0px, calc(var(--vvh, 100vh) - 150px), 96px);
+}
+body.phone-land.touch .voice-chip,
+body.phone-land.touch.chat-open .voice-chip {
+  top: calc(var(--safe-top) + 92px);
+  bottom: auto;
+}
+body.phone-land.touch .prop-dock {
+  top: calc(var(--safe-top) + 92px);
+}
+body.phone-land.touch .voice-chip:not([hidden]) ~ .prop-dock,
+body.phone-land.touch.chat-open .voice-chip:not([hidden]) ~ .prop-dock {
+  top: calc(var(--safe-top) + 138px);
+}
+/* One-off buttons and hints, clear of the right column. */
+body.phone-land #letter-btn,
+body.phone-land.touch.worship-mini #letter-btn {
+  top: calc(var(--safe-top) + 92px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+body.phone-land.touch #meditate-btn {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  bottom: calc(var(--safe-bottom) + 58px);
+}
+body.phone-land.touch .hint {
+  bottom: auto;
+  top: calc(var(--safe-top) + 92px);
+  left: calc(var(--safe-left) + 140px);
+  right: auto;
+  max-width: calc(100vw - var(--safe-left) - 140px - 240px);
+  text-align: left;
+}
+body.phone-land.touch.worship-on:not(.worship-mini) .hint {
+  display: none;
+}
+
+/* Very short views (browser bars in landscape): the video column reaches the
+   bottom, so action + camera stack left of it and the chat narrows. */
+@media (max-height: 349px) {
+  body.phone-land.in-world.touch.worship-on #action-btn {
+    right: calc(var(--safe-right) + 212px);
+  }
+  body.phone-land.in-world.touch.worship-on #camera-btn,
+  body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
+    right: calc(var(--safe-right) + 212px);
+    bottom: calc(var(--safe-bottom) + 58px);
+  }
+  :root body.phone-land.touch.worship-on:not(.tablet) #chat {
+    width: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 140px - 372px));
+  }
+}
+
+/* ---- a sheet open: sheet on the left, tool row + video on the right ---- */
+body.phone-land.overlay-open .overlay {
+  left: 0;
+  right: calc(var(--safe-right) + var(--land-tools-w) + 8px);
+  top: var(--vvtop, 0px);
+  height: var(--vvh, 100dvh);
+  padding: max(6px, env(safe-area-inset-top)) 0 max(6px, env(safe-area-inset-bottom)) var(--safe-left);
+  align-items: stretch;
+  justify-content: center;
+}
+body.phone-land.overlay-open.worship-on .overlay {
+  top: var(--vvtop, 0px);
+  height: var(--vvh, 100dvh);
+  right: calc(var(--safe-right) + var(--land-video-w) + 8px);
+}
+body.phone-land.overlay-open .overlay > .sheet:not(.login-prompt):not(.word-stage):not(.lantern-card) {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 16px;
+}
+body.phone-land.overlay-open .overlay > .sheet {
+  max-height: 100%;
+}
+/* World buttons on the right stay out of the way while a sheet is open. */
+body.phone-land.overlay-open #action-btn,
+body.phone-land.overlay-open #meditate-btn,
+body.phone-land.overlay-open #letter-btn {
+  visibility: hidden;
+}
+/* The clock gives way so the tool row alone fits the column. */
+body.phone-land.overlay-open .clock-card {
+  visibility: hidden;
+}
+/* The world player: video only (its controls come back when the sheet closes). */
+body.phone-land.overlay-open #worship.dock:not(.folded) {
+  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
+  bottom: auto;
+  left: auto;
+  right: var(--safe-right);
+  transform: none;
+  width: var(--land-video-w);
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+body.phone-land.overlay-open #worship.dock .worship-head,
+body.phone-land.overlay-open #worship.dock .worship-side,
+body.phone-land.overlay-open #worship.dock .worship-handle {
+  display: none;
+}
+body.phone-land.overlay-open #worship.dock .worship-frame {
+  width: var(--land-video-w);
+  height: 200px;
+  aspect-ratio: auto;
+  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
+}
+/* 골방 + a sheet (B1 room-sheet): the same column. */
+body.touch.phone-land:not(.tablet) #worship.room.room-sheet {
+  --room-sheet-top: min(var(--land-top), var(--vvh, 100vh) - 208px);
+  --room-sheet-w: var(--land-video-w);
+}
+
+/* ---- 골방 without a sheet: player right, room header and buttons bottom-left ---- */
+body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) {
+  left: auto;
+  right: var(--safe-right);
+  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 262px));
+  width: auto;
+}
+body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-body {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-frame {
+  flex: none;
+  width: 356px;
+  height: 200px;
+  aspect-ratio: auto;
+}
+body.phone-land.touch:not(.tablet) #worship.room.room-s:not(.mini):not(.room-sheet) .worship-frame {
+  width: 200px;
+}
+body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-side {
+  width: 76px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-roomsize {
+  flex-direction: column;
+  padding: 0;
+}
+body.phone-land.touch:not(.tablet) #worship.room.mini {
+  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
+}
+body.phone-land.touch .closet-head {
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 56px);
+  left: var(--safe-left);
+  right: auto;
+  max-width: min(300px, 30vw);
+}
+body.phone-land .closet-actions {
+  left: var(--safe-left);
+  transform: none;
+}
+
+/* Keyboard up on a sideways phone (~150-200 px left): the field being typed in
+   gets the room; step chips, the verse and paddings give way meanwhile. */
+body.land-typing .med-steps,
+body.land-typing .med-verse,
+body.land-typing .med-done,
+body.land-typing .lib-steps {
+  display: none;
+}
+body.land-typing .med-top,
+body.land-typing .book-top {
+  padding-top: 4px;
+  padding-bottom: 2px;
+}
+body.land-typing .med-body {
+  padding: 2px 12px;
+}
+body.land-typing .med-prompt {
+  display: none;
+}
+/* The field fills what is left between the header and the buttons. */
+body.land-typing .med-input {
+  min-height: 0;
+  height: max(44px, calc(var(--vvh, 100vh) - 132px));
+  resize: none;
+}
+body.land-typing .med-foot {
+  padding: 4px 12px;
+}
+body.land-typing .med-foot button {
+  min-height: 36px;
+  padding: 6px 14px;
+}
+
+/* 꾸미기 sideways: the preview on the left, tabs and options on the right
+   (the portrait stack left only a sliver for the options). */
+body.phone-land .sheet.look {
+  display: grid;
+  grid-template-columns: minmax(140px, 34%) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+body.phone-land .sheet.look > .book-top {
+  grid-column: 1 / -1;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+body.phone-land .sheet.look > .look-stage {
+  grid-column: 1;
+  grid-row: 2 / 5;
+  margin: 0 0 10px 12px;
+  min-height: 0;
+}
+body.phone-land.overlay-open .sheet.look .look-preview,
+body.phone-land.overlay-open.worship-on .sheet.look.drawing .look-preview {
+  height: 100%;
+  min-height: 0;
+}
+body.phone-land .sheet.look > .look-tabs {
+  grid-column: 2;
+  margin: 0 12px 4px;
+}
+body.phone-land .sheet.look > .look-body,
+body.phone-land .sheet.look > .look-foot {
+  grid-column: 2;
+}
+body.phone-land .sheet.look .look-swatches {
+  grid-template-columns: repeat(auto-fill, 40px);
 }

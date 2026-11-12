@@ -627,10 +627,9 @@ export class Api {
     // enforced in LibraryService); writing needs an account, a nickname and consent.
     const lib = d.library;
     const viewer = (user: SessionUser | null) => (user?.nickname ? user.id : null);
-    r('GET', '/api/library/shelves', ({ res, user }) => sendJson(res, 200, { shelves: lib.shelfCounts(viewer(user)) }));
-    r('GET', '/api/library/shelves/:shelf', ({ res, user, params, query }) => sendJson(res, 200, lib.list(viewer(user), params[0], query.get('page'))));
-    r('GET', '/api/library/today', ({ res, user }) => sendJson(res, 200, { items: lib.today(viewer(user)) }));
-    r('GET', '/api/library/popular', ({ res, user }) => sendJson(res, 200, { items: lib.popular(viewer(user)) }));
+    // Two bookcases: 'testimony' (🙏 하나님 이야기) and 'diary' (📔 일기).
+    r('GET', '/api/library/shelves', ({ res, user }) => sendJson(res, 200, { shelves: lib.bookcaseCounts(viewer(user)) }));
+    r('GET', '/api/library/shelves/:case', ({ res, user, params, query }) => sendJson(res, 200, lib.list(viewer(user), params[0], query.get('page'))));
     r('GET', '/api/library/mine', ({ res, user }) => sendJson(res, 200, lib.mine(this.signedIn(user).id)));
     r('GET', '/api/library/stories/:id', ({ res, user, params }) => sendJson(res, 200, lib.detail(id(params[0]), viewer(user), isAdmin(user, this.admins))));
     r('POST', '/api/library/stories', async ({ req, res, user }) => {

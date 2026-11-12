@@ -808,7 +808,7 @@ export class Room implements RoomEvents, ShopEvents {
 
   private sendLibrary(c: Client) {
     const lib = this.options.library;
-    if (lib) this.send(c, { t: 'library', shelves: lib.shelfCounts(c.userId !== null && c.accountName ? c.userId : null) });
+    if (lib) this.send(c, { t: 'library', shelves: lib.bookcaseCounts(c.userId !== null && c.accountName ? c.userId : null) });
   }
 
   private libraryTimer: NodeJS.Timeout | null = null;

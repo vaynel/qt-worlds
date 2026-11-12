@@ -9,10 +9,10 @@ import {
   LIBRARY_EXIT,
   LIBRARY_ROOM,
   LIBRARY_SPAWN,
-  SHELVES,
-  TESTIMONY_SHELVES,
-  type ShelfCounts,
-  type ShelfId,
+  BOOKCASES,
+  BOOKCASE_IDS,
+  type BookcaseCounts,
+  type BookcaseId,
 } from '../../../shared/protocol';
 import type { Ground } from '../entities/PlayerController';
 import type { CircleCollider } from './ChunkManager';
@@ -22,20 +22,25 @@ import { mulberry32 } from './random';
 
 const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 
-/** Books shown per shelf (4 boards x 18). More books than this still count; the shelf just looks full. */
-export const SHELF_CAPACITY = 72;
-const ROWS = 4;
+/** Spines shown per bookcase (5 boards x 32). More books than this still count; the case just looks full. */
+export const SHELF_CAPACITY = 160;
+const ROWS = 5;
 const PER_ROW = SHELF_CAPACITY / ROWS;
-const CASE_W = 2.4;
-const CASE_H = 2.5;
-const CASE_D = 0.5;
+const CASE_W = 4.4;
+const CASE_H = 3.1;
+const CASE_D = 0.55;
+/** Board spacing (5 rows of books under the top). */
+const ROW_H = 0.56;
+/** Where the two bookcases stand (north wall, either side of the hall's axis). */
+const CASE_X: Record<BookcaseId, number> = { testimony: -3.5, diary: 3.5 };
+const CASE_COLOR: Record<BookcaseId, number> = { testimony: 0xc9a03a, diary: 0x7d9a5a };
 const SPINE_COLORS = [0x8c3b2e, 0x2f5d7e, 0x4f7f5a, 0xc9a03a, 0x7d4f9e, 0xa0503a, 0x3f4f6e, 0x9a6a3a, 0x5f8f6b, 0xb04050, 0xe0c890, 0x6e4a30];
 
 /** What a tap or the action button can open inside the hall. */
-export type LibrarySpot = { kind: 'shelf'; shelf: ShelfId } | { kind: 'today' } | { kind: 'write' } | { kind: 'exit' };
+export type LibrarySpot = { kind: 'bookcase'; id: BookcaseId } | { kind: 'write' } | { kind: 'exit' };
 
 interface ShelfRig {
-  id: ShelfId;
+  id: BookcaseId;
   group: THREE.Group;
   books: THREE.InstancedMesh;
   label: THREE.Sprite | null;
@@ -47,9 +52,9 @@ interface ShelfRig {
 /**
  * 이야기 도서관 hall: its own scene (like the 골방) but shared — the local
  * player and everyone else inside walk around in this local frame (floor
- * y = 0, door in the south wall). Seven bookcases (five testimony shelves on
- * the north wall, the 발자취 서가 on the west wall and the 오늘 꽂힌 책 table),
- * two reading tables with chairs (seat kind 'desk'), the 쓰는 책상, warm lamps
+ * y = 0, door in the south wall). Two big bookcases on the north wall
+ * (🙏 하나님 이야기 and 📔 일기, one spine per visible book), two reading
+ * tables with chairs (seat kind 'desk'), the 쓰는 책상, warm lamps
  * and windows that follow the time of day. Walls between the camera and the
  * player are hidden (cut-away), so the third-person camera never looks at a wall.
  */
@@ -58,18 +63,16 @@ export class LibraryInterior implements Ground {
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
   private readonly colliders: CircleCollider[] = [];
-  private readonly shelves = new Map<ShelfId, ShelfRig>();
+  private readonly shelves = new Map<BookcaseId, ShelfRig>();
   private readonly walls: { group: THREE.Group; hidden: (c: THREE.Vector3) => boolean }[] = [];
   private readonly windowPanes: THREE.MeshBasicMaterial;
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly lamps: { light: THREE.PointLight; glow: THREE.MeshLambertMaterial; base: number }[] = [];
-  private readonly todayBooks: THREE.InstancedMesh;
-  private todayLabel: THREE.Sprite | null = null;
+  private writeLabel: THREE.Sprite | null = null;
   private readonly writeDesk = new THREE.Vector2(6.6, 4.2);
-  private readonly todaySpot = new THREE.Vector2(-5.8, 4.0);
   private readonly pickables: THREE.Object3D[] = [];
-  counts: ShelfCounts | null = null;
+  counts: BookcaseCounts | null = null;
 
   constructor() {
     const s = this.scene;
@@ -128,11 +131,8 @@ export class LibraryInterior implements Ground {
       this.mesh(new THREE.BoxGeometry(alongZ ? 0.12 : W * 2, 0.2, alongZ ? D * 2 : 0.12), trim, x, H - 0.1, z, 0, g);
     }
 
-    // Seven shelves: five testimony bookcases on the north wall, 발자취 서가 on the west wall.
-    TESTIMONY_SHELVES.forEach((id, i) => this.bookcase(id, (i - 2) * 3.1, -D + 0.38, 0, north));
-    this.bookcase('diary', -W + 0.38, -1.4, Math.PI / 2, west);
-    // 오늘 꽂힌 책: a slanted display table by the entrance.
-    this.todayBooks = this.todayTable();
+    // Two bookcases on the north wall: 🙏 하나님 이야기 (left) and 📔 일기 (right).
+    for (const id of BOOKCASE_IDS) this.bookcase(id, CASE_X[id], -D + 0.4, 0, north);
 
     // Reading tables with chairs and a green lamp each.
     for (const d of DESKS) this.readingTable(d.x, d.z);
@@ -168,20 +168,22 @@ export class LibraryInterior implements Ground {
     return m;
   }
 
-  private bookcase(id: ShelfId, x: number, z: number, yaw: number, parent: THREE.Group) {
+  private bookcase(id: BookcaseId, x: number, z: number, yaw: number, parent: THREE.Group) {
     const g = new THREE.Group();
     g.position.set(x, 0, z);
     g.rotation.y = yaw;
-    g.userData.spot = { kind: 'shelf', shelf: id } satisfies LibrarySpot;
+    g.userData.spot = { kind: 'bookcase', id } satisfies LibrarySpot;
     const wood = lam(0x7b5236);
     const board = lam(0x9a6a40);
     this.mesh(new THREE.BoxGeometry(CASE_W, CASE_H, 0.06), wood, 0, CASE_H / 2, -CASE_D / 2 + 0.03, 0, g);
-    for (const sx of [-1, 1]) this.mesh(new THREE.BoxGeometry(0.08, CASE_H, CASE_D), wood, (sx * (CASE_W - 0.08)) / 2, CASE_H / 2, 0, 0, g);
-    this.mesh(new THREE.BoxGeometry(CASE_W + 0.12, 0.1, CASE_D + 0.06), wood, 0, CASE_H + 0.05, 0, 0, g);
-    for (let r = 0; r <= ROWS; r++) this.mesh(new THREE.BoxGeometry(CASE_W - 0.1, 0.05, CASE_D - 0.04), board, 0, 0.12 + r * 0.58, 0, 0, g);
-    // A small coloured plaque per shelf.
-    const plaque = [0x8bbf4a, 0xc9a03a, 0x5f7fa6, 0xd9a3a3, 0xf2c94c, 0xa0503a][[...TESTIMONY_SHELVES, 'diary'].indexOf(id)] ?? 0xc9a03a;
-    this.mesh(new THREE.BoxGeometry(0.7, 0.16, 0.03), lam(plaque), 0, CASE_H + 0.2, CASE_D / 2 - 0.05, 0, g);
+    // Sides, a middle upright and a crown.
+    for (const sx of [-1, 1]) this.mesh(new THREE.BoxGeometry(0.1, CASE_H, CASE_D), wood, (sx * (CASE_W - 0.1)) / 2, CASE_H / 2, 0, 0, g);
+    this.mesh(new THREE.BoxGeometry(0.06, CASE_H - 0.1, CASE_D - 0.06), wood, 0, CASE_H / 2, 0, 0, g);
+    this.mesh(new THREE.BoxGeometry(CASE_W + 0.16, 0.12, CASE_D + 0.08), wood, 0, CASE_H + 0.06, 0, 0, g);
+    this.mesh(new THREE.BoxGeometry(CASE_W + 0.04, 0.12, CASE_D + 0.02), wood, 0, 0.06, 0, 0, g);
+    for (let r = 0; r <= ROWS; r++) this.mesh(new THREE.BoxGeometry(CASE_W - 0.12, 0.05, CASE_D - 0.04), board, 0, 0.12 + r * ROW_H, 0, 0, g);
+    // A coloured name board across the top (the label sprite says which one).
+    this.mesh(new THREE.BoxGeometry(1.6, 0.26, 0.04), lam(CASE_COLOR[id]), 0, CASE_H + 0.3, CASE_D / 2 - 0.04, 0, g);
     // Instanced spines, filled in setCounts().
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
@@ -199,32 +201,9 @@ export class LibraryInterior implements Ground {
     const fz = Math.cos(yaw);
     const rx = Math.cos(yaw);
     const rz = -Math.sin(yaw);
-    for (const t of [-0.9, -0.3, 0.3, 0.9]) this.colliders.push({ x: x + rx * t, z: z + rz * t, r: 0.36 });
-    this.shelves.set(id, { id, group: g, books, label: null, front: new THREE.Vector2(x + fx * 1.2, z + fz * 1.2), count: 0 });
-  }
-
-  private todayTable(): THREE.InstancedMesh {
-    const { x, y: z } = this.todaySpot;
-    const g = new THREE.Group();
-    g.position.set(x, 0, z);
-    g.rotation.y = Math.PI * 0.75;
-    g.userData.spot = { kind: 'today' } satisfies LibrarySpot;
-    const wood = lam(0x8a5a3b);
-    for (const [lx, lz] of [[-0.7, -0.35], [0.7, -0.35], [-0.7, 0.35], [0.7, 0.35]]) this.mesh(new THREE.BoxGeometry(0.08, 0.8, 0.08), wood, lx, 0.4, lz, 0, g);
-    const top = this.mesh(new THREE.BoxGeometry(1.7, 0.08, 0.95), lam(0xa8744c), 0, 0.85, 0, 0, g);
-    top.rotation.x = 0.22;
-    const geo = new THREE.BoxGeometry(0.26, 0.04, 0.34);
-    const mat = lam(0xffffff);
-    this.geometries.push(geo);
-    this.materials.push(mat);
-    const books = new THREE.InstancedMesh(geo, mat, 6);
-    books.count = 0;
-    books.name = 'books-today';
-    g.add(books);
-    this.scene.add(g);
-    this.pickables.push(g);
-    this.colliders.push({ x, z, r: 0.75 });
-    return books;
+    // Colliders every 0.6 m along the case (overlapping, so nobody slips behind it).
+    for (let t = -CASE_W / 2 + 0.3; t <= CASE_W / 2 - 0.29; t += 0.6) this.colliders.push({ x: x + rx * t, z: z + rz * t, r: 0.38 });
+    this.shelves.set(id, { id, group: g, books, label: null, front: new THREE.Vector2(x + fx * 1.3, z + fz * 1.3), count: 0 });
   }
 
   private readingTable(x: number, z: number) {
@@ -336,8 +315,8 @@ export class LibraryInterior implements Ground {
 
   // ------------------------------------------------------------------ books
 
-  /** One spine per visible story (capped at SHELF_CAPACITY), stable per shelf. */
-  setCounts(counts: ShelfCounts) {
+  /** One spine per visible story (capped at SHELF_CAPACITY), stable per bookcase. */
+  setCounts(counts: BookcaseCounts) {
     this.counts = counts;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -353,6 +332,8 @@ export class LibraryInterior implements Ground {
       for (let i = 0; i < n; i++) {
         const w = 0.07 + rand() * 0.045;
         const h = 0.3 + rand() * 0.16;
+        // Skip the middle upright.
+        if (x < 0.05 && x + w > -0.05) x = 0.06;
         if (col >= PER_ROW || x + w > CASE_W / 2 - 0.1) {
           row++;
           col = 0;
@@ -360,7 +341,7 @@ export class LibraryInterior implements Ground {
         }
         const lean = col === 0 && rand() < 0.3 ? 0.12 : 0;
         q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -lean);
-        pos.set(x + w / 2, 0.145 + row * 0.58, 0.02);
+        pos.set(x + w / 2, 0.145 + row * ROW_H, 0.02);
         scl.set(w, h, 0.32 + rand() * 0.06);
         m.compose(pos, q, scl);
         rig.books.setMatrixAt(i, m);
@@ -379,47 +360,30 @@ export class LibraryInterior implements Ground {
         disposeSprite(rig.label);
       }
       const total = counts[rig.id] ?? 0;
-      rig.label = createLabelSprite(SHELVES[rig.id].name, total ? `${total}권` : '아직 비어 있어요');
-      rig.label.scale.multiplyScalar(0.3);
-      rig.label.position.set(0, CASE_H + 0.5, 0.1);
+      const c = BOOKCASES[rig.id];
+      rig.label = createLabelSprite(`${c.emoji} ${c.name}`, total ? `${total}권` : '아직 비어 있어요');
+      rig.label.scale.multiplyScalar(0.5);
+      rig.label.position.set(0, CASE_H + 0.75, 0.1);
       rig.group.add(rig.label);
     }
-    const t = Math.max(0, Math.min(6, counts.today ?? 0));
-    for (let i = 0; i < t; i++) {
-      pos.set(-0.55 + (i % 3) * 0.55, 0.92 + Math.floor(i / 3) * 0.02, -0.2 + Math.floor(i / 3) * 0.4);
-      q.setFromEuler(new THREE.Euler(0.22, (i * 0.37) % 0.4, 0));
-      scl.set(1, 1, 1);
-      m.compose(pos, q, scl);
-      this.todayBooks.setMatrixAt(i, m);
-      this.todayBooks.setColorAt(i, color.setHex(SPINE_COLORS[(i * 5) % SPINE_COLORS.length]));
-    }
-    this.todayBooks.count = t;
-    this.todayBooks.instanceMatrix.needsUpdate = true;
-    if (this.todayBooks.instanceColor) this.todayBooks.instanceColor.needsUpdate = true;
-    this.todayBooks.computeBoundingSphere();
-    if (!this.todayLabel) {
-      this.todayLabel = createLabelSprite('오늘 꽂힌 책', '새로 꽂힌 이야기');
-      this.todayLabel.scale.multiplyScalar(0.3);
-      this.todayLabel.position.set(this.todaySpot.x, 1.9, this.todaySpot.y);
-      this.scene.add(this.todayLabel);
-      const w = createLabelSprite('쓰는 책상', '이야기와 일기 쓰기');
-      w.scale.multiplyScalar(0.3);
-      w.position.set(this.writeDesk.x, 1.9, this.writeDesk.y);
-      this.scene.add(w);
+    if (!this.writeLabel) {
+      this.writeLabel = createLabelSprite('✍️ 쓰는 책상', '이야기와 일기 쓰기');
+      this.writeLabel.scale.multiplyScalar(0.3);
+      this.writeLabel.position.set(this.writeDesk.x, 1.9, this.writeDesk.y);
+      this.scene.add(this.writeLabel);
     }
   }
 
-  /** Spines drawn per shelf (tests). */
+  /** Spines drawn per bookcase (tests). */
   get bookCounts(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const r of this.shelves.values()) out[r.id] = r.books.count;
-    out.today = this.todayBooks.count;
     return out;
   }
 
   // ------------------------------------------------------------------ interaction
 
-  /** What is under a screen ray (a bookcase, the today table, the writing desk). */
+  /** What is under a screen ray (a bookcase or the writing desk). */
   pick(raycaster: THREE.Raycaster): LibrarySpot | null {
     for (const hit of raycaster.intersectObjects(this.pickables, true)) {
       let o: THREE.Object3D | null = hit.object;
@@ -438,27 +402,28 @@ export class LibraryInterior implements Ground {
   near(x: number, z: number): LibrarySpot | null {
     if (Math.hypot(x - LIBRARY_EXIT.x, z - LIBRARY_EXIT.z) < LIBRARY_EXIT.reach) return { kind: 'exit' };
     if (Math.hypot(x - this.writeDesk.x, z - this.writeDesk.y) < 1.9) return { kind: 'write' };
-    if (Math.hypot(x - this.todaySpot.x, z - this.todaySpot.y) < 1.9) return { kind: 'today' };
     let best: LibrarySpot | null = null;
-    let bestD = 1.6;
+    let bestD = 2.2;
     for (const r of this.shelves.values()) {
-      const d = Math.hypot(x - r.front.x, z - r.front.y);
+      // Anywhere along the (wide) case front counts, not just its centre.
+      const dx = Math.max(0, Math.abs(x - r.front.x) - CASE_W / 2 + 0.4);
+      const d = Math.hypot(dx, z - r.front.y);
       if (d < bestD) {
         bestD = d;
-        best = { kind: 'shelf', shelf: r.id };
+        best = { kind: 'bookcase', id: r.id };
       }
     }
     return best;
   }
 
-  /** Where to stand to browse a shelf (tests, screenshots). */
-  shelfFront(id: ShelfId): { x: number; z: number } | null {
+  /** Where to stand to browse a bookcase (tests, screenshots). */
+  shelfFront(id: BookcaseId): { x: number; z: number } | null {
     const r = this.shelves.get(id);
     return r ? { x: r.front.x, z: r.front.y } : null;
   }
 
   spots() {
-    return { write: { x: this.writeDesk.x, z: this.writeDesk.y }, today: { x: this.todaySpot.x, z: this.todaySpot.y }, exit: { ...LIBRARY_EXIT } };
+    return { write: { x: this.writeDesk.x, z: this.writeDesk.y }, exit: { ...LIBRARY_EXIT } };
   }
 
   /** Hide the walls between the camera and the room; light follows the time of day. */
@@ -478,5 +443,6 @@ export class LibraryInterior implements Ground {
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
     for (const r of this.shelves.values()) if (r.label) disposeSprite(r.label);
+    if (this.writeLabel) disposeSprite(this.writeLabel);
   }
 }

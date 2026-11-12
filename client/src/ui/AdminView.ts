@@ -1,4 +1,4 @@
-import { PROPS, REPORT_LABELS, SHELVES, SHOP_STOCK_MAX, STORY_PROMPTS, STORY_REPORT_LABELS, VISIBILITY_LABELS, type PropId, type ReportReason, type StoryDetail, type StoryReportReason } from '../../../shared/protocol';
+import { PROPS, REPORT_LABELS, SHOP_STOCK_MAX, STORY_PROMPTS, STORY_REPORT_LABELS, VISIBILITY_LABELS, type PropId, type ReportReason, type StoryDetail, type StoryReportReason } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { button, el, Modal } from './dom';
 import { drawThumb } from './OutfitPainter';
@@ -349,7 +349,7 @@ export class AdminView {
     const state = s.hidden ? (s.review === 'kept' ? '숨김 (유지)' : '숨김') : s.review === 'restored' ? '보임 (복구됨)' : '보임';
     info.append(
       el('strong', 'admin-owner', `${s.title}`),
-      el('span', '', `${SHELVES[s.shelf].emoji} ${SHELVES[s.shelf].name} · ${s.kind === 'diary' ? '일기' : '이야기'} · ${VISIBILITY_LABELS[s.visibility]} · 작성자 ${s.author}${s.anonymous ? ' (익명)' : ''}`),
+      el('span', '', `${s.kind === 'diary' ? '📔 일기' : '🙏 하나님 이야기'} · ${VISIBILITY_LABELS[s.visibility]} · 작성자 ${s.author}${s.anonymous ? ' (익명)' : ''}`),
       el('span', `admin-state ${s.hidden ? 'hidden' : ''}`, state),
       el('span', '', `신고 ${s.reporters}명 · ${Object.entries(s.reasons).map(([k, n]) => `${STORY_REPORT_LABELS[k as StoryReportReason] ?? k} ${n}`).join(', ') || '-'}${s.authorBanUntil ? ` · ${day(s.authorBanUntil)}까지 글쓰기 금지` : ''}`),
     );

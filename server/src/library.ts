@@ -6,11 +6,10 @@ import {
   DIARY_LINES_MAX,
   DIARY_NOTE_MAX,
   DIARY_PHOTOS_MAX,
-  isShelfId,
-  isTestimonyShelf,
+  BOOKCASE_IDS,
+  isBookcaseId,
   kstDateOf,
   personalInfoKinds,
-  SHELF_IDS,
   STORIES_PER_DAY,
   STORY_BODY_MAX,
   STORY_HIDE_REPORTS,
@@ -19,8 +18,7 @@ import {
   STORY_REPORT_REASONS,
   STORY_TITLE_MAX,
   STORY_VISIBILITIES,
-  type ShelfCounts,
-  type ShelfId,
+  type BookcaseCounts,
   type DiaryLineMeta,
   type StoryDetail,
   type StoryItem,
@@ -45,7 +43,6 @@ interface StoryRow {
   id: number;
   user_id: number;
   kind: 'testimony' | 'diary';
-  shelf: ShelfId;
   title: string;
   parts: string;
   note: string;
@@ -169,7 +166,6 @@ export class LibraryService {
     return {
       id: s.id,
       kind: s.kind,
-      shelf: s.shelf,
       title: s.title,
       excerpt: excerptOf([...parts, s.note].filter(Boolean).join(' ')),
       // Anonymous: only the author (and the admin review screen) ever sees the nickname.
@@ -211,48 +207,24 @@ export class LibraryService {
 
   // ------------------------------------------------------------------ reading
 
-  /** Books on one shelf this viewer may see, newest first, PAGE_SIZE per page. */
-  list(viewerId: number | null, shelfRaw: unknown, pageRaw: unknown) {
-    if (!isShelfId(shelfRaw)) throw new HttpError(404, 'not_found', '서가를 찾을 수 없어요.');
+  /** Books in one bookcase (🙏 every testimony, 📔 every diary) this viewer may see, newest first, PAGE_SIZE per page. */
+  list(viewerId: number | null, caseRaw: unknown, pageRaw: unknown) {
+    if (!isBookcaseId(caseRaw)) throw new HttpError(404, 'not_found', '책장을 찾을 수 없어요.');
     const page = Math.max(0, Math.min(500, Math.floor(Number(pageRaw) || 0)));
     const rows = this.db
-      .prepare(`${SELECT} WHERE s.shelf = @shelf AND ${VISIBLE} ORDER BY s.created_at DESC, s.id DESC LIMIT @limit OFFSET @offset`)
-      .all({ shelf: shelfRaw, viewer: this.viewer(viewerId), limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE }) as StoryRow[];
-    return { shelf: shelfRaw, page, hasMore: rows.length > PAGE_SIZE, items: rows.slice(0, PAGE_SIZE).map((s) => this.item(s, viewerId)) };
+      .prepare(`${SELECT} WHERE s.kind = @kind AND ${VISIBLE} ORDER BY s.created_at DESC, s.id DESC LIMIT @limit OFFSET @offset`)
+      .all({ kind: caseRaw, viewer: this.viewer(viewerId), limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE }) as StoryRow[];
+    return { bookcase: caseRaw, page, hasMore: rows.length > PAGE_SIZE, items: rows.slice(0, PAGE_SIZE).map((s) => this.item(s, viewerId)) };
   }
 
-  /** How many books stand on each shelf for this viewer (the 3D shelves and the WS push). */
-  shelfCounts(viewerId: number | null): ShelfCounts {
+  /** How many books stand in each bookcase for this viewer (the 3D spines and the WS push). */
+  bookcaseCounts(viewerId: number | null): BookcaseCounts {
     const rows = this.db
-      .prepare(`SELECT s.shelf AS shelf, COUNT(*) AS n FROM stories s WHERE ${VISIBLE} GROUP BY s.shelf`)
-      .all({ viewer: this.viewer(viewerId) }) as { shelf: ShelfId; n: number }[];
-    const out = Object.fromEntries(SHELF_IDS.map((id) => [id, 0])) as ShelfCounts;
-    for (const r of rows) if (isShelfId(r.shelf)) out[r.shelf] = r.n;
-    out.today = (
-      this.db.prepare(`SELECT COUNT(*) AS n FROM stories s WHERE s.kst_date = @today AND ${VISIBLE}`).get({ viewer: this.viewer(viewerId), today: kstDateOf(this.now()) }) as {
-        n: number;
-      }
-    ).n;
+      .prepare(`SELECT s.kind AS kind, COUNT(*) AS n FROM stories s WHERE ${VISIBLE} GROUP BY s.kind`)
+      .all({ viewer: this.viewer(viewerId) }) as { kind: string; n: number }[];
+    const out = Object.fromEntries(BOOKCASE_IDS.map((id) => [id, 0])) as BookcaseCounts;
+    for (const r of rows) if (isBookcaseId(r.kind)) out[r.kind] = r.n;
     return out;
-  }
-
-  /** 🆕 오늘 꽂힌 책. */
-  today(viewerId: number | null): StoryItem[] {
-    const rows = this.db
-      .prepare(`${SELECT} WHERE s.kst_date = @today AND ${VISIBLE} ORDER BY s.created_at DESC LIMIT 40`)
-      .all({ viewer: this.viewer(viewerId), today: kstDateOf(this.now()) }) as StoryRow[];
-    return rows.map((s) => this.item(s, viewerId));
-  }
-
-  /** 이번 주 많이 공감받은 책 (공감 given in the last 7 days). */
-  popular(viewerId: number | null): StoryItem[] {
-    const rows = this.db
-      .prepare(
-        `${SELECT} WHERE ${VISIBLE} AND s.hidden_at IS NULL AND EXISTS (SELECT 1 FROM story_reactions x WHERE x.story_id = s.id AND x.created_at >= @since)
-         ORDER BY (SELECT COUNT(*) FROM story_reactions x WHERE x.story_id = s.id AND x.created_at >= @since) DESC, s.created_at DESC LIMIT 10`,
-      )
-      .all({ viewer: this.viewer(viewerId), since: this.now() - 7 * DAY_MS }) as StoryRow[];
-    return rows.map((s) => this.item(s, viewerId));
   }
 
   /** 나의 서재: my testimonies, my diaries, my bookmarks (only still visible ones). */
@@ -343,7 +315,6 @@ export class LibraryService {
   private testimonyFields(body: Record<string, unknown>) {
     const title = typeof body.title === 'string' ? cleanText(body.title) : '';
     if ([...title].length < 1 || [...title].length > STORY_TITLE_MAX) throw new HttpError(400, 'bad_title', `제목은 1~${STORY_TITLE_MAX}자로 적어 주세요.`);
-    if (!isTestimonyShelf(body.shelf)) throw new HttpError(400, 'bad_shelf', '꽂을 서가를 골라 주세요.');
     const raw = Array.isArray(body.parts) ? body.parts : [];
     if (raw.length !== STORY_PROMPTS.length) throw new HttpError(400, 'bad_parts', '세 가지 질문에 답해 주세요.');
     const parts = raw.map((p) => (typeof p === 'string' ? cleanMultiline(p) : ''));
@@ -358,7 +329,8 @@ export class LibraryService {
       ref = hit.ref;
       verse = hit.text;
     }
-    return { title, shelf: body.shelf, parts, ref, verse };
+    // No topic any more (two bookcases): a `shelf` sent by an older client is ignored.
+    return { title, parts, ref, verse };
   }
 
   createTestimony(userId: number, body: Record<string, unknown>): StoryDetail {
@@ -377,9 +349,9 @@ export class LibraryService {
     const info = this.db
       .prepare(
         `INSERT INTO stories (user_id, kind, shelf, title, parts, note, ref, verse, visibility, group_id, kst_date, created_at, updated_at)
-         VALUES (?, 'testimony', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, 'testimony', 'story', ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(userId, f.shelf, f.title, JSON.stringify(f.parts), f.ref, f.verse, vis.visibility, vis.groupId, today, now, now);
+      .run(userId, f.title, JSON.stringify(f.parts), f.ref, f.verse, vis.visibility, vis.groupId, today, now, now);
     this.db.prepare('DELETE FROM story_drafts WHERE user_id = ?').run(userId);
     return this.detailOf(this.row(Number(info.lastInsertRowid), userId)!, userId);
   }
@@ -392,8 +364,8 @@ export class LibraryService {
     const vis = this.visibility(userId, body);
     this.personal([f.title, ...f.parts].join('\n'), body.confirmPersonal);
     this.db
-      .prepare('UPDATE stories SET shelf = ?, title = ?, parts = ?, ref = ?, verse = ?, visibility = ?, group_id = ?, updated_at = ? WHERE id = ?')
-      .run(f.shelf, f.title, JSON.stringify(f.parts), f.ref, f.verse, vis.visibility, vis.groupId, this.now(), id);
+      .prepare('UPDATE stories SET title = ?, parts = ?, ref = ?, verse = ?, visibility = ?, group_id = ?, updated_at = ? WHERE id = ?')
+      .run(f.title, JSON.stringify(f.parts), f.ref, f.verse, vis.visibility, vis.groupId, this.now(), id);
     return this.detailOf(this.row(id, userId)!, userId);
   }
 
@@ -415,7 +387,6 @@ export class LibraryService {
     const draft = {
       title: s(d.title, STORY_TITLE_MAX * 2),
       parts: (Array.isArray(d.parts) ? d.parts : []).slice(0, STORY_PROMPTS.length).map((p) => s(p, STORY_BODY_MAX)),
-      shelf: isTestimonyShelf(d.shelf) ? d.shelf : null,
       ref: s(d.ref, 40),
       step: Number.isInteger(d.step) ? Math.max(0, Math.min(5, d.step as number)) : 0,
     };

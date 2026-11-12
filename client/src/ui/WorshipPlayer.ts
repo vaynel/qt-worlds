@@ -181,6 +181,13 @@ export class WorshipPlayer {
    */
   private pausedForBackground = false;
   private backgroundPauses = 0;
+  /**
+   * P1-3: a sideways phone with the keyboard up has no room for a fully visible
+   * 200 px video. Meanwhile the player is treated as folded (hidden, paused) and
+   * resumes when there is room again, if it was playing.
+   */
+  private squeezed = false;
+  private pausedForSqueeze = false;
   private playedWhileHidden = false;
 
   constructor(private readonly videos: WorshipVideo[] = WORSHIP_VIDEOS) {
@@ -315,9 +322,8 @@ export class WorshipPlayer {
     return document.visibilityState === 'hidden';
   }
 
-  private pauseForBackground() {
-    // Ask the player itself: autoplay can start before our state listener sees
-    // a 'playing' event, so this.state alone may still say "none".
+  /** Playing (or about to), asking the player itself: autoplay can start before our state listener sees a 'playing' event. */
+  private isActive(): boolean {
     let live = this.state;
     try {
       const s = this.player && this.ready ? this.player.getPlayerState?.() : undefined;
@@ -325,7 +331,18 @@ export class WorshipPlayer {
     } catch {
       /* ignore */
     }
-    const active = live === STATE.PLAYING || live === STATE.BUFFERING || this.state === STATE.PLAYING || this.state === STATE.BUFFERING;
+    return live === STATE.PLAYING || live === STATE.BUFFERING || this.state === STATE.PLAYING || this.state === STATE.BUFFERING;
+  }
+
+  /** Sideways phone with the keyboard up (see `squeezed`). */
+  setSqueezed(on: boolean) {
+    if (on === this.squeezed) return;
+    this.squeezed = on;
+    this.applySize();
+  }
+
+  private pauseForBackground() {
+    const active = this.isActive();
     if (active) this.pausedForBackground = true;
     window.clearTimeout(this.graceTimer);
     if (this.player && this.ready && active) {
@@ -458,6 +475,11 @@ export class WorshipPlayer {
     const inRoom = this.mode === 'room';
     let eff: WorshipFold = inRoom ? this.roomFold : this.fold;
     if (modal && eff !== 'folded') eff = 'open';
+    const squeezed = this.squeezed && visible && eff !== 'folded';
+    if (squeezed) {
+      if (!this.pausedForSqueeze) this.pausedForSqueeze = this.isActive();
+      eff = 'folded';
+    }
     this.effective = eff;
     const large = !inRoom && eff === 'open' && !modal && this.size === 'large' && !IS_TOUCH;
     // 골방 + a sheet: one compact, on-screen placement (video only, under the HUD,
@@ -482,8 +504,17 @@ export class WorshipPlayer {
     body.toggle('worship-mini', visible && eff === 'mini');
     body.toggle('worship-folded', visible && eff === 'folded');
     body.toggle('worship-room-sheet', visible && roomSheet);
-    this.tab.hidden = !(visible && eff === 'folded' && !modal);
+    this.tab.hidden = !(visible && eff === 'folded' && !modal && !squeezed);
     if (eff === 'folded') this.pauseForFold();
+    else if (this.pausedForSqueeze) {
+      // Room again: carry on if it was playing before the squeeze.
+      this.pausedForSqueeze = false;
+      if (this.player && this.ready && !WorshipPlayer.pageHidden()) {
+        this.player.playVideo();
+        this.armPrompt();
+      }
+    }
+    if (!squeezed && eff === 'folded') this.pausedForSqueeze = false;
     this.sizeBtn.replaceChildren(icon(this.size === 'large' ? 'small' : 'large'));
     const label = this.size === 'large' ? '작게 보기' : '크게 보기';
     this.sizeBtn.setAttribute('aria-label', label);
@@ -909,6 +940,8 @@ export class WorshipPlayer {
       effective: this.effective,
       playedWhileFolded: this.playedWhileFolded,
       pausedForBackground: this.pausedForBackground,
+      squeezed: this.squeezed,
+      pausedForSqueeze: this.pausedForSqueeze,
       backgroundPauses: this.backgroundPauses,
       playedWhileHidden: this.playedWhileHidden,
       tabVisible: !this.tab.hidden,

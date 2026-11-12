@@ -230,12 +230,12 @@ try {
   const guest = new Agent();
   const g = (await A.json('POST', '/api/groups', { name: '새벽 모임' })).data;
   await B.json('POST', '/api/groups/join', { code: g.code });
-  const base = { title: '광야에서 들은 소리', parts: ['몹시 힘든 한 해였어요. 일도 사람도 다 떠났어요.', '새벽에 시편을 읽다가 울었어요.', '이제는 매일 아침 감사로 시작해요.'], shelf: 'wilderness' };
+  const base = { title: '광야에서 들은 소리', parts: ['몹시 힘든 한 해였어요. 일도 사람도 다 떠났어요.', '새벽에 시편을 읽다가 울었어요.', '이제는 매일 아침 감사로 시작해요.'] };
   const T = {};
   T.pub = (await A.json('POST', '/api/library/stories', { ...base, ref: '시편 23:1', visibility: 'public' })).data.id;
-  T.grp = (await A.json('POST', '/api/library/stories', { ...base, title: '모임 이야기', shelf: 'answer', visibility: 'group', groupId: g.id })).data.id;
-  T.anon = (await A.json('POST', '/api/library/stories', { ...base, title: '익명으로 쓰는 감사', shelf: 'thanks', visibility: 'anonymous' })).data.id;
-  T.priv = (await A.json('POST', '/api/library/stories', { ...base, title: '나만 보는 기도', shelf: 'first', visibility: 'private' })).data.id;
+  T.grp = (await A.json('POST', '/api/library/stories', { ...base, title: '모임 이야기', visibility: 'group', groupId: g.id })).data.id;
+  T.anon = (await A.json('POST', '/api/library/stories', { ...base, title: '익명으로 쓰는 감사', visibility: 'anonymous' })).data.id;
+  T.priv = (await A.json('POST', '/api/library/stories', { ...base, title: '나만 보는 기도', visibility: 'private' })).data.id;
   check('setup: four books (public, group, anonymous, private) and a group A+B', [T.pub, T.grp, T.anon, T.priv].every(Number.isInteger) && !!g.id, JSON.stringify(T));
   const letters = (agent, sid) => agent.json('GET', `/api/library/stories/${sid}/letters`);
   const write = (agent, sid, body) => agent.json('POST', `/api/library/stories/${sid}/letters`, { requestId: rid(), ...body });
@@ -574,6 +574,11 @@ try {
     check('walk: nobody ever leaves the floor while walking', w.offFloor.length === 0, w.offFloor.slice(0, 5).join(' '));
     check(`walk: pushing into every wall, corner and piece of furniture (${w.pushes}×3 s) never traps or drops the player`, w.pushes > 60 && w.pushFails.length === 0, w.pushFails.slice(0, 6).join(' | '));
     check('walk: standing up from every desk chair lands on free floor', w.seats.length === 0, w.seats.join(' | '));
+    // Two bookcases (🙏 하나님 이야기, 📔 일기) on the north wall: where you stand to browse each is free floor.
+    const hall = await pg.evaluate(() => window.__WORLDS_TEST__.library());
+    const fronts = Object.values(hall.fronts).filter(Boolean);
+    const frontFree = await pg.evaluate((list) => list.map((s) => window.__WORLDS_TEST__.libraryFree(s.x, s.z)), fronts);
+    check('walk: exactly two bookcases, both browsable from free floor', JSON.stringify(Object.keys(hall.fronts).sort()) === '["diary","testimony"]' && fronts.length === 2 && frontFree.every(Boolean), JSON.stringify(hall.fronts));
     // A stale world-coordinate correction inside the hall is ignored; a bad teleport lands on free floor.
     const pos = await pg.evaluate(() => {
       window.__WORLDS_TEST__.teleport(-8.9, 6.9);
@@ -617,12 +622,12 @@ try {
     await pg.screenshot({ path: shotPath('b5-diary-draft-phone') });
     // Unpick → the line goes; pick again → it comes back.
     await pg.tap(`#lib-pick-${shot.id}`);
-    await sleep(300);
+    await until(pg, (id) => !window.__WORLDS_DEBUG__.la.view.diaryPhotos.includes(id), shot.id, 5000).catch(() => undefined);
     const off = await view(pg);
     await pg.tap(`#lib-pick-${shot.id}`);
-    await sleep(300);
+    await until(pg, (id) => window.__WORLDS_DEBUG__.la.view.diaryPhotos.includes(id), shot.id, 5000).catch(() => undefined);
     const on = await view(pg);
-    check('unpicking removes the "사진 N장" line, picking adds it back', !off.diaryLines.some((l) => /사진 \d+장/.test(l)) && on.diaryLines.some((l) => /사진 1장/.test(l)) && on.diaryPhotos.length >= 1);
+    check('unpicking removes the "사진 N장" line, picking adds it back', !off.diaryLines.some((l) => /사진 \d+장/.test(l)) && on.diaryLines.some((l) => /사진 1장/.test(l)) && on.diaryPhotos.length >= 1, JSON.stringify({ off: [off.diaryPhotos, off.diaryLines.filter((l) => /사진/.test(l))], on: [on.diaryPhotos, on.diaryLines.filter((l) => /사진/.test(l))] }));
     await pg.fill('#lib-diary-note', '오늘은 들판 바람이 참 좋았어요.');
     await pg.click('#lib-vis-public');
     await pg.tap('#lib-diary-publish');

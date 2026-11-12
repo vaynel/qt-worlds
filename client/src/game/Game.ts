@@ -42,7 +42,7 @@ import { Social } from './Social';
 import { ShopClient } from './Shop';
 import { PropDock, ShopView } from '../ui/ShopView';
 import { PLAZA as PLAZA_CENTRE, PROPS, SHOP_STALL, shopWindowAt } from '../../../shared/protocol';
-import { DESK_SEATS, LIBRARY_DOOR, LIBRARY_ROOM, LIBRARY_SPAWN, SHELVES, type ShelfCounts, type Space } from '../../../shared/protocol';
+import { DESK_SEATS, LIBRARY_DOOR, LIBRARY_ROOM, LIBRARY_SPAWN, BOOKCASES, BOOKCASE_IDS, type BookcaseCounts, type Space } from '../../../shared/protocol';
 import { LibraryInterior, type LibrarySpot } from '../world/Library';
 import { LibraryView } from '../ui/LibraryView';
 import { kstStamp, takePhoto } from './Photo';
@@ -723,7 +723,7 @@ export class Game {
 
   // ------------------------------------------------------------------ 이야기 도서관 (L-A)
 
-  /** E / action button inside the hall: door, desk chair, shelf, 오늘 꽂힌 책, 쓰는 책상. */
+  /** E / action button inside the hall: door, desk chair, a bookcase, 쓰는 책상. */
   private libraryAction() {
     if (this.player.seat >= 0) return this.social.toggleSeat();
     const spot = this.nearSpot;
@@ -733,13 +733,12 @@ export class Game {
   }
 
   private openSpot(spot: LibrarySpot) {
-    if (spot.kind === 'shelf') this.libraryView.openShelf(spot.shelf);
-    else if (spot.kind === 'today') this.libraryView.openShelf('today');
+    if (spot.kind === 'bookcase') this.libraryView.openShelf(spot.id);
     else if (spot.kind === 'write') this.libraryView.openDesk();
     else if (spot.kind === 'exit') this.leaveLibrary();
   }
 
-  /** Tap on a bookcase, the today table or the writing desk. True when one was hit. */
+  /** Tap on a bookcase or the writing desk. True when one was hit. */
   private tapLibrary(clientX: number, clientY: number): boolean {
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
@@ -795,7 +794,7 @@ export class Game {
 
   private async refreshShelves() {
     try {
-      const r = await api<{ shelves: ShelfCounts }>('GET', '/api/library/shelves');
+      const r = await api<{ shelves: BookcaseCounts }>('GET', '/api/library/shelves');
       this.library.setCounts(r.shelves);
     } catch {
       /* offline: keep what we have */
@@ -1001,7 +1000,7 @@ export class Game {
       libraryDoor: () => ({ x: LIBRARY_DOOR.x, z: LIBRARY_DOOR.z }),
       enterLibrary: () => this.enterLibrary(),
       leaveLibrary: () => this.leaveLibrary(),
-      library: () => ({ desks: DESK_SEATS.map((s) => ({ ...s })), spots: this.library.spots(), fronts: Object.fromEntries((Object.keys(SHELVES) as (keyof typeof SHELVES)[]).map((id) => [id, this.library.shelfFront(id)])) }),
+      library: () => ({ desks: DESK_SEATS.map((s) => ({ ...s })), spots: this.library.spots(), fronts: Object.fromEntries(BOOKCASE_IDS.map((id) => [id, this.library.shelfFront(id)])) }),
       libraryOpen: (what: string, arg?: unknown) => {
         const v = this.libraryView;
         if (what === 'shelf') v.openShelf(arg as never);
@@ -1363,8 +1362,7 @@ export class Game {
     const key = (label: string) => (touch ? label : `${label} (E)`);
     if (spot?.kind === 'exit') this.hud.setAction(key('밖으로 나가기'));
     else if (seatLabel) this.hud.setAction(seatLabel);
-    else if (spot?.kind === 'shelf') this.hud.setAction(key(`${SHELVES[spot.shelf].name} 보기`));
-    else if (spot?.kind === 'today') this.hud.setAction(key('오늘 꽂힌 책 보기'));
+    else if (spot?.kind === 'bookcase') this.hud.setAction(key(`${BOOKCASES[spot.id].name} 책장 보기`));
     else if (spot?.kind === 'write') this.hud.setAction(key('쓰는 책상'));
     else this.hud.setAction(null);
     this.propDock.setNearPlaza(false);
@@ -1372,7 +1370,7 @@ export class Game {
     this.hud.setPlace('이야기 도서관');
     const dn = this.world.dayNight;
     this.hud.setClock(dn.formatClock(), dn.phase, dn.night > 0.5);
-    this.hud.showPrompt('library-in', '이야기 도서관', '서가를 누르면 책을 꺼내 읽을 수 있어요. 들어온 문으로 나가요.', this.elapsed);
+    this.hud.showPrompt('library-in', '이야기 도서관', '🙏 하나님 이야기와 📔 일기 책장을 누르면 책을 꺼내 읽을 수 있어요. 들어온 문으로 나가요.', this.elapsed);
     this.hud.update(this.elapsed, this.input.hasMoved);
   }
 
