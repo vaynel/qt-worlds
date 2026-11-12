@@ -88,16 +88,25 @@ docker cp qt-worlds:/data/backups/. ./deploy/backups/
 - if you change `BACKUP_KEEP` (`docker exec -e BACKUP_KEEP=7 qt-worlds node server/scripts/backup.mjs`), update the policy text in `client/src/legal/pages.ts` too;
 - copies you take out of the volume (`./deploy/backups/` above) are not pruned. Delete them yourself after 14 days, or don't keep them.
 
-**Screenshots are not in the DB backup.** `backup.mjs` copies only `worlds.db`; the image files in `/data/screenshots/` are not backed up (the 개인정보처리방침 says so). After a restore, photos whose file is missing simply answer 404 (the diary text is intact). If you want them too, copy the folder yourself (e.g. `docker cp qt-worlds:/data/screenshots ./deploy/backups/screenshots-$(date +%F)`) and delete those copies within 14 days, like the DB copies.
+**Photos are backed up too (B3, L-B).** Each run also maintains **one incremental photo mirror**, `/data/backups/screenshots/`, shared by all kept DB backups (photo files never change after upload, so one copy per photo is enough):
 
-To restore (this stops the service briefly):
+- new files in `/data/screenshots/` (and every file the new backup DB lists) are copied in, atomically (temp file + rename), mode 0600;
+- a mirrored file is deleted only when it is gone from `/data/screenshots/` **and** none of the kept `worlds-*.db` backups lists it in its `screenshots` table.
+
+So restoring *any* kept backup together with the mirror serves every photo that DB knows about, and a deleted photo (회원 탈퇴, 30-day 파기, 앨범에서 지우기) leaves the mirror once the last backup that still listed it is pruned, i.e. within `BACKUP_KEEP` backups (~14 days), as the 개인정보처리방침 says. Running it repeatedly is safe (idempotent: nothing is copied twice, a second run in the same second gets the next second, after every existing backup). Space: one copy of each live photo plus photos deleted in the last ~14 days (photos are < 150 KB, 10 per account per day at most). The script prints `photos mirrored in …: N copied, M removed, K files (X MB)`. If you copy backups out of the volume, copy `screenshots/` with them and prune those copies yourself too.
+
+To restore (this stops the service briefly). The second step copies back only the photos the restored DB lists (nothing deleted later comes back):
 
 ```bash
 docker compose stop qt-worlds
 docker run --rm -v qt-worlds-data:/data -v "$PWD/deploy/backups":/b alpine \
   sh -c 'cp /b/worlds-YYYYMMDD-HHMMSS.db /data/worlds.db && rm -f /data/worlds.db-wal /data/worlds.db-shm && chown 1000:1000 /data/worlds.db'
 docker compose start qt-worlds
+# photos for that backup (from the mirror in the volume; safe while running):
+docker exec qt-worlds node server/scripts/backup.mjs --restore-photos /data/backups/worlds-YYYYMMDD-HHMMSS.db
 ```
+
+(If you restore a DB copied in from the host, put it in `/data/backups/` first or pass its path; the photos come from `/data/backups/screenshots/`. Exit code 2 means some listed photos were not in the mirror.)
 
 ## 5. Logs
 
@@ -131,6 +140,7 @@ The app logs nicknames on join/leave and voice-room join, campfire chat *lengths
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | from `npx web-push generate-vapid-keys` | Web Push; notifications are off (UI hidden) if missing. See §8 |
 | `VAPID_SUBJECT` | `mailto:you@example.com` | Contact for push services (`mailto:` or `https:` URL). Required with the keys |
 | `WORLDS_ADMIN_EMAILS` | your Google email | Comma-separated, matched against the verified Google email. These accounts see ⚙ → 옷 그림 관리 (reported outfits: 숨김 유지 / 복구 / 그림 금지 n일). Everyone else gets 404 from `/api/admin/*`. Empty = no admin |
+| `LETTER_RATE_LIMIT` / `LETTER_REPLY_RATE_LIMIT` | `20` / `60` | ✉️ 답장 편지 (L-B): new letters / replies per account per hour (idempotent retries don't count). Optional |
 
 ## 7. Without Docker (production mode on the host)
 

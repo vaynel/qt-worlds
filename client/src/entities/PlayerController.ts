@@ -13,6 +13,8 @@ const STEP_OFF: Record<SeatKind, number> = { mat: 0, log: 0.85, bench: 0.8, desk
 export interface Ground {
   groundHeight(x: number, z: number): number;
   collidersNear(x: number, z: number): Iterable<CircleCollider>;
+  /** Interiors (B4): the nearest spot a standing player fits, used to recover from a bad position. */
+  nearestFree?(x: number, z: number): { x: number; z: number };
 }
 
 const WALK_SPEED = 4.2;
@@ -76,15 +78,18 @@ export class PlayerController {
     this.avatar.setDeskReading(false);
     if (step !== 0) {
       // Step off forward so the seat's colliders don't shove us sideways.
-      const x = this.position.x + Math.sin(this.yaw) * step;
-      const z = this.position.z + Math.cos(this.yaw) * step;
+      let x = this.position.x + Math.sin(this.yaw) * step;
+      let z = this.position.z + Math.cos(this.yaw) * step;
+      // Never stand up into furniture or out of the room (B4).
+      if (this.world.nearestFree) ({ x, z } = this.world.nearestFree(x, z));
       this.position.set(x, this.world.groundHeight(x, z), z);
       this.syncAvatar();
     }
   }
 
-  /** Instant move (QA hook / respawn). */
+  /** Instant move (QA hook / respawn). Interiors land on the nearest free floor. */
   teleport(x: number, z: number) {
+    if (this.world.nearestFree) ({ x, z } = this.world.nearestFree(x, z));
     this.seat = -1;
     this.avatar.setSeated(false);
     this.avatar.setDeskReading(false);
@@ -99,6 +104,10 @@ export class PlayerController {
       this.syncAvatar();
       return;
     }
+
+    // B4: somehow off the floor or inside furniture (a stale server correction, an old
+    // client state): step onto the nearest free spot instead of being stuck there.
+    if (this.world.nearestFree && !this.walkable(this.position.x, this.position.z, 0, 0)) this.recover();
 
     // Camera-relative: forward is away from the camera along the ground.
     const fx = -Math.sin(cameraYaw);
@@ -133,9 +142,20 @@ export class PlayerController {
     return true;
   }
 
+  /** Move to the nearest free floor (interiors only). */
+  recover() {
+    if (!this.world.nearestFree) return;
+    const f = this.world.nearestFree(this.position.x, this.position.z);
+    this.position.set(f.x, this.world.groundHeight(f.x, f.z), f.z);
+    this.velocity.set(0, 0, 0);
+    this.syncAvatar();
+  }
+
   /** Axis-separated move so the player slides along shorelines and steep banks. */
   private tryMove(dx: number, dz: number) {
     const p = this.position;
+    const startX = p.x;
+    const startZ = p.z;
     const y = this.world.groundHeight(p.x, p.z);
     const step = Math.hypot(dx, dz);
     if (step < 1e-6) return;
@@ -165,6 +185,14 @@ export class PlayerController {
         p.x += ox * push;
         p.z += oz * push;
       }
+    }
+    // B4: a push-out must never shove us off the floor (e.g. a corner plant next to
+    // the library wall). Stay where we were instead.
+    if (!this.walkable(p.x, p.z, 0, 0)) {
+      p.x = startX;
+      p.z = startZ;
+      this.velocity.x = 0;
+      this.velocity.z = 0;
     }
   }
 

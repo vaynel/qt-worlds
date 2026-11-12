@@ -361,6 +361,60 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // v10: ✉️ 답장 편지 (L-B): letters under a book and their replies in one table
+  // (parent_id NULL = a letter; else a reply in that letter's thread). Deleting a
+  // letter's writer or the book cascades the whole thread. Reports (3 distinct →
+  // hidden), per-thread read pointers (📬 받은 편지, synced across devices),
+  // 공감 push batching per book, and the new notification preferences
+  // (📚 내 이야기 소식, ✉️ 새 편지, 💌 답장: default on; 📔 밤 일기 알림: default off, 21:00).
+  // Diaries also keep each line's source kind and minute (the reader's timeline).
+  `
+  CREATE TABLE story_letters (
+    id INTEGER PRIMARY KEY,
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES story_letters(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    anonymous INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL,
+    request_id TEXT,
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    hidden_at INTEGER,
+    author_hidden_at INTEGER,
+    review TEXT CHECK (review IS NULL OR review IN ('kept', 'restored')),
+    reviewed_at INTEGER,
+    UNIQUE (user_id, request_id)
+  );
+  CREATE INDEX story_letters_story ON story_letters(story_id, id);
+  CREATE INDEX story_letters_parent ON story_letters(parent_id, id);
+  CREATE INDEX story_letters_user ON story_letters(user_id, created_at);
+  CREATE TABLE letter_reports (
+    letter_id INTEGER NOT NULL REFERENCES story_letters(id) ON DELETE CASCADE,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (reason IN ('inappropriate', 'privacy', 'spam', 'other')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (letter_id, reporter_id)
+  );
+  CREATE INDEX letter_reports_reporter ON letter_reports(reporter_id);
+  CREATE TABLE letter_reads (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    letter_id INTEGER NOT NULL REFERENCES story_letters(id) ON DELETE CASCADE,
+    read_id INTEGER NOT NULL,
+    PRIMARY KEY (user_id, letter_id)
+  ) WITHOUT ROWID;
+  CREATE TABLE story_push (
+    story_id INTEGER PRIMARY KEY REFERENCES stories(id) ON DELETE CASCADE,
+    cursor_at INTEGER NOT NULL,
+    last_sent_at INTEGER
+  );
+  ALTER TABLE stories ADD COLUMN line_meta TEXT;
+  ALTER TABLE push_prefs ADD COLUMN library INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE push_prefs ADD COLUMN letters INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE push_prefs ADD COLUMN replies INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE push_prefs ADD COLUMN diary INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE push_prefs ADD COLUMN diary_time INTEGER NOT NULL DEFAULT 1260;
+  ALTER TABLE push_prefs ADD COLUMN last_diary_date TEXT;
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

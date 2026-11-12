@@ -78,6 +78,8 @@ export interface NetHandlers {
   groupChat(message: GroupMessage): void;
   groupChatUpdate(message: GroupMessage): void;
   groupRead(groupId: number, lastReadId: number): void;
+  /** ✉️ 받은 편지 badge (L-B), with a fixed-text toast when something arrived. */
+  letters(unread: number, toast: string | null, storyId: number | null): void;
 }
 
 /** Codes after which reconnecting would just fail again. */
@@ -237,6 +239,9 @@ export class NetClient {
         break;
       case 'groupRead':
         this.handlers.groupRead?.(msg.groupId, msg.lastReadId);
+        break;
+      case 'letters':
+        this.handlers.letters?.(msg.unread, msg.toast ?? null, msg.storyId ?? null);
         break;
       case 'word':
         this.handlers.word?.(msg.word);
@@ -400,6 +405,9 @@ export class NetClient {
         case 'groupChatUpdate':
         case 'groupRead':
           this.dispatch(msg);
+          break;
+        case 'letters':
+          if (typeof msg.unread === 'number') this.dispatch(msg);
           break;
         case 'error':
           if (msg.code === 'bad_nickname' || msg.code === 'full' || msg.code === 'version' || msg.code === 'name_taken') {

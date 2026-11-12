@@ -7,6 +7,7 @@ import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
 import type { FootprintService } from './footprints.js';
 import type { LibraryService } from './library.js';
+import type { LetterService } from './letters.js';
 import type { ShotService } from './shots.js';
 import { FOOTPRINT_KEEP_DAYS } from '../../shared/protocol.js';
 
@@ -42,7 +43,7 @@ export class AccountService {
     private readonly db: DB,
     private readonly looks: LookService | null = null,
     private readonly shop: ShopService | null = null,
-    private readonly library: { library: LibraryService; footprints: FootprintService; shots: ShotService } | null = null,
+    private readonly library: { library: LibraryService; footprints: FootprintService; shots: ShotService; letters?: LetterService } | null = null,
   ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
@@ -128,8 +129,21 @@ export class AccountService {
       created_at: number;
       last_ok_at: number | null;
     }[];
-    const prefs = this.db.prepare('SELECT daily, daily_time, prayer, props, updated_at FROM push_prefs WHERE user_id = ?').get(userId) as
-      | { daily: number; daily_time: number; prayer: number; props: number; updated_at: number }
+    const prefs = this.db
+      .prepare('SELECT daily, daily_time, prayer, props, library, letters, replies, diary, diary_time, updated_at FROM push_prefs WHERE user_id = ?')
+      .get(userId) as
+      | {
+          daily: number;
+          daily_time: number;
+          prayer: number;
+          props: number;
+          library: number;
+          letters: number;
+          replies: number;
+          diary: number;
+          diary_time: number;
+          updated_at: number;
+        }
       | undefined;
     const sessions = this.db.prepare('SELECT created_at, expires_at, persistent FROM sessions WHERE user_id = ? ORDER BY created_at').all(userId) as {
       created_at: number;
@@ -206,14 +220,25 @@ export class AccountService {
       notifications: {
         devices: subs.map((s) => ({ service: origin(s.endpoint), device: s.user_agent, createdAt: iso(s.created_at), lastDeliveredAt: iso(s.last_ok_at) })),
         prefs: prefs
-          ? { daily: prefs.daily === 1, dailyTimeMinutes: prefs.daily_time, prayer: prefs.prayer === 1, propReminders: prefs.props === 1, updatedAt: iso(prefs.updated_at) }
+          ? {
+              daily: prefs.daily === 1,
+              dailyTimeMinutes: prefs.daily_time,
+              prayer: prefs.prayer === 1,
+              propReminders: prefs.props === 1,
+              myStoryNews: prefs.library === 1,
+              newLetters: prefs.letters === 1,
+              letterReplies: prefs.replies === 1,
+              nightDiary: prefs.diary === 1,
+              nightDiaryTimeMinutes: prefs.diary_time,
+              updatedAt: iso(prefs.updated_at),
+            }
           : null,
       },
       appearance: this.looks?.export(userId) ?? null,
       propShop: this.shop?.export(userId) ?? null,
       // 이야기 도서관: my books (testimonies, diaries), 공감, 책갈피, books read, reports,
       // the draft, 발자취 (activity log) and my screenshots (images included).
-      library: this.library?.library.export(userId) ?? null,
+      library: this.library ? { ...this.library.library.export(userId), ...(this.library.letters?.export(userId) ?? {}) } : null,
       footprints: this.library?.footprints.export(userId) ?? null,
       screenshots: this.library?.shots.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
@@ -292,8 +317,12 @@ export class AccountService {
       // read pointers, push subscriptions and preferences, appearance and strikes
       // (columns on users), my outfit drawings (→ reports about them) and my reports,
       // prop rentals, their request log and daily counts (stock is not given back),
-      // my books (→ their 공감, 책갈피, readers, reports, photo links), my 공감/책갈피/
-      // reads/reports on others' books, my draft, 발자취 and screenshot rows.
+      // my books (→ their 공감, 책갈피, readers, reports, photo links, and every ✉️ letter
+      // thread under them), my 공감/책갈피/reads/reports on others' books, my draft,
+      // 발자취 and screenshot rows. ✉️ My letters on others' books go with their whole
+      // thread (the book author's replies too: a conversation with nobody on the other
+      // side would make no sense, and the replies quote/answer my words); my replies
+      // as a book author vanish with my books; my letter reports and read pointers.
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
       const remainingGroups = memberOf.filter((g) => !deletedGroups.includes(g));

@@ -653,6 +653,13 @@ export class Room implements RoomEvents, ShopEvents {
     }
   }
 
+  /** ✉️ 받은 편지: unread count (and an optional fixed-text toast) to that account's own connections. */
+  letters(userId: number, unread: number, toast?: string, storyId?: number) {
+    for (const c of this.clients.values()) {
+      if (c.joined && c.userId === userId && c.accountName) this.send(c, { t: 'letters', unread, ...(toast ? { toast } : {}), ...(storyId ? { storyId } : {}) });
+    }
+  }
+
   /** Read on one device: tell the user's other connections (badge sync). */
   groupRead(userId: number, groupId: number, lastReadId: number) {
     for (const c of this.clients.values()) {

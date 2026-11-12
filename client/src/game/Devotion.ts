@@ -29,6 +29,9 @@ export interface DevotionOptions {
   onLetterOpened?: (date: string) => void;
   /** 📔 오늘 일기 쓰기 from the 오늘 tab. */
   writeDiary?: () => void;
+  /** ✉️ 받은 편지 (L-B): open it, and how many are unread. */
+  openInbox?: () => void;
+  lettersUnread?: () => number;
 }
 
 /**
@@ -57,6 +60,8 @@ export class Devotion {
       word: () => this.word,
       meditate: () => this.meditateToday(true),
       writeDiary: o.writeDiary,
+      openInbox: o.openInbox,
+      lettersUnread: o.lettersUnread,
     });
     this.meditation = new MeditationView(o.store, o.needLogin);
     this.meditation.onSaved((place) => {

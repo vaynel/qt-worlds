@@ -135,6 +135,28 @@ export class Hud {
     this.wordBtn.setAttribute('aria-label', isNew ? '말씀 · 오늘의 말씀이 도착했어요' : '말씀');
   }
 
+  /**
+   * ✉️ 받은 편지 (L-B): unread letters and replies, as a badge on 말씀 (the 말씀 책's
+   * 오늘 page has 📬 받은 편지 and 📔 오늘 일기 쓰기).
+   */
+  setLettersUnread(n: number) {
+    let badge = this.wordBtn.querySelector<HTMLSpanElement>('.badge');
+    if (n <= 0) {
+      badge?.remove();
+      this.wordBtn.removeAttribute('data-letters');
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.id = 'word-letters-badge';
+      this.wordBtn.append(badge);
+    }
+    badge.textContent = n > 99 ? '99+' : String(n);
+    this.wordBtn.dataset.letters = String(n);
+    this.wordBtn.setAttribute('aria-label', `말씀 · 받은 편지 ${n}통`);
+  }
+
   /** 🔴 unread group chat messages on the 모임 button. */
   setGroupsUnread(n: number) {
     let badge = this.groupsBtn.querySelector<HTMLSpanElement>('.badge');

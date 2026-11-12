@@ -8,6 +8,7 @@ import {
   DESK_SEAT_HEIGHT,
   LIBRARY_EXIT,
   LIBRARY_ROOM,
+  LIBRARY_SPAWN,
   SHELVES,
   TESTIMONY_SHELVES,
   type ShelfCounts,
@@ -304,6 +305,33 @@ export class LibraryInterior implements Ground {
 
   collidersNear(): CircleCollider[] {
     return this.colliders;
+  }
+
+  /** Free floor for a standing body: inside the hall and clear of every collider. */
+  isFree(x: number, z: number, body = 0.35): boolean {
+    if (this.groundHeight(x, z) !== 0) return false;
+    return this.colliders.every((c) => Math.hypot(x - c.x, z - c.z) >= c.r + body - 1e-3);
+  }
+
+  /**
+   * B4 safety net: the nearest free floor to (x, z) (clamped into the hall first,
+   * then searched outward in rings). Always returns somewhere walkable.
+   */
+  nearestFree(x: number, z: number): { x: number; z: number } {
+    const { halfW, halfD } = LIBRARY_ROOM;
+    const cx = Math.max(-(halfW - 0.4), Math.min(halfW - 0.4, Number.isFinite(x) ? x : LIBRARY_SPAWN.x));
+    const cz = Math.max(-(halfD - 0.4), Math.min(halfD - 0.4, Number.isFinite(z) ? z : LIBRARY_SPAWN.z));
+    if (this.isFree(cx, cz)) return { x: cx, z: cz };
+    for (let r = 0.1; r <= 8; r += 0.1) {
+      const n = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.1));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const px = cx + Math.cos(a) * r;
+        const pz = cz + Math.sin(a) * r;
+        if (this.isFree(px, pz)) return { x: px, z: pz };
+      }
+    }
+    return { x: LIBRARY_SPAWN.x, z: LIBRARY_SPAWN.z };
   }
 
   // ------------------------------------------------------------------ books

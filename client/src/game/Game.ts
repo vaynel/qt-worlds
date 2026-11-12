@@ -42,7 +42,7 @@ import { Social } from './Social';
 import { ShopClient } from './Shop';
 import { PropDock, ShopView } from '../ui/ShopView';
 import { PLAZA as PLAZA_CENTRE, PROPS, SHOP_STALL, shopWindowAt } from '../../../shared/protocol';
-import { DESK_SEATS, LIBRARY_DOOR, LIBRARY_SPAWN, SHELVES, type ShelfCounts, type Space } from '../../../shared/protocol';
+import { DESK_SEATS, LIBRARY_DOOR, LIBRARY_ROOM, LIBRARY_SPAWN, SHELVES, type ShelfCounts, type Space } from '../../../shared/protocol';
 import { LibraryInterior, type LibrarySpot } from '../world/Library';
 import { LibraryView } from '../ui/LibraryView';
 import { kstStamp, takePhoto } from './Photo';
@@ -75,6 +75,20 @@ const DOOR_REACH = 2.6;
  * Networking (remote players, chat, mats) lives in Social and runs right
  * after the local player moves.
  */
+
+type DeepLink = { kind: 'book'; id: number; letter: number | null } | { kind: 'diary' } | { kind: 'inbox' };
+/** Links from notifications: /?book=<id>[&letter=<id>], /?diary=1, /?letters=1. */
+function deepLink(q: URLSearchParams): DeepLink | null {
+  const book = Number(q.get('book'));
+  if (Number.isInteger(book) && book > 0) {
+    const letter = Number(q.get('letter'));
+    return { kind: 'book', id: book, letter: Number.isInteger(letter) && letter > 0 ? letter : null };
+  }
+  if (q.get('diary') === '1') return { kind: 'diary' };
+  if (q.get('letters') === '1') return { kind: 'inbox' };
+  return null;
+}
+
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -255,6 +269,13 @@ export class Game {
     }
     if (session.account) void this.groupsView.refreshUnread();
     session.net?.on({
+      // ✉️ 받은 편지: badge on 말씀; a gentle toast (fixed text) when something arrived.
+      letters: (unread, toast, storyId) => {
+        this.setLettersUnread(unread);
+        const reading = storyId !== null && this.libraryView.isOpen && this.libraryView.describe().story?.id === storyId;
+        if (reading && storyId !== null) void this.libraryView.refreshLetters(storyId);
+        else if (toast) this.hud.toast(`${toast} · 말씀 → 📬 받은 편지`, this.elapsed, 5);
+      },
       groupChat: (m) => this.groupsView.receive(m),
       groupChatUpdate: (m) => this.groupsView.update(m),
       groupRead: (gid) => this.groupsView.readElsewhere(gid),
@@ -265,6 +286,9 @@ export class Game {
       lanternGone: (id) => this.lanterns.remove(id),
       // The server refused a jump: go back to where it last accepted us.
       correct: (x, _y, z) => {
+        // B4: a late correction for the world (sent before we stepped inside) must not
+        // drop us at world coordinates inside the hall.
+        if (this.inLibrary && (Math.abs(x) > LIBRARY_ROOM.halfW || Math.abs(z) > LIBRARY_ROOM.halfD)) return;
         this.player.teleport(x, z);
         this.rig.snap(this.player.position);
       },
@@ -281,6 +305,8 @@ export class Game {
       now: () => this.elapsed,
       needLogin,
       lanternsChanged: () => undefined,
+      openInbox: () => this.libraryView.openMine('inbox'),
+      lettersUnread: () => this.lettersUnread,
       onLetterOpened: () => {
         if (this.account) void api('POST', '/api/footprints/letter').catch(() => undefined);
       },
@@ -320,13 +346,19 @@ export class Game {
       needLogin: (reason) => this.loginPrompt.open(reason, ''),
       toast: (text) => this.hud.toast(text, this.elapsed, 4),
       changed: () => void this.refreshShelves(),
+      lettersUnread: (n) => this.setLettersUnread(n),
     });
+    if (this.account) void this.refreshLetters();
+    this.pendingLink = deepLink(params);
     this.setupCamera();
     // Tapping a 🕊️ notification while the app is open: show today's word.
     window.addEventListener('worlds-notification-click', (e) => {
       // ⏰ prop reminders just bring the app forward (the HUD chip shows the time left).
       const url = (e as CustomEvent).detail;
       if (typeof url === 'string' && url.includes('props=1')) return;
+      // 📚 / ✉️ / 💌 → that book; 📔 → today's diary (L-B).
+      const link = typeof url === 'string' ? deepLink(new URL(url, location.origin).searchParams) : null;
+      if (link) return this.openLink(link);
       if (!Modal.anyOpen) void this.devotion.openWord();
     });
 
@@ -360,6 +392,13 @@ export class Game {
     }
     document.getElementById('closet-meditate')!.addEventListener('click', () => this.devotion.meditate());
     document.getElementById('closet-exit')!.addEventListener('click', () => this.leaveCloset());
+    // B4: from anywhere in the library, straight out of the door.
+    const libExit = document.getElementById('library-exit');
+    libExit?.addEventListener('pointerdown', (e) => e.stopPropagation());
+    libExit?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!this.transitioning) this.leaveLibrary();
+    });
 
     // Tap/click (not drag) on the canvas: open the letter if it was hit.
     canvas.addEventListener('pointerdown', (e) => {
@@ -712,6 +751,48 @@ export class Game {
     return true;
   }
 
+  /**
+   * B4 safety net: holding a direction for ~2 s without moving while not on free
+   * floor (inside furniture, off the floor) → step to the nearest free spot.
+   */
+  private stuckFor = 0;
+  private watchStuck(dt: number, bx: number, bz: number) {
+    const p = this.player.position;
+    const pushing = Math.hypot(this.move.x, this.move.y) > 0.3 && this.player.seat < 0 && !this.transitioning;
+    const moved = Math.hypot(p.x - bx, p.z - bz) > 0.002;
+    this.stuckFor = pushing && !moved ? this.stuckFor + dt : 0;
+    if (this.stuckFor < 2) return;
+    this.stuckFor = 0;
+    if (!this.library.isFree(p.x, p.z, 0.3)) {
+      this.player.recover();
+      this.social.forceSend();
+      this.hud.toast('길이 막혀서 가까운 빈자리로 옮겼어요. 왼쪽 위 ↩ 문으로 나가기로 언제든 나갈 수 있어요.', this.elapsed, 5);
+    }
+  }
+
+  /** ✉️ unread letters (badge on 말씀). */
+  private lettersUnread = 0;
+  private setLettersUnread(n: number) {
+    this.lettersUnread = n;
+    this.hud.setLettersUnread(n);
+  }
+
+  private async refreshLetters() {
+    try {
+      this.setLettersUnread((await api<{ unread: number }>('GET', '/api/library/letters/inbox')).unread);
+    } catch {
+      /* offline */
+    }
+  }
+
+  /** ?book=… / ?diary=1 (notification taps, shared links): opened once the world is up. */
+  private pendingLink: DeepLink | null = null;
+  private openLink(link: DeepLink) {
+    if (link.kind === 'book') this.libraryView.openStory(link.id, link.letter);
+    else if (link.kind === 'diary') this.libraryView.openDiary();
+    else this.libraryView.openMine('inbox');
+  }
+
   private async refreshShelves() {
     try {
       const r = await api<{ shelves: ShelfCounts }>('GET', '/api/library/shelves');
@@ -930,6 +1011,152 @@ export class Game {
         else if (what === 'diary') v.openDiary();
         else if (what === 'desk') v.openDesk();
       },
+      /**
+       * B4: drive the real PlayerController on the library floor (no rendering):
+       * from every free grid point walk a BFS path to the door; push into walls,
+       * corners and furniture; stand up from every desk chair.
+       */
+      libraryWalk: (gridStep = 0.4) => {
+        const lib = this.library;
+        const pc = new PlayerController(lib, LIBRARY_SPAWN.x, LIBRARY_SPAWN.z, 0);
+        const { halfW, halfD } = LIBRARY_ROOM;
+        const exit = { x: 0, z: 6.3 };
+        const cell = 0.25;
+        const nx = Math.round((2 * halfW) / cell);
+        const nz = Math.round((2 * halfD) / cell);
+        const idx = (i: number, k: number) => k * nx + i;
+        const cx = (i: number) => -halfW + (i + 0.5) * cell;
+        const cz = (k: number) => -halfD + (k + 0.5) * cell;
+        const free = new Uint8Array(nx * nz);
+        for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) free[idx(i, k)] = lib.isFree(cx(i), cz(k), 0.36) ? 1 : 0;
+        // Distance field from the door over free cells (4-neighbour BFS).
+        const dist = new Int32Array(nx * nz).fill(-1);
+        const ei = Math.floor((exit.x + halfW) / cell);
+        const ek = Math.floor((exit.z + halfD) / cell);
+        const q = [idx(ei, ek)];
+        dist[q[0]] = 0;
+        for (let h = 0; h < q.length; h++) {
+          const c = q[h];
+          const i = c % nx;
+          const k = Math.floor(c / nx);
+          for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const ii = i + di;
+            const kk = k + dk;
+            if (ii < 0 || kk < 0 || ii >= nx || kk >= nz) continue;
+            const n = idx(ii, kk);
+            if (!free[n] || dist[n] >= 0) continue;
+            dist[n] = dist[c] + 1;
+            q.push(n);
+          }
+        }
+        const cellOf = (x: number, z: number) => idx(Math.max(0, Math.min(nx - 1, Math.floor((x + halfW) / cell))), Math.max(0, Math.min(nz - 1, Math.floor((z + halfD) / cell))));
+        const onFloor = () => lib.groundHeight(pc.position.x, pc.position.z) === 0;
+        const step = (dx: number, dz: number, run = false) => {
+          const len = Math.hypot(dx, dz) || 1;
+          pc.update(1 / 60, { x: dx / len, y: -dz / len, run }, 0, 0);
+        };
+        const out = { starts: 0, reached: 0, unreachable: [] as string[], stuck: [] as string[], offFloor: [] as string[], pushes: 0, pushFails: [] as string[], seats: [] as string[] };
+        for (let x = -halfW + 0.3; x <= halfW - 0.3; x += gridStep) {
+          for (let z = -halfD + 0.3; z <= halfD - 0.3; z += gridStep) {
+            if (!lib.isFree(x, z, 0.36)) continue;
+            out.starts++;
+            const tag = `${x.toFixed(1)},${z.toFixed(1)}`;
+            // The start is free but its grid cell's centre may not be: any reachable cell within ~0.5 m will do.
+            let near = false;
+            const c0 = cellOf(x, z);
+            for (let di = -2; di <= 2 && !near; di++)
+              for (let dk = -2; dk <= 2 && !near; dk++) {
+                const ii = (c0 % nx) + di;
+                const kk = Math.floor(c0 / nx) + dk;
+                if (ii >= 0 && kk >= 0 && ii < nx && kk < nz && dist[idx(ii, kk)] >= 0) near = true;
+              }
+            if (!near) {
+              out.unreachable.push(tag);
+              continue;
+            }
+            pc.teleport(x, z);
+            let ok = false;
+            for (let t = 0; t < 60 * 40; t++) {
+              const p = pc.position;
+              if (Math.hypot(p.x - exit.x, p.z - exit.z) < 1.0) {
+                ok = true;
+                break;
+              }
+              // Steer to the lowest-distance free neighbour cell's centre.
+              const c = cellOf(p.x, p.z);
+              let best = c;
+              const i0 = c % nx;
+              const k0 = Math.floor(c / nx);
+              for (let di = -1; di <= 1; di++)
+                for (let dk = -1; dk <= 1; dk++) {
+                  const ii = i0 + di;
+                  const kk = k0 + dk;
+                  if (ii < 0 || kk < 0 || ii >= nx || kk >= nz) continue;
+                  const n = idx(ii, kk);
+                  if (dist[n] >= 0 && (dist[best] < 0 || dist[n] < dist[best])) best = n;
+                }
+              if (dist[best] < 0)
+                for (let di = -2; di <= 2; di++)
+                  for (let dk = -2; dk <= 2; dk++) {
+                    const ii = i0 + di;
+                    const kk = k0 + dk;
+                    if (ii < 0 || kk < 0 || ii >= nx || kk >= nz) continue;
+                    const n = idx(ii, kk);
+                    if (dist[n] >= 0 && (dist[best] < 0 || dist[n] < dist[best])) best = n;
+                  }
+              const tx = best === c ? exit.x : cx(best % nx);
+              const tz = best === c ? exit.z : cz(Math.floor(best / nx));
+              step(tx - p.x, tz - p.z);
+              if (!onFloor()) {
+                out.offFloor.push(tag);
+                break;
+              }
+            }
+            if (ok) out.reached++;
+            else if (!out.offFloor.includes(tag)) out.stuck.push(`${tag}→${pc.position.x.toFixed(1)},${pc.position.z.toFixed(1)}`);
+          }
+        }
+        // Push hard into every wall, corner and piece of furniture for 3 s, then walk out.
+        const targets: { x: number; z: number }[] = [
+          ...lib.collidersNear().map((c) => ({ x: c.x, z: c.z })),
+          { x: -halfW, z: -halfD },
+          { x: halfW, z: -halfD },
+          { x: -halfW, z: halfD },
+          { x: halfW, z: halfD },
+          { x: -halfW, z: 0 },
+          { x: halfW, z: 0 },
+          { x: 0, z: -halfD },
+          { x: 3, z: halfD },
+        ];
+        for (const t of targets) {
+          for (let a = 0; a < 8; a++) {
+            const sx = t.x + Math.cos((a / 8) * Math.PI * 2) * 1.6;
+            const sz = t.z + Math.sin((a / 8) * Math.PI * 2) * 1.6;
+            if (!lib.isFree(sx, sz, 0.36)) continue;
+            out.pushes++;
+            pc.teleport(sx, sz);
+            for (let i = 0; i < 180; i++) step(t.x - pc.position.x, t.z - pc.position.z, i % 2 === 0);
+            const tag = `${t.x.toFixed(1)},${t.z.toFixed(1)}#${a}`;
+            if (!onFloor()) {
+              out.pushFails.push(`${tag} off floor`);
+              continue;
+            }
+            // …and can still walk away from it.
+            const before = { x: pc.position.x, z: pc.position.z };
+            for (let i = 0; i < 90; i++) step(sx - t.x, sz - t.z);
+            if (Math.hypot(pc.position.x - before.x, pc.position.z - before.z) < 0.3) out.pushFails.push(`${tag} can't back off`);
+          }
+        }
+        for (const seat of DESK_SEATS) {
+          pc.sitAt(seat.index, seat.x, seat.z, seat.yaw, 'desk');
+          pc.standUp();
+          if (!lib.isFree(pc.position.x, pc.position.z, 0.34)) out.seats.push(`seat ${seat.index} → ${pc.position.x.toFixed(2)},${pc.position.z.toFixed(2)}`);
+        }
+        pc.avatar.root.removeFromParent();
+        return out;
+      },
+      libraryFree: (x: number, z: number) => this.library.isFree(x, z),
+      playerPos: () => ({ x: this.player.position.x, z: this.player.position.z, inLibrary: this.inLibrary }),
       capture: () => this.capture(),
       /** Screen position of a library spot (to tap it like a player would). */
       libraryScreen: (x: number, y: number, z: number) => {
@@ -988,7 +1215,10 @@ export class Game {
     this.hud.setTouch(this.input.isTouch);
 
     // 2. Simulation
+    const bx = this.player.position.x;
+    const bz = this.player.position.z;
     this.player.update(dt, this.move, this.rig.yaw, this.elapsed);
+    if (this.inLibrary) this.watchStuck(dt, bx, bz);
     this.social.update(dt, this.elapsed, Math.hypot(this.move.x, this.move.y) > 0.2);
 
     // 3. Camera (after the player moved)
@@ -1020,6 +1250,23 @@ export class Game {
 
     if (this.frame === 3) {
       this.hud.ready();
+      const link = this.pendingLink;
+      if (link) {
+        this.pendingLink = null;
+        // Tidy the address bar (a reload shouldn't reopen it).
+        const q = new URLSearchParams(location.search);
+        for (const k of ['book', 'letter', 'diary', 'letters']) q.delete(k);
+        const qs = q.toString();
+        history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`);
+        if (!this.pendingGuide) this.openLink(link);
+        else {
+          const after = this.pendingGuide;
+          this.pendingGuide = () => {
+            after();
+            this.openLink(link);
+          };
+        }
+      }
       const next = this.pendingGuide;
       if (next) {
         this.pendingGuide = null;

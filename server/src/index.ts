@@ -14,6 +14,7 @@ import { Room } from './Room.js';
 import { ShopService } from './shop.js';
 import { FootprintService } from './footprints.js';
 import { LibraryService } from './library.js';
+import { LetterService } from './letters.js';
 import { ShotService } from './shots.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
@@ -74,8 +75,9 @@ const footprints = new FootprintService(db);
 const shotsDir = process.env.WORLDS_SHOTS_DIR ?? resolve(dirname(dbPath), 'screenshots');
 const shots = new ShotService(db, shotsDir);
 const library = new LibraryService(db, groups, dailyWord, footprints, shots);
+const letters = new LetterService(db, library);
 log(`screenshots: ${shotsDir}`);
-const accounts = new AccountService(db, looks, shop, { library, footprints, shots });
+const accounts = new AccountService(db, looks, shop, { library, footprints, shots, letters });
 if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
 else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
@@ -114,7 +116,7 @@ const room = new Room({
 shop.events = room;
 const ice = new IceServers();
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, footprints, shots, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -192,7 +194,8 @@ const sweep = () => {
 };
 const sweeper = setInterval(sweep, 3_600_000);
 sweep();
-// Every minute: daily words that are due (Asia/Seoul) and batched prayer notices.
+// Every minute: daily words that are due (Asia/Seoul), batched prayer and 공감 notices,
+// and 📔 밤 일기 알림.
 // Mock push (tests) is driven by /api/test/push/tick with a fake clock instead.
 // Every second: shop windows (stock release), prop expiry and 10-minute reminders (server clock).
 const shopTimer = setInterval(() => void shop.tick().catch((e) => console.error('shop tick', e)), 1000);

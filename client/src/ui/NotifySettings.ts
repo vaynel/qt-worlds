@@ -10,7 +10,20 @@ export interface PushPrefs {
   prayer: boolean;
   /** 소품 만료 알림 (M9). */
   props: boolean;
+  /** L-B: 📚 내 이야기 소식 (공감, batched), ✉️ new letters, 💌 answers to my letters. */
+  library?: boolean;
+  letters?: boolean;
+  replies?: boolean;
+  /** 📔 밤 일기 알림 (default off) and its time. */
+  diary?: boolean;
+  diaryTime?: string;
 }
+
+/** 밤 일기 알림: evenings, every 30 minutes (17:00 … 23:30). */
+const DIARY_TIMES = Array.from({ length: 14 }, (_, i) => {
+  const m = 17 * 60 + i * 30;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+});
 
 const DENIED_STEPS: Record<Platform, { title: string; steps: string[] }> = {
   'ios-standalone': { title: 'iPhone · iPad (홈 화면 앱)', steps: ['설정 앱 → 알림 → QT 월드', '"알림 허용"을 켜요'] },
@@ -188,6 +201,27 @@ export class NotifySettings {
     timeRow.append(el('span', 'settings-hint', '매일 (한국 시간)'), time);
     const prayer = toggle('notify-prayer', '🤲 내 등불에 기도하기 반응', prefs.prayer, (v) => void save({ prayer: v }));
     const props = toggle('notify-props', '⏰ 소품 만료 알림 (끝나기 10분 전)', prefs.props !== false, (v) => void save({ props: v }));
+    // 이야기 도서관 (L-B).
+    const library = toggle('notify-library', '📚 내 이야기 소식 (공감, 30분에 한 번 모아서)', prefs.library !== false, (v) => void save({ library: v }));
+    const letters = toggle('notify-letters', '✉️ 내 이야기에 온 새 편지', prefs.letters !== false, (v) => void save({ letters: v }));
+    const replies = toggle('notify-replies', '💌 내 편지에 온 답장', prefs.replies !== false, (v) => void save({ replies: v }));
+    const diaryTime = el('select', 'notify-time');
+    diaryTime.id = 'notify-diary-time';
+    diaryTime.setAttribute('aria-label', '밤 일기 알림 시간');
+    for (const t of DIARY_TIMES) {
+      const o = el('option', '', timeLabel(t));
+      o.value = t;
+      diaryTime.append(o);
+    }
+    diaryTime.value = prefs.diaryTime ?? '21:00';
+    diaryTime.disabled = !prefs.diary;
+    diaryTime.addEventListener('change', () => void save({ diaryTime: diaryTime.value }));
+    const diary = toggle('notify-diary', '📔 밤 일기 알림', prefs.diary === true, (v) => {
+      diaryTime.disabled = !v;
+      void save({ diary: v });
+    });
+    const diaryRow = el('label', 'notify-time-row');
+    diaryRow.append(el('span', 'settings-hint', '오늘 발자취가 있고 일기를 아직 안 썼을 때만'), diaryTime);
 
     const off = button('알림 끄기', 'ghost', async () => {
       off.disabled = true;
@@ -209,7 +243,13 @@ export class NotifySettings {
       timeRow,
       prayer.row,
       props.row,
-      el('p', 'settings-note', '누가 기도했는지는 알려 드리지 않아요. 알림 설정은 내 계정에 저장돼요.'),
+      el('p', 'settings-section notify-section', '📚 이야기 도서관'),
+      library.row,
+      letters.row,
+      replies.row,
+      diary.row,
+      diaryRow,
+      el('p', 'settings-note', '누가 기도하거나 공감했는지, 편지의 내용과 보낸 분의 이름은 알림에 담기지 않아요. 알림 설정은 내 계정에 저장돼요.'),
       off,
       this.status,
     );

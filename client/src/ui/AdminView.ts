@@ -52,6 +52,23 @@ interface AdminStory extends StoryDetail {
   authorBanUntil: number | null;
 }
 
+interface AdminLetter {
+  id: number;
+  storyId: number;
+  storyTitle: string;
+  reply: boolean;
+  role: 'author' | 'writer';
+  writer: string;
+  anonymous: boolean;
+  text: string;
+  deleted: boolean;
+  hidden: boolean;
+  review: 'kept' | 'restored' | null;
+  reporters: number;
+  reasons: Partial<Record<StoryReportReason, number>>;
+  createdAt: string;
+}
+
 export type AdminTab = 'outfits' | 'shop' | 'library';
 
 export class AdminView {
@@ -258,8 +275,12 @@ export class AdminView {
 
   private async loadLibrary(note = '') {
     let list: AdminStory[];
+    let letters: AdminLetter[];
     try {
-      list = (await api<{ stories: AdminStory[] }>('GET', '/api/admin/library')).stories;
+      [list, letters] = await Promise.all([
+        api<{ stories: AdminStory[] }>('GET', '/api/admin/library').then((r) => r.stories),
+        api<{ letters: AdminLetter[] }>('GET', '/api/admin/library/letters').then((r) => r.letters),
+      ]);
     } catch (err) {
       this.modal.sheet.replaceChildren(el('p', 'settings-note', err instanceof ApiError ? err.message : '불러오지 못했어요.'));
       return;
@@ -280,7 +301,45 @@ export class AdminView {
     if (list.length === 0) body.append(el('p', 'settings-note', '살펴볼 책이 없어요.'));
     for (const s of list) ul.append(this.storyCard(s));
     body.append(ul);
+    // ✉️ 신고된 편지 (L-B).
+    body.append(el('h3', 'admin-subtitle', `✉️ 신고된 편지 ${letters.length ? letters.length : ''}`.trim()));
+    body.append(el('p', 'settings-note', '서로 다른 3명이 신고하면 자동으로 숨겨져요. 익명 편지와 익명 책 글쓴이의 이름은 여기에서만 보여요. 편지를 삭제하면 그 아래 답장도 함께 지워져요.'));
+    const ll = el('ul', 'admin-list');
+    ll.id = 'admin-letters-list';
+    if (letters.length === 0) body.append(el('p', 'settings-note', '살펴볼 편지가 없어요.'));
+    for (const l of letters) ll.append(this.letterCard(l));
+    body.append(ll);
     sheet.append(this.top('도서관 관리'), body);
+  }
+
+  private letterCard(l: AdminLetter): HTMLElement {
+    const li = el('li', 'admin-item admin-letter');
+    li.dataset.id = String(l.id);
+    const info = el('div', 'admin-info');
+    const state = l.hidden ? (l.review === 'kept' ? '숨김 (유지)' : '숨김') : l.review === 'restored' ? '보임 (복구됨)' : '보임';
+    info.append(
+      el('strong', 'admin-owner', `${l.reply ? '답장' : '편지'} · ${l.writer}${l.anonymous ? ' (익명으로 보임)' : ''}${l.role === 'author' ? ' · 글쓴이' : ''}`),
+      el('span', '', `책: ${l.storyTitle} · ${day(Date.parse(l.createdAt))}`),
+      el('span', `admin-state ${l.hidden ? 'hidden' : ''}`, state),
+      el('span', '', `신고 ${l.reporters}명 · ${Object.entries(l.reasons).map(([k, n]) => `${STORY_REPORT_LABELS[k as StoryReportReason] ?? k} ${n}`).join(', ') || '-'}`),
+      el('p', 'admin-letter-text', l.deleted ? '(쓴 분이 지운 편지)' : l.text),
+    );
+    const actions = el('div', 'admin-actions');
+    const act = async (action: 'hide' | 'restore' | 'delete') => {
+      if (action === 'delete' && !window.confirm(l.reply ? '이 답장을 삭제할까요?' : '이 편지와 그 아래 답장을 모두 삭제할까요? 되돌릴 수 없어요.')) return;
+      try {
+        await api('POST', `/api/admin/library/letters/${l.id}`, { action });
+        await this.loadLibrary(action === 'hide' ? '편지 숨김을 유지해요.' : action === 'restore' ? '편지를 복구했어요.' : '편지를 삭제했어요.');
+      } catch (err) {
+        if (this.status) this.status.textContent = err instanceof ApiError ? err.message : '처리하지 못했어요.';
+      }
+    };
+    const keep = button(l.hidden ? '숨김 유지' : '숨기기', 'chip admin-hide', () => void act('hide'));
+    const restore = button('복구', 'chip admin-restore', () => void act('restore'));
+    const del = button('삭제', 'chip admin-delete', () => void act('delete'));
+    actions.append(keep, restore, del);
+    li.append(info, actions);
+    return li;
   }
 
   private storyCard(s: AdminStory): HTMLElement {

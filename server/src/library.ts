@@ -21,6 +21,7 @@ import {
   STORY_VISIBILITIES,
   type ShelfCounts,
   type ShelfId,
+  type DiaryLineMeta,
   type StoryDetail,
   type StoryItem,
   type StoryReaction,
@@ -67,6 +68,7 @@ interface StoryRow {
   r_pray: number;
   is_read: number;
   is_bookmarked: number;
+  line_meta: string | null;
 }
 
 /** Everything a list or detail needs, for one viewer (-1 = guest). */
@@ -81,7 +83,7 @@ const SELECT = `SELECT s.*, u.nickname AS nickname, g.name AS group_name,
   FROM stories s JOIN users u ON u.id = s.user_id LEFT JOIN groups g ON g.id = s.group_id`;
 
 /** Server-side visibility, as SQL: mine, or not hidden and (public | anonymous | my group). */
-const VISIBLE = `(s.user_id = @viewer OR (s.hidden_at IS NULL AND (s.visibility IN ('public', 'anonymous')
+export const VISIBLE = `(s.user_id = @viewer OR (s.hidden_at IS NULL AND (s.visibility IN ('public', 'anonymous')
   OR (s.visibility = 'group' AND s.group_id IN (SELECT m.group_id FROM group_members m WHERE m.user_id = @viewer)))))`;
 
 const excerptOf = (text: string, n = 80) => {
@@ -98,7 +100,7 @@ const diaryTitle = (date: string) => {
 export interface DiaryDraft {
   date: string;
   word: { ref: string; text: string } | null;
-  lines: { key: string; text: string }[];
+  lines: { key: string; minute: number; text: string }[];
   photos: ReturnType<ShotService['list']>;
   existing: StoryDetail | null;
   defaultVisibility: StoryVisibility;
@@ -111,7 +113,7 @@ export interface DiaryDraft {
  * 📔 오늘의 일기 (one per day, drafted from 발자취 with fixed templates), with
  * 💛 공감, 🔖 책갈피, unique readers, reports (auto-hide), admin review and a
  * writing ban. Visibility is decided here for every list, detail and photo.
- * (✉️ 답장 편지 is L-B: it will hang off stories(id) like story_reactions.)
+ * ✉️ 답장 편지 (L-B) lives in LetterService and asks `book()` here who may see a book.
  */
 export class LibraryService {
   now: () => number = () => Date.now();
@@ -147,6 +149,16 @@ export class LibraryService {
       return Array.isArray(p) ? p.filter((x): x is string => typeof x === 'string') : [];
     } catch {
       return [];
+    }
+  }
+
+  private lineMeta(s: StoryRow): (DiaryLineMeta | null)[] | null {
+    if (s.kind !== 'diary' || !s.line_meta) return null;
+    try {
+      const m = JSON.parse(s.line_meta) as unknown;
+      return Array.isArray(m) ? m.map((x) => (x && typeof x === 'object' && typeof x.key === 'string' && typeof x.minute === 'number' ? { key: x.key, minute: x.minute } : null)) : null;
+    } catch {
+      return null;
     }
   }
 
@@ -191,6 +203,7 @@ export class LibraryService {
       ref: s.ref,
       verse: s.verse,
       photoIds,
+      lineMeta: this.lineMeta(s),
       myReactions,
       groupId: mine ? s.group_id : null,
     };
@@ -262,6 +275,22 @@ export class LibraryService {
     return s;
   }
 
+  /** The book as LetterService needs it, if this viewer may see it (else the same 404). */
+  book(id: number, viewerId: number | null, admin = false) {
+    const s = this.visible(id, viewerId, admin);
+    return { id: s.id, userId: s.user_id, kind: s.kind, title: s.title, visibility: s.visibility, hidden: s.hidden_at !== null };
+  }
+
+  /** Writing ban (글쓰기 금지) also covers letters. */
+  assertCanWrite(userId: number) {
+    this.checkBan(userId);
+  }
+
+  /** Same personal-info check as books (409 until confirmed). */
+  assertNoPersonal(text: string, confirmed: unknown) {
+    this.personal(text, confirmed, '보낼까요');
+  }
+
   /** Open a book: counts this reader once (never the author) and leaves a 발자취. */
   detail(id: number, viewerId: number | null, admin = false): StoryDetail {
     const s = this.visible(id, viewerId, admin);
@@ -304,10 +333,10 @@ export class LibraryService {
   }
 
   /** Phone numbers, e-mails, resident numbers: 409 until the author says 그래도 올리기. */
-  private personal(text: string, confirmed: unknown) {
+  private personal(text: string, confirmed: unknown, verb = '올릴까요') {
     const kinds = personalInfoKinds(text);
     if (kinds.length && confirmed !== true) {
-      throw new HttpError(409, 'personal_info', `${kinds.join(', ')}처럼 보이는 내용이 있어요. 다른 사람이 볼 수 있어요. 그래도 올릴까요?`);
+      throw new HttpError(409, 'personal_info', `${kinds.join(', ')}처럼 보이는 내용이 있어요. 다른 사람이 볼 수 있어요. 그래도 ${verb}?`);
     }
   }
 
@@ -415,7 +444,7 @@ export class LibraryService {
     return {
       date,
       word: word ? { ref: word.ref, text: word.text } : null,
-      lines: diaryLines(fp.events, fp.minutes).map((l) => ({ key: l.key, text: l.text })),
+      lines: diaryLines(fp.events, fp.minutes).map((l) => ({ key: l.key, minute: l.minute, text: l.text })),
       photos: this.shots.list(userId, date),
       existing: existingRow ? this.detailOf(this.row(existingRow.id, userId)!, userId) : null,
       defaultVisibility: this.defaultVisibility(userId),
@@ -431,7 +460,19 @@ export class LibraryService {
     const date = kstDateOf(now);
     const rawLines = Array.isArray(body.lines) ? body.lines : [];
     if (rawLines.length > DIARY_LINES_MAX) throw new HttpError(400, 'too_long', `일기는 ${DIARY_LINES_MAX}줄까지 쓸 수 있어요.`);
-    const lines = rawLines.map((l) => (typeof l === 'string' ? cleanText(l) : '')).filter((l) => l.length > 0);
+    // Each line's source (key + minute) from today's template draft, when the client says which one it was.
+    const fp = this.footprints.day(userId, date);
+    const known = new Map(diaryLines(fp.events, fp.minutes).map((l) => [l.key, l.minute]));
+    const rawMeta = Array.isArray(body.lineKeys) ? body.lineKeys : [];
+    const pairs = rawLines
+      .map((l, i) => {
+        const key = rawMeta[i];
+        const minute = typeof key === 'string' ? known.get(key) : undefined;
+        return { text: typeof l === 'string' ? cleanText(l) : '', meta: typeof key === 'string' && minute !== undefined ? { key, minute } : null };
+      })
+      .filter((p) => p.text.length > 0);
+    const lines = pairs.map((p) => p.text);
+    const lineMeta = pairs.some((p) => p.meta) ? JSON.stringify(pairs.map((p) => p.meta)) : null;
     if (lines.some((l) => [...l].length > DIARY_LINE_MAX)) throw new HttpError(400, 'too_long', `한 줄은 ${DIARY_LINE_MAX}자까지 쓸 수 있어요.`);
     const note = typeof body.note === 'string' ? cleanMultiline(body.note) : '';
     if ([...note].length > DIARY_NOTE_MAX) throw new HttpError(400, 'too_long', `오늘 한 줄은 ${DIARY_NOTE_MAX}자까지 쓸 수 있어요.`);
@@ -450,17 +491,17 @@ export class LibraryService {
       if (existing) {
         sid = existing.id;
         this.db
-          .prepare('UPDATE stories SET parts = ?, note = ?, visibility = ?, group_id = ?, ref = ?, verse = ?, updated_at = ? WHERE id = ?')
-          .run(JSON.stringify(lines), note, vis.visibility, vis.groupId, word?.ref ?? null, word?.text ?? null, now, sid);
+          .prepare('UPDATE stories SET parts = ?, line_meta = ?, note = ?, visibility = ?, group_id = ?, ref = ?, verse = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(lines), lineMeta, note, vis.visibility, vis.groupId, word?.ref ?? null, word?.text ?? null, now, sid);
         this.db.prepare('DELETE FROM diary_photos WHERE story_id = ?').run(sid);
       } else {
         sid = Number(
           this.db
             .prepare(
-              `INSERT INTO stories (user_id, kind, shelf, title, parts, note, ref, verse, visibility, group_id, kst_date, created_at, updated_at)
-               VALUES (?, 'diary', 'diary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO stories (user_id, kind, shelf, title, parts, line_meta, note, ref, verse, visibility, group_id, kst_date, created_at, updated_at)
+               VALUES (?, 'diary', 'diary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
-            .run(userId, diaryTitle(date), JSON.stringify(lines), note, word?.ref ?? null, word?.text ?? null, vis.visibility, vis.groupId, date, now, now).lastInsertRowid,
+            .run(userId, diaryTitle(date), JSON.stringify(lines), lineMeta, note, word?.ref ?? null, word?.text ?? null, vis.visibility, vis.groupId, date, now, now).lastInsertRowid,
         );
       }
       const add = this.db.prepare('INSERT INTO diary_photos (story_id, shot_id, ord) VALUES (?, ?, ?)');

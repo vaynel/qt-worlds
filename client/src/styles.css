@@ -5010,3 +5010,650 @@ body.touch #camera-btn {
   font-size: 15px;
   padding: 7px 10px;
 }
+
+/* =================== L-B: B4 library escape =================== */
+.library-exit {
+  display: none;
+  margin-top: 6px;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 0.82rem;
+  border-radius: 999px;
+  background: rgba(255, 250, 240, 0.95);
+  color: var(--ink);
+  border: 1px solid rgba(74, 52, 38, 0.18);
+  pointer-events: auto;
+}
+body.in-library .library-exit {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* =================== L-B: B6 book reader, ✉️ letters, 📬 inbox =================== */
+.sheet.library.lib-page-story {
+  --paper: #fbf4e4;
+  --paper-edge: #efe1c3;
+  --serif: 'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', 'Batang', 'Source Han Serif K', 'Noto Serif CJK KR', Georgia, serif;
+  width: min(680px, 100%);
+  background: var(--paper);
+}
+.lib-page-story .lib-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  border-bottom: 1px solid var(--paper-edge);
+}
+.lib-page-story .lib-body {
+  padding: 0 0 12px;
+  gap: 0;
+}
+.lib-more-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.lib-more-btn {
+  min-width: 44px;
+  min-height: 40px;
+  font-size: 1.3rem;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.lib-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: #fffdf7;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(42, 30, 22, 0.25);
+}
+.lib-menu[hidden] {
+  display: none;
+}
+.lib-menu-item {
+  justify-content: flex-start;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  min-height: 42px;
+  padding: 8px 10px;
+  font-weight: 600;
+}
+.lib-menu-item.danger {
+  color: #a3301e;
+}
+.lib-reader {
+  margin: 0;
+  padding: 22px clamp(20px, 6vw, 44px) 18px;
+  font-family: var(--serif);
+  color: #3e2c20;
+  line-height: 1.9;
+  background:
+    linear-gradient(90deg, rgba(160, 120, 70, 0.07), transparent 18px, transparent calc(100% - 18px), rgba(160, 120, 70, 0.07)),
+    var(--paper);
+}
+.lib-reader-head {
+  text-align: center;
+  margin-bottom: 14px;
+}
+.lib-reader-shelf {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.lib-reader .lib-story-title {
+  margin: 8px 0 6px;
+  font-size: 1.42rem;
+  line-height: 1.4;
+  font-weight: 700;
+  word-break: keep-all;
+}
+.lib-reader .lib-story-by {
+  justify-content: center;
+  margin: 0;
+  font-family: system-ui, sans-serif;
+}
+.lib-reader .lib-story-by .lib-author::before {
+  content: '— ';
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+.lib-reader .lib-verse {
+  position: relative;
+  margin: 16px 4px 20px;
+  padding: 14px 18px 12px 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid var(--paper-edge);
+  border-bottom: 1px solid var(--paper-edge);
+  font-size: 0.98rem;
+  font-style: italic;
+  line-height: 1.85;
+}
+.lib-reader .lib-verse::before {
+  content: '“';
+  position: absolute;
+  left: 4px;
+  top: -6px;
+  font-size: 2.6rem;
+  line-height: 1;
+  color: #d9b36a;
+}
+.lib-reader .lib-verse cite {
+  text-align: right;
+  font-family: system-ui, sans-serif;
+  font-style: normal;
+}
+.lib-reader .lib-prompt {
+  margin: 18px 0 4px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+}
+.lib-reader .lib-part {
+  font-size: 1.02rem;
+  line-height: 1.95;
+  text-indent: 0.6em;
+}
+/* Diary: a soft timeline. */
+.lib-timeline {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  position: relative;
+}
+.lib-timeline::before {
+  content: '';
+  position: absolute;
+  left: 78px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: linear-gradient(#ead7b0, #e7cfa0);
+  border-radius: 1px;
+}
+.lib-tl {
+  display: grid;
+  grid-template-columns: 64px 30px 1fr;
+  column-gap: 6px;
+  align-items: start;
+  padding: 5px 0;
+}
+.lib-tl-time {
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  text-align: right;
+  padding-top: 0.35em;
+  white-space: nowrap;
+}
+.lib-tl-icon {
+  position: relative;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 0 0 2px #ecd9b4;
+  font-size: 0.95rem;
+  font-family: system-ui, sans-serif;
+}
+.lib-tl-text {
+  font-size: 1rem;
+  line-height: 1.75;
+  padding-top: 0.12em;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+/* Photos: polaroids. */
+.lib-reader .lib-photos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px 14px;
+  margin: 20px 0 6px;
+}
+.lib-polaroid {
+  margin: 0;
+  width: min(250px, 78%);
+  padding: 8px 8px 6px;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(60, 40, 20, 0.22);
+  transform: rotate(var(--tilt, -1.5deg));
+  text-align: center;
+}
+.lib-photo-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  min-height: 0;
+  cursor: zoom-in;
+}
+.lib-reader .lib-photo {
+  border-radius: 0;
+  aspect-ratio: auto;
+  max-height: 340px;
+  object-fit: cover;
+}
+.lib-polaroid figcaption {
+  margin-top: 6px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+  color: #7a6a5a;
+}
+/* ✏️ 오늘 한 줄: a handwritten highlight. */
+.lib-handnote {
+  margin: 20px 6px 4px;
+  padding: 12px 16px;
+  background: linear-gradient(transparent 55%, rgba(255, 214, 120, 0.55) 55%);
+  border-radius: 0;
+  transform: rotate(-0.6deg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lib-handnote-label {
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+.lib-handnote-text {
+  font-family: 'Nanum Pen Script', 'Nanum Brush Script', 'Gaegu', var(--serif);
+  font-size: 1.12rem;
+  font-style: italic;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+/* Bottom: compact reactions, 🔖 toggle, readers. */
+.lib-reader-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 4px;
+  border-top: 1px dashed var(--paper-edge);
+}
+.lib-reader-foot .lib-reacts {
+  flex: 1;
+  gap: 6px;
+}
+.lib-react {
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  gap: 4px;
+  background: #fffdf7;
+  border: 1px solid var(--paper-edge);
+}
+.lib-react.on {
+  background: #ffe9c2;
+  border-color: #e7b75f;
+}
+.lib-react-n {
+  min-width: 1ch;
+  color: var(--ink-soft);
+}
+.lib-react.on .lib-react-n {
+  color: var(--ink);
+}
+.lib-mark {
+  flex: none;
+  width: 42px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.15rem;
+  background: transparent;
+  border: 1px solid transparent;
+  filter: grayscale(1) opacity(0.55);
+}
+.lib-mark.on {
+  filter: none;
+  background: #ffe9c2;
+  border-color: #e7b75f;
+}
+.lib-page-story .lib-readers {
+  margin: 4px 16px 0;
+  font-size: 0.78rem;
+}
+@media (max-width: 420px) {
+  .lib-react-label {
+    display: none;
+  }
+  .lib-react {
+    padding: 4px 12px;
+    font-size: 0.9rem;
+  }
+  .lib-timeline::before {
+    left: 66px;
+  }
+  .lib-tl {
+    grid-template-columns: 52px 30px 1fr;
+  }
+  .lib-tl-time {
+    font-size: 0.7rem;
+  }
+}
+/* Phones: the reader takes the whole visible height (below the docked player when it's on). */
+@media (max-width: 600px) {
+  .sheet.library.lib-page-story,
+  body.overlay-open.worship-on .sheet.library.lib-page-story {
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+}
+/* Full-screen photo. */
+.lib-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(20, 14, 10, 0.88);
+  cursor: zoom-out;
+}
+.lib-lightbox img {
+  max-width: 100%;
+  max-height: calc(var(--vvh, 100dvh) - 80px);
+  object-fit: contain;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.lib-lightbox-hint {
+  color: #f2e6d0;
+  font-size: 0.85rem;
+}
+
+/* ✉️ letters: envelopes under the book. */
+.lib-letters {
+  margin: 14px 12px 6px;
+  padding: 14px 12px 10px;
+  border-radius: 14px;
+  background: #f3e7cf;
+}
+.lib-letters-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+.lib-letters-count {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff8ea;
+  font-size: 0.8rem;
+  text-align: center;
+}
+.lib-letter-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lib-letter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lib-envelope {
+  position: relative;
+  padding: 12px 14px 8px;
+  background:
+    repeating-linear-gradient(135deg, #c8644a 0 8px, transparent 8px 16px, #5f7fa6 16px 24px, transparent 24px 32px) top / 100% 4px no-repeat,
+    #fffdf6;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(74, 52, 38, 0.12);
+}
+.lib-letter.unread .lib-envelope {
+  box-shadow: 0 0 0 2px #e7b75f, 0 2px 8px rgba(74, 52, 38, 0.12);
+}
+.lib-letter.focus .lib-envelope {
+  animation: lib-letter-focus 1.8s ease 1;
+}
+@keyframes lib-letter-focus {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px var(--accent);
+  }
+}
+.lib-letter.folded .lib-envelope {
+  opacity: 0.7;
+}
+.lib-letter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.lib-letter-from {
+  font-weight: 700;
+  color: var(--ink);
+}
+.lib-letter-date {
+  margin-left: auto;
+}
+.lib-role {
+  background: #ffe2b8;
+}
+.lib-letter-text {
+  margin: 6px 0 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--serif, serif);
+  line-height: 1.75;
+}
+.lib-letter-text.deleted {
+  color: var(--ink-soft);
+  font-style: italic;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.lib-letter-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+.lib-letter-actions .link-btn {
+  min-height: 32px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.lib-replies {
+  list-style: none;
+  margin: 0 0 0 18px;
+  padding: 0 0 0 10px;
+  border-left: 2px dotted #d9c19a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lib-reply {
+  padding: 8px 12px 4px;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+.lib-reply.role-author {
+  background: #fff2da;
+}
+.lib-reply-open {
+  align-self: flex-start;
+  margin-left: 18px;
+  min-height: 36px;
+  font-size: 0.85rem;
+}
+.lib-reply-note {
+  margin: 0 0 0 28px;
+}
+.lib-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0 2px;
+  scroll-margin-bottom: calc(var(--kb, 0px) + 24px);
+}
+.lib-reply-compose {
+  margin-left: 18px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+.lib-letter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lib-letter-input {
+  scroll-margin: 80px 0 calc(var(--kb, 0px) + 80px);
+  min-height: 84px;
+}
+.lib-anon {
+  font-size: 0.85rem;
+}
+.notify-section {
+  margin-top: 10px;
+}
+.today-inbox.has-unread {
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+/* 📬 받은 편지 */
+.lib-inbox {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lib-inbox-item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 400;
+  background: #fffdf7;
+  border-radius: 12px;
+  align-items: flex-start;
+}
+.lib-inbox-item.unread {
+  background: #fff2da;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.lib-inbox-icon {
+  font-size: 1.3rem;
+  line-height: 1.4;
+}
+.lib-inbox-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.lib-inbox-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lib-inbox-from {
+  font-weight: 700;
+}
+.lib-inbox-date {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+.lib-inbox-badge {
+  position: static;
+}
+.lib-inbox-book {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.lib-inbox-excerpt {
+  font-size: 0.88rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* 📸 diary picker (B5): a clear check mark on picked photos. */
+.lib-pick-item {
+  position: relative;
+}
+.lib-pick-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(40, 30, 20, 0.35);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.lib-pick-item.on .lib-pick-check {
+  background: var(--accent);
+}
+.lib-pick-item.on .lib-pick-check::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.lib-pick-item:not(.on) img {
+  opacity: 0.55;
+}
+.admin-subtitle {
+  margin: 18px 0 4px;
+  font-size: 1rem;
+}
+.admin-letter-text {
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: #fffaf0;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+#btn-word .badge {
+  position: absolute;
+}
+.admin-item.admin-letter {
+  grid-template-columns: 1fr;
+}
+.admin-letter .admin-info {
+  min-width: 0;
+}
+.lib-letters,
+.lib-letter {
+  scroll-margin-top: 72px;
+}

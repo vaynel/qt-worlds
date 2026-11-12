@@ -705,7 +705,8 @@ try {
     await until(pb, () => window.__WORLDS_DEBUG__.la.view.page === 'diary' && document.getElementById('lib-diary-lines'), null, 15000);
     const linesB = (await la(pb)).view.diaryLines;
     check('B diary draft lists the library photo line and visibility 모임 by default', linesB.some((l) => /사진 1장/.test(l)) && (await la(pb)).view.diaryVisibility === 'group', JSON.stringify(linesB));
-    await pb.tap(`#lib-pick-${bShot.id}`);
+    // L-B (B5): today's photos start picked.
+    check('B diary draft: the library photo is already picked', (await pb.getAttribute(`#lib-pick-${bShot.id}`, 'aria-pressed')) === 'true');
     await pb.fill('#lib-diary-note', '오늘은 도서관이 참 따뜻했어요.');
     await pb.evaluate(() => {
       document.activeElement?.blur();

@@ -8,9 +8,10 @@ import type { PushService } from './push.js';
 import type { AccountService } from './account.js';
 import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
-import { kstDateOf, SHOT_MAX_BYTES, TERMS_VERSION } from '../../shared/protocol.js';
+import { kstDateOf, LETTER_REPLIES_PER_HOUR, LETTERS_PER_HOUR, SHOT_MAX_BYTES, TERMS_VERSION } from '../../shared/protocol.js';
 import type { FootprintService } from './footprints.js';
 import type { LibraryService } from './library.js';
+import type { LetterResult, LetterService } from './letters.js';
 import { readBody, type ShotService } from './shots.js';
 
 /** What the API tells the realtime room about. */
@@ -28,6 +29,8 @@ export interface RoomEvents {
   accountDeleted(userId: number, lanternIds: number[]): void;
   /** 이야기 도서관: books were added, removed, hidden or restored (shelf counts for people inside). */
   libraryChanged(): void;
+  /** ✉️ 받은 편지 badge (and a fixed-text toast) for that account's own connections only. */
+  letters(userId: number, unread: number, toast?: string, storyId?: number): void;
 }
 
 /** ICE servers for WebRTC: short-lived Cloudflare TURN credentials, minted server-side. */
@@ -112,6 +115,7 @@ export interface ApiDeps {
   looks: LookService;
   shop: ShopService;
   library: LibraryService;
+  letters: LetterService;
   footprints: FootprintService;
   shots: ShotService;
   /** Test-only endpoints (simulated clock). Never in production. */
@@ -160,6 +164,8 @@ export class Api {
   private readonly storyReportLimit = new RateLimiter(Number(process.env.STORY_REPORT_RATE_LIMIT ?? 30), 3_600_000);
   private readonly libraryWriteLimit = new RateLimiter(Number(process.env.LIBRARY_RATE_LIMIT ?? 240), 3_600_000);
   private readonly shotLimit = new RateLimiter(60, 3_600_000);
+  private readonly letterLimit = new RateLimiter(Number(process.env.LETTER_RATE_LIMIT ?? LETTERS_PER_HOUR), 3_600_000);
+  private readonly letterReplyLimit = new RateLimiter(Number(process.env.LETTER_REPLY_RATE_LIMIT ?? LETTER_REPLIES_PER_HOUR), 3_600_000);
   private readonly admins = adminEmails();
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
@@ -561,6 +567,9 @@ export class Api {
       r('POST', '/api/test/push/clock', async ({ req, res }) => {
         const now = (await readJson(req)).now;
         d.push.now = typeof now === 'number' ? () => now : () => Date.now();
+        // L-B: books, 공감 and letters follow the same fake clock (diary reminders, 공감 batching).
+        d.library.now = d.push.now;
+        d.letters.now = d.push.now;
         sendJson(res, 200, { now: d.push.now() });
       });
       r('POST', '/api/test/push/tick', async ({ res }) => sendJson(res, 200, await d.push.tick()));
@@ -646,7 +655,12 @@ export class Api {
     r('POST', '/api/library/stories/:id/reactions', async ({ req, res, user, params }) => {
       const u = this.signedIn(user);
       this.limit(this.libraryWriteLimit, `user:${u.id}`);
-      sendJson(res, 200, lib.react(u.id, id(params[0]), (await readJson(req)).type));
+      const sid = id(params[0]);
+      const type = (await readJson(req)).type;
+      const story = lib.react(u.id, sid, type);
+      // 📚 내 이야기 소식: batched per book in PushService (never who).
+      if (!story.mine && typeof type === 'string' && story.myReactions.includes(type as never)) void d.push.storyReacted(sid).catch((e) => console.error('push story', e));
+      sendJson(res, 200, story);
     });
     r('POST', '/api/library/stories/:id/bookmark', ({ res, user, params }) => {
       const u = this.signedIn(user);
@@ -663,6 +677,75 @@ export class Api {
         console.log(`story ${sid} hidden after reports`);
         d.room.libraryChanged();
       }
+      sendJson(res, 200, { ok: true, duplicate: out.duplicate });
+    });
+    // ✉️ 답장 편지 (L-B): visibility follows the book (LetterService asks LibraryService).
+    const lt = d.letters;
+    const delivered = (out: LetterResult) => {
+      const n = out.notice;
+      if (!out.created || !n) return;
+      const toast = n.kind === 'letter' ? '✉️ 내 이야기에 새 편지가 왔어요' : '💌 편지에 답장이 왔어요';
+      d.room.letters(n.userId, lt.unreadCount(n.userId), toast, n.storyId);
+      void d.push.letter(n.userId, n.kind, n.recipientRole, n.storyId, n.letterId).catch((e) => console.error('push letter', e));
+    };
+    const badges = (userIds: number[]) => {
+      for (const uid of userIds) d.room.letters(uid, lt.unreadCount(uid));
+    };
+    r('GET', '/api/library/letters/inbox', ({ res, user }) => sendJson(res, 200, lt.inbox(this.signedIn(user).id)));
+    r(
+      'POST',
+      '/api/library/letters/read',
+      async ({ req, res, user }) => {
+        const u = this.signedIn(user);
+        const out = lt.markRead(u.id, await readJson(req));
+        d.room.letters(u.id, out.unread);
+        sendJson(res, 200, out);
+      },
+      open,
+    );
+    r('GET', '/api/library/stories/:id/letters', ({ res, user, params }) => {
+      const v = viewer(user);
+      const out = lt.list(id(params[0]), v, isAdmin(user, this.admins));
+      if (v !== null && out.markedRead) d.room.letters(v, lt.unreadCount(v));
+      sendJson(res, 200, { storyId: out.storyId, count: out.count, canWrite: out.canWrite, note: out.note, letters: out.letters });
+    });
+    r('POST', '/api/library/stories/:id/letters', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const body = await readJson(req);
+      const out = lt.write(u.id, id(params[0]), body, () => this.limit(this.letterLimit, `user:${u.id}`));
+      delivered(out);
+      sendJson(res, out.created ? 201 : 200, { thread: out.thread, replayed: !out.created });
+    });
+    r('POST', '/api/library/letters/:id/replies', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const body = await readJson(req);
+      const out = lt.reply(u.id, id(params[0]), body, () => this.limit(this.letterReplyLimit, `user:${u.id}`));
+      delivered(out);
+      sendJson(res, out.created ? 201 : 200, { thread: out.thread, replayed: !out.created });
+    });
+    r('DELETE', '/api/library/letters/:id', ({ res, user, params }) => {
+      const out = lt.remove(this.signedIn(user).id, id(params[0]));
+      badges(out.parties);
+      sendJson(res, 200, { ok: true });
+    });
+    r(
+      'POST',
+      '/api/library/letters/:id/hide',
+      async ({ req, res, user, params }) => {
+        const u = this.signedIn(user);
+        const thread = lt.hide(u.id, id(params[0]), (await readJson(req)).hidden);
+        d.room.letters(u.id, lt.unreadCount(u.id));
+        sendJson(res, 200, { thread });
+      },
+      open,
+    );
+    r('POST', '/api/library/letters/:id/report', async ({ req, res, user, params }) => {
+      const u = this.signedIn(user);
+      const lid = id(params[0]);
+      const body = await readJson(req);
+      this.limit(this.storyReportLimit, `user:${u.id}`);
+      const out = lt.report(u.id, lid, body.reason);
+      if (out.changed) console.log(`letter ${lid} hidden after reports`);
       sendJson(res, 200, { ok: true, duplicate: out.duplicate });
     });
     r('GET', '/api/library/draft', ({ res, user }) => sendJson(res, 200, lib.getDraft(this.signedIn(user).id)));
@@ -742,6 +825,19 @@ export class Api {
     r('GET', '/api/admin/library', ({ res, user }) => {
       this.admin(user);
       sendJson(res, 200, { stories: lib.adminList() });
+    }, open);
+    r('GET', '/api/admin/library/letters', ({ res, user }) => {
+      this.admin(user);
+      sendJson(res, 200, { letters: lt.adminList() });
+    }, open);
+    r('POST', '/api/admin/library/letters/:id', async ({ req, res, user, params }) => {
+      const u = this.admin(user);
+      const lid = id(params[0]);
+      const body = await readJson(req);
+      const out = lt.adminAction(lid, body.action);
+      badges(out.parties);
+      console.log(`admin ${u.id}: letter ${lid} ${String(body.action).slice(0, 10)}`);
+      sendJson(res, 200, { ok: true });
     }, open);
     r('POST', '/api/admin/library/:id', async ({ req, res, user, params }) => {
       const u = this.admin(user);

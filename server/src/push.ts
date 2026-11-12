@@ -9,7 +9,13 @@ import { HttpError } from './http.js';
  *  - 🕊️ daily word at the user's chosen time (Asia/Seoul), at most once a day;
  *  - 🤲 someone prayed (기도하기) for one of my lanterns: never who, never which
  *    lantern, throttled and batched;
- *  - ⏰ a borrowed prop (M9 나눔 소품 가게) has 10 minutes left (sent by ShopService).
+ *  - ⏰ a borrowed prop (M9 나눔 소품 가게) has 10 minutes left (sent by ShopService);
+ *  - 📚 내 이야기 소식 (L-B): 공감 on one of my books, batched per book (at most
+ *    once per STORY_WINDOW_MS: "N명이 공감했어요"), never who;
+ *  - ✉️ a new letter on my book / 💌 an answer in a letter thread (fixed text:
+ *    never the letter's words, the book's title or anyone's name);
+ *  - 📔 밤 일기 알림 (default off): at the chosen time, once a day, only if I
+ *    left 발자취 today and haven't published today's diary.
  * Payloads only ever hold our own fixed text and the (public) daily word.
  * Disabled unless VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT are set.
  */
@@ -25,9 +31,16 @@ const PRAYER_DEDUPE_MS = 6 * 3600_000;
 
 export const DAILY_TITLE = '🕊️ 오늘의 말씀이 도착했어요';
 export const PRAYER_TITLE = '🤲 누군가 당신의 묵상을 위해 기도하고 있어요';
+export const STORY_TITLE = '📚 내 이야기 소식';
+export const LETTER_TITLE = '✉️ 내 이야기에 새 편지가 왔어요';
+export const REPLY_TITLE = '💌 편지에 답장이 왔어요';
+export const DIARY_TITLE = '📔 오늘 하루를 일기로 남겨 볼까요?';
+/** 공감 on one book: at most one notification per this window (the rest are counted into the next). */
+export const STORY_WINDOW_MS = 30 * 60_000;
+export const DEFAULT_DIARY_MIN = 21 * 60;
 
 export interface PushPayload {
-  kind: 'daily' | 'prayer' | 'prop';
+  kind: 'daily' | 'prayer' | 'prop' | 'story' | 'letter' | 'reply' | 'diary';
   title: string;
   body: string;
   url: string;
@@ -46,6 +59,11 @@ interface PrefsRow {
   daily_time: number;
   prayer: number;
   props: number;
+  library: number;
+  letters: number;
+  replies: number;
+  diary: number;
+  diary_time: number;
 }
 
 export interface Delivery {
@@ -215,13 +233,24 @@ export class PushService {
   // ---------------------------------------------------------------- preferences
 
   prefs(userId: number) {
-    const p = this.db.prepare('SELECT daily, daily_time, prayer, props FROM push_prefs WHERE user_id = ?').get(userId) as PrefsRow | undefined;
+    const p = this.db.prepare('SELECT daily, daily_time, prayer, props, library, letters, replies, diary, diary_time FROM push_prefs WHERE user_id = ?').get(userId) as
+      | PrefsRow
+      | undefined;
     return {
       daily: p ? p.daily === 1 : true,
       dailyTime: minutesToTime(p ? p.daily_time : DEFAULT_DAILY_MIN),
       prayer: p ? p.prayer === 1 : true,
       /** 소품 만료 알림 (M9): 10 minutes before a borrowed prop goes back. */
       props: p ? p.props === 1 : true,
+      /** 📚 내 이야기 소식: 공감 on my books (batched). */
+      library: p ? p.library === 1 : true,
+      /** ✉️ new letters on my books (and their writers' answers). */
+      letters: p ? p.letters === 1 : true,
+      /** 💌 answers to my letters. */
+      replies: p ? p.replies === 1 : true,
+      /** 📔 밤 일기 알림 (default off) and its time. */
+      diary: p ? p.diary === 1 : false,
+      diaryTime: minutesToTime(p ? p.diary_time : DEFAULT_DIARY_MIN),
       subscriptions: this.count(userId),
     };
   }
@@ -236,16 +265,25 @@ export class PushService {
     const daily = bool(body.daily, cur.daily, '말씀 알림');
     const prayer = bool(body.prayer, cur.prayer, '기도 알림');
     const props = bool(body.props, cur.props, '소품 만료 알림');
-    const timeRaw = body.dailyTime === undefined ? cur.dailyTime : body.dailyTime;
-    const m = typeof timeRaw === 'string' ? /^([01]\d|2[0-3]):(00|30)$/.exec(timeRaw) : null;
-    if (!m) throw new HttpError(400, 'bad_time', '알림 시간은 30분 단위로 골라 주세요.');
-    const minutes = Number(m[1]) * 60 + Number(m[2]);
+    const library = bool(body.library, cur.library, '내 이야기 소식 알림');
+    const letters = bool(body.letters, cur.letters, '편지 알림');
+    const replies = bool(body.replies, cur.replies, '답장 알림');
+    const diary = bool(body.diary, cur.diary, '밤 일기 알림');
+    const time = (raw: unknown) => {
+      const m = typeof raw === 'string' ? /^([01]\d|2[0-3]):(00|30)$/.exec(raw) : null;
+      if (!m) throw new HttpError(400, 'bad_time', '알림 시간은 30분 단위로 골라 주세요.');
+      return Number(m[1]) * 60 + Number(m[2]);
+    };
+    const minutes = time(body.dailyTime === undefined ? cur.dailyTime : body.dailyTime);
+    const diaryMinutes = time(body.diaryTime === undefined ? cur.diaryTime : body.diaryTime);
     this.db
       .prepare(
-        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, props, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, props = excluded.props, updated_at = excluded.updated_at`,
+        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, props, library, letters, replies, diary, diary_time, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, props = excluded.props,
+           library = excluded.library, letters = excluded.letters, replies = excluded.replies, diary = excluded.diary, diary_time = excluded.diary_time,
+           updated_at = excluded.updated_at`,
       )
-      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, props ? 1 : 0, this.now());
+      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, props ? 1 : 0, library ? 1 : 0, letters ? 1 : 0, replies ? 1 : 0, diary ? 1 : 0, diaryMinutes, this.now());
     return this.prefs(userId);
   }
 
@@ -291,8 +329,8 @@ export class PushService {
    * Runs every minute: daily words that are due (chosen time reached today,
    * within the grace window, not yet sent today), then batched prayers.
    */
-  async tick(now = this.now()): Promise<{ daily: number; prayer: number }> {
-    if (!this.enabled) return { daily: 0, prayer: 0 };
+  async tick(now = this.now()): Promise<{ daily: number; prayer: number; stories: number; diary: number }> {
+    if (!this.enabled) return { daily: 0, prayer: 0, stories: 0, diary: 0 };
     const { date, minutes } = seoulClock(now);
     const due = this.db
       .prepare(
@@ -313,7 +351,109 @@ export class PushService {
       await this.sendToUser(user_id, payload!, 6 * 3600);
       daily++;
     }
-    return { daily, prayer: await this.flushPrayers(now) };
+    const prayer = await this.flushPrayers(now);
+    const stories = await this.flushStories(now);
+    const diary = await this.diaryReminders(now);
+    return { daily, prayer, stories, diary };
+  }
+
+  // ---------------------------------------------------------------- 이야기 도서관 (L-B)
+
+  private wants(userId: number, pref: 'library' | 'letters' | 'replies'): boolean {
+    const p = this.db.prepare(`SELECT ${pref} AS on_ FROM push_prefs WHERE user_id = ?`).get(userId) as { on_: number } | undefined;
+    return !!p && p.on_ === 1 && this.count(userId) > 0;
+  }
+
+  /** 💛 공감 was added to a book (by someone else). Batched: at most once per STORY_WINDOW_MS per book. */
+  async storyReacted(storyId: number, at = this.now()): Promise<void> {
+    if (!this.enabled) return;
+    const s = this.db.prepare('SELECT user_id FROM stories WHERE id = ?').get(storyId) as { user_id: number } | undefined;
+    if (!s || !this.wants(s.user_id, 'library')) return;
+    // Only reactions from now on count toward this book's next notice.
+    this.db.prepare('INSERT OR IGNORE INTO story_push (story_id, cursor_at, last_sent_at) VALUES (?, ?, NULL)').run(storyId, at - 1);
+    await this.sendStory(storyId, this.now());
+  }
+
+  /** Claim (once per window, survives restarts) and send "N명이 공감했어요" for one book. */
+  private async sendStory(storyId: number, now: number): Promise<boolean> {
+    const row = this.db
+      .prepare('SELECT p.cursor_at, p.last_sent_at, s.user_id FROM story_push p JOIN stories s ON s.id = p.story_id WHERE p.story_id = ?')
+      .get(storyId) as { cursor_at: number; last_sent_at: number | null; user_id: number } | undefined;
+    if (!row) return false;
+    if (row.last_sent_at !== null && now - row.last_sent_at < STORY_WINDOW_MS) return false;
+    const { n } = this.db
+      .prepare('SELECT COUNT(DISTINCT user_id) n FROM story_reactions WHERE story_id = ? AND created_at > ? AND user_id <> ?')
+      .get(storyId, row.cursor_at, row.user_id) as { n: number };
+    if (n === 0) return false;
+    const claimed = this.db
+      .prepare('UPDATE story_push SET cursor_at = ?, last_sent_at = ? WHERE story_id = ? AND (last_sent_at IS NULL OR last_sent_at <= ?) AND cursor_at = ?')
+      .run(now, now, storyId, now - STORY_WINDOW_MS, row.cursor_at).changes;
+    if (!claimed || !this.wants(row.user_id, 'library')) return false;
+    await this.sendToUser(
+      row.user_id,
+      { kind: 'story', title: STORY_TITLE, body: n > 1 ? `내 이야기에 ${n}명이 공감했어요` : '내 이야기에 누군가 공감했어요', url: `/?book=${storyId}`, tag: `story-${storyId}` },
+      12 * 3600,
+    );
+    return true;
+  }
+
+  private async flushStories(now: number): Promise<number> {
+    const due = this.db
+      .prepare(
+        `SELECT p.story_id FROM story_push p WHERE (p.last_sent_at IS NULL OR p.last_sent_at <= ?)
+           AND EXISTS (SELECT 1 FROM story_reactions x WHERE x.story_id = p.story_id AND x.created_at > p.cursor_at)`,
+      )
+      .all(now - STORY_WINDOW_MS) as { story_id: number }[];
+    let sent = 0;
+    for (const { story_id } of due) if (await this.sendStory(story_id, now)) sent++;
+    // Books nobody reacted to for a day don't need a row.
+    this.db.prepare('DELETE FROM story_push WHERE last_sent_at IS NOT NULL AND last_sent_at < ? AND NOT EXISTS (SELECT 1 FROM story_reactions x WHERE x.story_id = story_push.story_id AND x.created_at > story_push.cursor_at)').run(now - 86_400_000);
+    return sent;
+  }
+
+  /**
+   * ✉️ / 💌: a new letter on `userId`'s book, or an answer in a thread they're part of.
+   * Fixed text only: no letter words, no book title, no names (anonymous stays anonymous).
+   */
+  async letter(userId: number, kind: 'letter' | 'reply', recipientRole: 'author' | 'writer', storyId: number, letterId: number): Promise<boolean> {
+    if (!this.enabled || !this.wants(userId, recipientRole === 'author' ? 'letters' : 'replies')) return false;
+    const payload: PushPayload =
+      kind === 'letter'
+        ? { kind: 'letter', title: LETTER_TITLE, body: '이야기 도서관에서 편지를 읽어 보세요.', url: `/?book=${storyId}&letter=${letterId}`, tag: `letters-${storyId}` }
+        : {
+            kind: 'reply',
+            title: REPLY_TITLE,
+            body: recipientRole === 'author' ? '내 이야기에 온 편지에 답장이 이어졌어요.' : '내가 쓴 편지에 글쓴이가 답장했어요.',
+            url: `/?book=${storyId}&letter=${letterId}`,
+            tag: `letter-${letterId}`,
+          };
+    return (await this.sendToUser(userId, payload, 24 * 3600)) > 0;
+  }
+
+  /** 📔 밤 일기 알림: due (chosen time, grace window), 발자취 today, no diary yet; claimed once a day. */
+  private async diaryReminders(now: number): Promise<number> {
+    const { date, minutes } = seoulClock(now);
+    const due = this.db
+      .prepare(
+        `SELECT p.user_id FROM push_prefs p
+         WHERE p.diary = 1 AND p.diary_time <= @minutes AND p.diary_time > @minutes - ${DAILY_GRACE_MIN}
+           AND (p.last_diary_date IS NULL OR p.last_diary_date <> @date)
+           AND EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.user_id = p.user_id)
+           AND (EXISTS (SELECT 1 FROM footprints f WHERE f.user_id = p.user_id AND f.kst_date = @date)
+             OR EXISTS (SELECT 1 FROM footprint_minutes m WHERE m.user_id = p.user_id AND m.kst_date = @date))
+           AND NOT EXISTS (SELECT 1 FROM stories s WHERE s.user_id = p.user_id AND s.kind = 'diary' AND s.kst_date = @date)`,
+      )
+      .all({ minutes, date }) as { user_id: number }[];
+    let sent = 0;
+    for (const { user_id } of due) {
+      const claimed = this.db
+        .prepare('UPDATE push_prefs SET last_diary_date = ? WHERE user_id = ? AND (last_diary_date IS NULL OR last_diary_date <> ?)')
+        .run(date, user_id, date).changes;
+      if (!claimed) continue;
+      await this.sendToUser(user_id, { kind: 'diary', title: DIARY_TITLE, body: '오늘 QT 월드에서 보낸 하루로 일기 초안이 준비돼 있어요.', url: '/?diary=1', tag: 'diary' }, 3 * 3600);
+      sent++;
+    }
+    return sent;
   }
 
   /** 기도하기 was added to a lantern (by `actorId`). Who and which lantern never leave the server. */

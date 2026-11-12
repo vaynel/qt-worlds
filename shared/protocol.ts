@@ -455,6 +455,11 @@ export type ServerMessage =
   | { t: 'myShop'; mine: MyShop; ended?: PropId[] }
   /** 10 minutes left on a borrowed prop (once per rental). */
   | { t: 'propReminder'; item: PropId; endsAt: number; now: number }
+  /**
+   * ✉️ 받은 편지 (L-B): this account's unread count (only to its own connections).
+   * `toast` (fixed text, never letter content or names) when something new arrived.
+   */
+  | { t: 'letters'; unread: number; toast?: string; storyId?: number }
   | { t: 'error'; code: ErrorCode; message: string };
 
 // ------------------------------------------------------------------ validation
@@ -910,6 +915,12 @@ export function personalInfoKinds(text: string): string[] {
   return PERSONAL_PATTERNS.filter(([, re]) => re.test(text)).map(([k]) => k);
 }
 
+/** A diary line's source: the template key (e.g. 'letter', 'lantern:pray', 'shot') and minute of the day (1440 = the whole day). */
+export interface DiaryLineMeta {
+  key: string;
+  minute: number;
+}
+
 /** One book in a list (never the author's account id; anonymous books never carry the nickname). */
 export interface StoryItem {
   id: number;
@@ -947,7 +958,79 @@ export interface StoryDetail extends StoryItem {
   verse: string | null;
   /** Screenshot ids shown inline (diary). */
   photoIds: number[];
+  /** Diary: per line (same order as parts) the template it came from and its minute of the day (KST), or null for lines without one. */
+  lineMeta: (DiaryLineMeta | null)[] | null;
   myReactions: StoryReaction[];
   /** Testimony: author-only group id (for editing). */
   groupId: number | null;
 }
+
+// ------------------------------------------------------------------ 이야기 도서관: ✉️ 답장 편지 (L-B)
+
+export const LETTER_MAX = 300;
+/** Replies under one letter (book author ↔ letter writer, taking turns). */
+export const LETTER_REPLIES_MAX = 20;
+/** Per user per hour (overridable on the server with LETTER_RATE_LIMIT / LETTER_REPLY_RATE_LIMIT). */
+export const LETTERS_PER_HOUR = 20;
+export const LETTER_REPLIES_PER_HOUR = 60;
+/** What an anonymous book's author is called in letter threads (never the nickname). */
+export const BOOK_AUTHOR_NAME = '글쓴이';
+
+/** One letter or reply as a viewer sees it (no account ids; masked names). */
+export interface LetterMessage {
+  id: number;
+  /** '' when deleted (or hidden from this viewer). */
+  text: string;
+  /** Nickname, ANONYMOUS_NAME (anonymous letter writer) or BOOK_AUTHOR_NAME (anonymous book's author). */
+  author: string;
+  /** Who wrote it in this thread: the book's author or the letter's writer. */
+  role: 'author' | 'writer';
+  mine: boolean;
+  createdAt: string;
+  deleted: boolean;
+  /** Hidden after reports (only its writer and admins still see the text). */
+  reported: boolean;
+}
+
+export interface LetterThread extends LetterMessage {
+  /** Sent with 익명으로 보내기. */
+  anonymous: boolean;
+  /** The book's author hid this letter (others don't see it any more). */
+  hiddenByAuthor: boolean;
+  replies: LetterMessage[];
+  /** This viewer may answer now (a party, their turn, under the cap). */
+  canReply: boolean;
+  /** Why not (shown under the thread), e.g. waiting for the other person. */
+  replyNote: string | null;
+  /** This viewer is the book's author (may hide it). */
+  canHide: boolean;
+  /** Messages in this thread this viewer hasn't seen. */
+  unread: number;
+}
+
+export interface LettersOfBook {
+  storyId: number;
+  /** Letters others can see (not deleted/hidden). */
+  count: number;
+  /** May this viewer write a new letter here, and if not why. */
+  canWrite: boolean;
+  note: string | null;
+  letters: LetterThread[];
+}
+
+/** One conversation in 📬 받은 편지. */
+export interface InboxItem {
+  letterId: number;
+  storyId: number;
+  storyTitle: string;
+  storyKind: 'testimony' | 'diary';
+  /** My side: 'author' = a letter on my book; 'writer' = my letter on someone's book. */
+  role: 'author' | 'writer';
+  /** Display name of whoever wrote the newest message (masked like the thread). */
+  from: string;
+  excerpt: string;
+  lastAt: string;
+  messages: number;
+  unread: number;
+}
+

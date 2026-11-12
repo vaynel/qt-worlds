@@ -23,6 +23,9 @@ export interface WordBookHooks {
   meditate: () => void;
   /** 📔 오늘 일기 쓰기 (이야기 도서관). */
   writeDiary?: () => void;
+  /** 📬 받은 편지 (이야기 도서관, L-B). */
+  openInbox?: () => void;
+  lettersUnread?: () => number;
 }
 
 /** One line of today's meditation for the 오늘 tab. */
@@ -196,6 +199,16 @@ export class WordBookView {
       diary.id = 'today-diary';
       diary.title = '오늘 QT 월드에서 한 일로 일기가 써져요';
       actions.append(diary);
+    }
+    if (this.hooks.openInbox && this.store.kind !== 'guest') {
+      const n = this.hooks.lettersUnread?.() ?? 0;
+      const inbox = button(n ? `📬 받은 편지 ${n}` : '📬 받은 편지', n ? 'today-inbox has-unread' : 'today-inbox', () => {
+        this.modal.close();
+        this.hooks.openInbox!();
+      });
+      inbox.id = 'today-inbox';
+      inbox.title = '내 이야기에 온 편지와 내 편지에 온 답장';
+      actions.append(inbox);
     }
     paper.append(actions, shareBox);
   }
