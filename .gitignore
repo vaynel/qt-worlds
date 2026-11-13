@@ -35,3 +35,6 @@ coverage/
 !**/.env.*.example
 deploy/turn_key.txt
 *key*.txt
+
+# security audit details stay local until fixed (public repo)
+docs/security/

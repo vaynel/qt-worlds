@@ -4,6 +4,7 @@ import { PRIVACY_PATH, TERMS_PATH } from '../config/legal';
 import { api, ApiError, logout, startGoogleLogin } from '../net/api';
 import { installMode, isStandalone, onInstallChange } from '../pwa/pwa';
 import { button, el, Modal } from './dom';
+import { graphicsQuality, QUALITY_LABELS, setGraphicsQuality, type GraphicsQuality } from '../game/graphics';
 import type { InstallGuide } from './InstallGuide';
 import { NotifySettings } from './NotifySettings';
 import { consent, ConsentSheet, DeleteAccountSheet, downloadMyData, legalLinks } from './Legal';
@@ -19,11 +20,12 @@ const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
 ];
 
 /** Level-2 pages of ⚙ 설정 ('menu' is level 1). */
-export type SettingsPage = 'menu' | 'sound' | 'notify' | 'account' | 'footprints' | 'install' | 'admin';
+export type SettingsPage = 'menu' | 'sound' | 'display' | 'notify' | 'account' | 'footprints' | 'install' | 'admin';
 
 const TITLES: Record<SettingsPage, string> = {
   menu: '설정',
   sound: '🔊 소리',
+  display: '🎨 화면',
   notify: '🔔 알림',
   account: '👤 계정',
   footprints: '📔 발자취',
@@ -143,6 +145,8 @@ export class SettingsView {
     switch (this.page) {
       case 'sound':
         return this.soundPage(this.audio.settings);
+      case 'display':
+        return this.displayPage();
       case 'notify':
         return [new NotifySettings(!!this.account(), this.install!).root];
       case 'account':
@@ -187,6 +191,7 @@ export class SettingsView {
       );
     }
     list.append(this.item('sound', '🔊', '소리', '음량과 모든 소리 끄기', () => this.go('sound')));
+    list.append(this.item('display', '🎨', '화면', `화면 품질 · ${QUALITY_LABELS[graphicsQuality()].name}`, () => this.go('display')));
     if (this.available('notify')) list.append(this.item('notify', '🔔', '알림', '오늘의 말씀, 기도 알림', () => this.go('notify')));
     const needs = acc && consent.needed ? el('span', 'settings-item-flag', '동의 필요') : undefined;
     if (this.library) list.append(this.item('footprints', '📔', '발자취', '오늘의 일기, 나의 서재, 기록 끄기·지우기', () => this.go('footprints')));
@@ -217,6 +222,30 @@ export class SettingsView {
   }
 
   // ------------------------------------------------------------ level 2
+
+  private displayPage(): HTMLElement[] {
+    const wrap = el('div', 'settings-quality');
+    wrap.setAttribute('role', 'radiogroup');
+    wrap.setAttribute('aria-label', '화면 품질');
+    const draw = () => {
+      const cur = graphicsQuality();
+      wrap.replaceChildren(
+        ...(Object.keys(QUALITY_LABELS) as GraphicsQuality[]).map((q) => {
+          const b = button('', `quality-option${q === cur ? ' on' : ''}`, () => {
+            setGraphicsQuality(q);
+            draw();
+          });
+          b.id = `quality-${q}`;
+          b.setAttribute('role', 'radio');
+          b.setAttribute('aria-checked', q === cur ? 'true' : 'false');
+          b.append(el('strong', '', QUALITY_LABELS[q].name), el('span', '', QUALITY_LABELS[q].hint));
+          return b;
+        }),
+      );
+    };
+    draw();
+    return [wrap, el('p', 'settings-note', '화면이 자주 끊기거나 휴대폰이 뜨거워지면 보통이나 절약으로 낮춰 보세요.')];
+  }
 
   private soundPage(s: AudioSettings): HTMLElement[] {
     const out: HTMLElement[] = [];

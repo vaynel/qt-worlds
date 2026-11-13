@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { maxPixelRatio, onGraphicsQuality } from './graphics';
 import type { WordPassage } from '../../../shared/protocol';
 import type { AudioEngine } from '../audio/AudioEngine';
 import { PlayerController } from '../entities/PlayerController';
@@ -446,6 +447,7 @@ export class Game {
 
     this.timer.connect(document);
     window.addEventListener('resize', this.resize);
+    onGraphicsQuality(() => this.resize());
     this.resize();
   }
 
@@ -1200,8 +1202,8 @@ export class Game {
   private readonly resize = () => {
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
-    // Pixel ratio is a fill-rate budget: capped lower on touch devices, lowest on phones.
-    const maxDpr = this.isPhone ? 1.25 : this.isTouch ? 1.5 : 1.75;
+    // Pixel ratio is a fill-rate budget; ⚙ → 🎨 화면 picks it (default 선명).
+    const maxDpr = maxPixelRatio(this.isTouch ? 1.5 : 1.75);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;

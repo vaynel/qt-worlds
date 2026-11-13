@@ -6065,3 +6065,33 @@ body.phone-land .sheet.look .look-swatches {
   position: relative;
   min-height: 44px;
 }
+
+
+/* =================== ⚙ → 🎨 화면 품질 =================== */
+.settings-quality {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 52px;
+  padding: 10px 14px;
+  text-align: left;
+  border-radius: 14px;
+  border: 1.5px solid rgba(120, 90, 60, 0.25);
+  background: rgba(255, 250, 240, 0.85);
+}
+
+.quality-option span {
+  font-size: 0.84rem;
+  opacity: 0.75;
+}
+
+.quality-option.on {
+  border-color: #c4664a;
+  background: #fff1e6;
+}

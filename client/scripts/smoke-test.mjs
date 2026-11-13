@@ -171,7 +171,12 @@ try {
     check(`${n}: the world renders (${d.renderer.calls} draw calls, ${d.chunks} chunks)`, d.ready && d.renderer.calls > 20 && d.chunks > 0);
     check(`${n}: HUD has 말씀 · 모임 · 찬양 · ⚙`, tools.join(',') === 'btn-word,btn-groups,btn-worship,btn-settings', tools.join(','));
   }
-  check('phone pixel ratio capped at 1.25 (DPR 2 device)', (await debug(A)).renderer.pixelRatio === 1.25, String((await debug(A)).renderer.pixelRatio));
+  // ⚙ → 🎨 화면 품질: default 선명 (1.5 on a DPR-2 phone); 보통 → 1.25; 절약 → 1.
+  check('phone pixel ratio default 선명 = 1.5 (DPR 2 device)', (await debug(A)).renderer.pixelRatio === 1.5, String((await debug(A)).renderer.pixelRatio));
+  await A.evaluate(() => { localStorage.setItem('worlds.graphics.quality', 'normal'); window.dispatchEvent(new CustomEvent('worlds:graphics')); });
+  await until(A, () => window.__WORLDS_DEBUG__.renderer.pixelRatio === 1.25, null, 10000).catch(() => undefined);
+  check('화면 품질 보통 → 1.25, applied live', (await debug(A)).renderer.pixelRatio === 1.25, String((await debug(A)).renderer.pixelRatio));
+  await A.evaluate(() => { localStorage.setItem('worlds.graphics.quality', 'sharp'); window.dispatchEvent(new CustomEvent('worlds:graphics')); });
   check('desktop pixel ratio unchanged (1 here)', (await debug(B)).renderer.pixelRatio === 1, String((await debug(B)).renderer.pixelRatio));
 
   step('worship');
