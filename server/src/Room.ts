@@ -18,6 +18,8 @@ import {
   SIT_REACH,
   SNAPSHOT_HZ,
   parseClientMessage,
+  kstDateOf,
+  kstDayNumber,
   seoulDate,
   validateChat,
   validateNickname,
@@ -128,7 +130,10 @@ export class Room implements RoomEvents, ShopEvents {
   private readonly timer: NodeJS.Timeout;
   private readonly footprintTimer: NodeJS.Timeout;
   private readonly log: (msg: string) => void;
-  private currentDate = seoulDate();
+  private readonly bootMs = Date.now();
+  private currentDate = kstDateOf(this.bootMs);
+  /** KST day number of currentDate: the 12 Hz day-change check is one division, not a date format. */
+  private currentDay = kstDayNumber(this.bootMs);
 
   constructor(private readonly options: RoomOptions) {
     this.log = options.log ?? (() => undefined);
@@ -717,9 +722,11 @@ export class Room implements RoomEvents, ShopEvents {
   }
 
   /** At 00:00 KST everyone gets the new day's word. */
-  private checkDayChange(): void {
-    const today = seoulDate();
-    if (today === this.currentDate) return;
+  checkDayChange(now = Date.now()): void {
+    const day = kstDayNumber(now);
+    if (day === this.currentDay) return;
+    this.currentDay = day;
+    const today = kstDateOf(now);
     this.currentDate = today;
     this.log(`new day ${today}`);
     for (const c of this.clients.values()) {

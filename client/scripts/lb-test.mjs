@@ -240,7 +240,16 @@ try {
   const letters = (agent, sid) => agent.json('GET', `/api/library/stories/${sid}/letters`);
   const write = (agent, sid, body) => agent.json('POST', `/api/library/stories/${sid}/letters`, { requestId: rid(), ...body });
   const reply = (agent, lid, body) => agent.json('POST', `/api/library/letters/${lid}/replies`, { requestId: rid(), ...body });
-  const inbox = async (agent) => (await agent.json('GET', '/api/library/letters/inbox')).data;
+  // Every inbox read also asks the badge-only endpoint: one SQL COUNT must agree with the full inbox.
+  const unreadMismatch = [];
+  let unreadCompared = 0;
+  const inbox = async (agent) => {
+    const data = (await agent.json('GET', '/api/library/letters/inbox')).data;
+    const badge = await agent.json('GET', '/api/library/letters/unread');
+    unreadCompared++;
+    if (badge.status !== 200 || badge.data?.unread !== data?.unread) unreadMismatch.push(`${badge.status}:${badge.data?.unread}≠${data?.unread}`);
+    return data;
+  };
   const L = {};
 
   // ================================================================ API: letters
@@ -842,6 +851,7 @@ try {
     await A.json('POST', '/api/me/delete', { nickname: NICK.a });
     check('A (book author) deletes the account: all letters on A\'s books are gone', onA > 0 && count('SELECT COUNT(*) n FROM story_letters WHERE story_id IN (?, ?, ?)', T.pub, T.grp, T.anon) === 0);
     check('…and D\'s inbox no longer lists them', (await inbox(D)).items.every((i) => ![T.pub, T.grp, T.anon].includes(i.storyId)));
+    check(`GET /letters/unread always equals the inbox's unread (${unreadCompared} comparisons)`, unreadCompared > 5 && unreadMismatch.length === 0, unreadMismatch.join(' '));
   }
 } catch (err) {
   console.error(err);

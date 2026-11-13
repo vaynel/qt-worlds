@@ -9,7 +9,7 @@ interface WorldsDebug {
   player: { x: number; y: number; z: number };
   location: string;
   timeOfDay: { hours: number; phase: string; sun: number };
-  renderer: { calls: number; triangles: number };
+  renderer: { calls: number; triangles: number; pixelRatio: number; sheetCovers: boolean };
   net: {
     status: string;
     id: string;

@@ -550,7 +550,7 @@ try {
   prodWs.ws.close();
   const prodBrowser = await browser.newContext(desktop);
   const PB = await prodBrowser.newPage();
-  await PB.goto(`${P}/?shadows=0&noworship=1`);
+  await PB.goto(`${P}/?test=1&shadows=0&noworship=1`); // test=1: only for __WORLDS_DEBUG__ (the server ignores it in production)
   await PB.waitForSelector('#btn-google');
   check('production: the page loads; Google button shows "준비 중" without credentials', (await PB.textContent('#btn-google')).includes('준비 중'));
   await PB.fill('#nickname', '배포손님');

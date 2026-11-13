@@ -691,6 +691,8 @@ export class Api {
       for (const uid of userIds) d.room.letters(uid, lt.unreadCount(uid));
     };
     r('GET', '/api/library/letters/inbox', ({ res, user }) => sendJson(res, 200, lt.inbox(this.signedIn(user).id)));
+    // Just the 📬 badge number (sign-in): one COUNT instead of the whole inbox.
+    r('GET', '/api/library/letters/unread', ({ res, user }) => sendJson(res, 200, { unread: lt.unreadCount(this.signedIn(user).id) }));
     r(
       'POST',
       '/api/library/letters/read',

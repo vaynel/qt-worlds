@@ -285,6 +285,10 @@ try {
     p.setDefaultTimeout(12000);
     p.on('pageerror', (e) => check(`${dev}: no page error`, false, String(e).split('\n')[0]));
     await loginJoin(p, BASE, `p13-${dev}`, `가로${dev}`.slice(0, 12), Q);
+    // Phones show a light facade until the first tap (nothing from YouTube loads before it).
+    await until(p, () => window.__WORLDS_DEBUG__.m3.worship.facade === true, null, 10000).catch(() => undefined);
+    check(`${dev}: worship facade first (no YouTube iframe before a tap)`, (await debug(p)).m3.worship.facade && (await debug(p)).m3.worship.iframes === 0);
+    if (await p.isVisible('#worship-facade-play')) await p.tap('#worship-facade-play');
     await until(p, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 30000).catch(() => undefined);
     check(`${dev}: landscape phone layout (body.phone-land, not a tablet)`, await p.evaluate(() => document.body.classList.contains('phone-land') && !document.body.classList.contains('tablet')));
 

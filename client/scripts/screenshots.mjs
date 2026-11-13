@@ -61,6 +61,9 @@ async function pixelStats(page) {
   });
 }
 
+// __WORLDS_DEBUG__ is published only in test mode (?test=1).
+const withTest = (query) => (query ? `${query}&test=1` : '?test=1');
+
 async function capture(name, contextOptions, query, action) {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
@@ -75,7 +78,7 @@ async function capture(name, contextOptions, query, action) {
       return orig.call(this, type, attrs);
     };
   });
-  await page.goto(base + query);
+  await page.goto(base + withTest(query));
   await waitReady(page);
   const before = await page.evaluate(() => window.__WORLDS_DEBUG__);
   if (action) await action(page);
@@ -136,7 +139,7 @@ await capture('landmark-campfire-night', desktop, '?time=20:30&at=campfire');
 // Determinism: same seed -> same terrain checksum; different seed -> different.
 async function checksum(query) {
   const page = await browser.newPage();
-  await page.goto(base + query);
+  await page.goto(base + withTest(query));
   await page.waitForFunction(() => window.__WORLDS_DEBUG__?.ready === true, null, { timeout: 60_000 });
   const value = await page.evaluate(() => window.__WORLDS_DEBUG__.terrainChecksum);
   await page.close();

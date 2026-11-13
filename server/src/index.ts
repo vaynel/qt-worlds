@@ -122,6 +122,10 @@ const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, r
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
 const staticClient = SERVE_CLIENT && StaticClient.available(clientDist) ? new StaticClient(clientDist) : null;
 if (SERVE_CLIENT) log(staticClient ? `serving client from ${clientDist}` : `WARNING: SERVE_CLIENT set but ${clientDist} has no build`);
+if (staticClient) {
+  const t0 = Date.now();
+  void staticClient.warm().then(() => log(`client assets compressed (gzip + brotli) in ${Date.now() - t0} ms`));
+}
 
 const http = createServer((req, res) => {
   if (req.url === '/health') {

@@ -623,7 +623,7 @@ export class LibraryView {
 
   private async refreshUnread() {
     try {
-      const r = await api<{ unread: number; items: InboxItem[] }>('GET', '/api/library/letters/inbox');
+      const r = await api<{ unread: number }>('GET', '/api/library/letters/unread');
       this.hooks.lettersUnread?.(r.unread);
     } catch {
       /* the badge catches up later */

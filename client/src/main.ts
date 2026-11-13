@@ -6,7 +6,7 @@ import { WORSHIP_VIDEOS } from './config/worship';
 import { getAuthConfig, getMe } from './net/api';
 import { GuestWordBookStore, LocalWordBookStore, ServerWordBookStore, type WordBookStore } from './storage/WordBook';
 import { EntryScreen } from './ui/EntryScreen';
-import { preloadYouTubeApi, WorshipPlayer } from './ui/WorshipPlayer';
+import { preloadYouTubeApi, WORSHIP_LAZY, WorshipPlayer } from './ui/WorshipPlayer';
 import { initPwa } from './pwa/pwa';
 import { consent, ConsentSheet } from './ui/Legal';
 import { Modal } from './ui/dom';
@@ -40,7 +40,8 @@ audio.onSettingsChange(applyWorshipVolume);
 // The player's own slider and mute button write the same settings as ⚙ 설정.
 worship.onVolumeInput((v) => audio.update({ worship: v }));
 worship.onMuteToggle((m) => audio.update({ worshipMuted: m }));
-if (worshipVideos.length) void preloadYouTubeApi().catch(() => undefined);
+// Phones load nothing from YouTube until the user turns to worship (WORSHIP_LAZY).
+if (worshipVideos.length && !WORSHIP_LAZY) void preloadYouTubeApi().catch(() => undefined);
 
 // Track the visible viewport so sheets sit above the on-screen keyboard.
 // Tablets: touch devices whose *screen* (not the current viewport, which the

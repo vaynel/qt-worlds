@@ -6022,3 +6022,46 @@ body.phone-land .sheet.look > .look-foot {
 body.phone-land .sheet.look .look-swatches {
   grid-template-columns: repeat(auto-fill, 40px);
 }
+
+/* ===================================================================== */
+/* Perf P1: phone worship facade (no YouTube loaded until the first tap). */
+/* Lives inside .worship-frame, so every dock/room/sheet/landscape layout */
+/* sizes it exactly like the real player.                                 */
+/* ===================================================================== */
+.worship-facade {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  text-align: center;
+  background: radial-gradient(circle at 50% 40%, #4a3628, #241b15 70%);
+}
+.worship-facade-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+}
+.worship-facade-title {
+  position: relative;
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffe2a8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.worship-facade-play {
+  position: relative;
+  min-height: 44px;
+}

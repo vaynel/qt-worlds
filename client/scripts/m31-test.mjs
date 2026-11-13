@@ -152,7 +152,7 @@ async function playbackOutcome(page, ms = 20000) {
   try {
     await until(page, () => {
       const w = window.__WORLDS_DEBUG__?.m3?.worship;
-      return w && (w.state === 'playing' || w.promptVisible || w.error);
+      return w && (w.state === 'playing' || w.promptVisible || w.error || w.facade);
     }, null, ms);
   } catch {
     /* fall through: report the state as-is */

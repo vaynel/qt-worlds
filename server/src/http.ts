@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { brotliCompress, constants as zlibConstants, gzipSync } from 'node:zlib';
 
 export const MAX_BODY_BYTES = 64 * 1024;
 
@@ -290,12 +290,34 @@ const MIME: Record<string, string> = {
 };
 const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt']);
 
+/** Is `enc` in this Accept-Encoding header (and not refused with q=0)? */
+export function acceptsEncoding(header: string | string[] | undefined, enc: string): boolean {
+  for (const part of String(header ?? '').toLowerCase().split(',')) {
+    const [name, ...params] = part.trim().split(';');
+    if (name.trim() !== enc) continue;
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith('q='));
+    return !q || Number(q.slice(2)) > 0;
+  }
+  return false;
+}
+
+interface Entry {
+  body: Buffer;
+  gz: Buffer | null;
+  /** Brotli copy (quality 11), filled in the background; gzip is served until it's ready. */
+  br: Buffer | null;
+  type: string;
+  etag: string;
+}
+
 /**
  * Serves client/dist with SPA fallback. Hashed files under /assets/ are
- * immutable; index.html is never cached. Text is gzipped once and kept.
+ * immutable; index.html is never cached. Text is compressed once and kept:
+ * gzip right away, brotli (≈20 % smaller) on the libuv thread pool so the
+ * event loop never waits for it. warm() does all of it at startup.
  */
 export class StaticClient {
-  private readonly cache = new Map<string, { body: Buffer; gz: Buffer | null; type: string; etag: string }>();
+  private readonly cache = new Map<string, Entry>();
 
   constructor(private readonly root: string) {}
 
@@ -303,15 +325,57 @@ export class StaticClient {
     return existsSync(join(root, 'index.html'));
   }
 
-  private load(file: string) {
+  /** Load and compress every file up front (call once at startup); resolves when the brotli copies are ready. */
+  warm(): Promise<void> {
+    const pending: Promise<void>[] = [];
+    const walk = (dir: string) => {
+      for (const d of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, d.name);
+        if (d.isDirectory()) walk(path);
+        else if (d.isFile()) {
+          this.load(path);
+          const job = this.brJobs.get(path);
+          if (job) pending.push(job);
+        }
+      }
+    };
+    walk(this.root);
+    return Promise.all(pending).then(() => undefined);
+  }
+
+  private readonly brJobs = new Map<string, Promise<void>>();
+
+  private load(file: string): Entry {
     let entry = this.cache.get(file);
-    if (entry) return entry;
-    const body = readFileSync(file);
-    const ext = extname(file).toLowerCase();
-    const type = MIME[ext] ?? 'application/octet-stream';
-    const gz = COMPRESSIBLE.has(ext) && body.length > 1024 ? gzipSync(body, { level: 6 }) : null;
-    entry = { body, gz, type, etag: `"${createHash('sha1').update(body).digest('base64url').slice(0, 16)}"` };
-    this.cache.set(file, entry);
+    if (!entry) {
+      const body = readFileSync(file);
+      const ext = extname(file).toLowerCase();
+      const type = MIME[ext] ?? 'application/octet-stream';
+      const gz = COMPRESSIBLE.has(ext) && body.length > 1024 ? gzipSync(body, { level: 6 }) : null;
+      entry = { body, gz, br: null, type, etag: `"${createHash('sha1').update(body).digest('base64url').slice(0, 16)}"` };
+      this.cache.set(file, entry);
+      if (gz) {
+        const e = entry;
+        const job = new Promise<void>((done) =>
+          brotliCompress(
+            body,
+            {
+              params: {
+                [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+                [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+                [zlibConstants.BROTLI_PARAM_SIZE_HINT]: body.length,
+              },
+            },
+            (err, out) => {
+              // Only kept when it actually wins over gzip.
+              if (!err && out.length < e.gz!.length) e.br = out;
+              done();
+            },
+          ),
+        );
+        this.brJobs.set(file, job);
+      }
+    }
     return entry;
   }
 
@@ -355,9 +419,12 @@ export class StaticClient {
       res.end();
       return true;
     }
-    const gzipOk = entry.gz && /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
-    const body = gzipOk ? entry.gz! : entry.body;
-    if (gzipOk) headers['content-encoding'] = 'gzip';
+    const accept = req.headers['accept-encoding'];
+    const brOk = entry.br !== null && acceptsEncoding(accept, 'br');
+    const gzipOk = !brOk && entry.gz !== null && acceptsEncoding(accept, 'gzip');
+    const body = brOk ? entry.br! : gzipOk ? entry.gz! : entry.body;
+    if (brOk) headers['content-encoding'] = 'br';
+    else if (gzipOk) headers['content-encoding'] = 'gzip';
     headers['content-length'] = String(body.length);
     res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : body);

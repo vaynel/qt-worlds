@@ -80,6 +80,13 @@ const IS_TOUCH = typeof window !== 'undefined' && (window.matchMedia('(pointer: 
 const FOLD_KEY = `worlds.worship.fold.${IS_TOUCH ? 'touch' : 'desktop'}`;
 /** phone / tablet / desktop (tablet = touch with a screen >= 600 px on its short side). */
 const DEVICE = !IS_TOUCH ? 'desktop' : typeof screen !== 'undefined' && Math.min(screen.width, screen.height) >= 600 ? 'tablet' : 'phone';
+/**
+ * Phones: no YouTube API and no iframe until the user turns to worship (▶ 찬양
+ * 듣기, the HUD 찬양 button, unfolding, a track, or entering the 골방). Until
+ * then a light facade (thumbnail + title) sits in the player's place. Phones
+ * can't autoplay anyway, so this only saves the ≈2.6 MB of player and video.
+ */
+export const WORSHIP_LAZY = DEVICE === 'phone';
 const ROOM_FOLD_KEY = `worlds.worship.roomFold.${DEVICE}`;
 const ROOM_SIZE_KEY = `worlds.worship.roomSize.${DEVICE}`;
 /** 골방 wall player: 작게 = policy minimum, 보통 ≈ 1/3 of the width, 크게 ≈ 58 %. */
@@ -189,6 +196,10 @@ export class WorshipPlayer {
   private squeezed = false;
   private pausedForSqueeze = false;
   private playedWhileHidden = false;
+  /** False on phones until the first turn to worship (see WORSHIP_LAZY). */
+  private activated = !WORSHIP_LAZY;
+  /** Only the newest create() may build a player (never two iframes). */
+  private createSeq = 0;
 
   constructor(private readonly videos: WorshipVideo[] = WORSHIP_VIDEOS) {
     let saved: string | null = null;
@@ -549,8 +560,28 @@ export class WorshipPlayer {
       /* ignore */
     }
     this.applySize();
+    // Phones: unfolding or expanding is a turn to worship (creates the real player).
+    if (fold !== 'folded' && this.wake()) return;
     // Coming back from 접기: resume only once the video is on screen again.
     if (wasFolded && this.effective !== 'folded') requestAnimationFrame(() => requestAnimationFrame(() => this.resumeVisible()));
+  }
+
+  /**
+   * Phones: the first turn to worship swaps the facade for the real player.
+   * True when that started a player here.
+   */
+  private wake(): boolean {
+    if (this.activated) return false;
+    this.activated = true;
+    if (this.player || this.mode === 'hidden' || this.effective === 'folded' || !this.videos.length) return false;
+    void this.create(this.index, true);
+    return true;
+  }
+
+  /** Create the player, or (phones, before any turn to worship) show the facade. */
+  private start(index: number, autoplay: boolean) {
+    if (this.activated) void this.create(index, autoplay);
+    else this.renderFacade(index);
   }
 
   private unfoldFromTab() {
@@ -560,7 +591,7 @@ export class WorshipPlayer {
   private resumeVisible() {
     if (this.effective === 'folded' || this.mode === 'hidden') return;
     if (!this.player) {
-      if (this.videos.length) void this.create(this.index, true);
+      if (this.videos.length) this.start(this.index, true);
       return;
     }
     if (this.ready) {
@@ -676,6 +707,8 @@ export class WorshipPlayer {
    */
   open(asRoom = false, unfold = false) {
     this.setClosedPref(false);
+    // The HUD 찬양 button (unfold) is a turn to worship; entering the world is not.
+    if (unfold) this.activated = true;
     // The HUD 찬양 button brings a folded player back into view; entering the
     // world keeps a remembered 접기 (paused, cued only).
     if (unfold && this.fold === 'folded') this.setFold(IS_TOUCH ? 'mini' : 'open');
@@ -685,7 +718,7 @@ export class WorshipPlayer {
       if (this.state !== STATE.PLAYING) this.playFromGesture();
       return;
     }
-    void this.create(this.index, true);
+    this.start(this.index, true);
   }
 
   /** In the 골방 the player moves onto the room layout; outside it docks again. */
@@ -695,9 +728,11 @@ export class WorshipPlayer {
         // Closed earlier: show it in the room, but wait for a tap to play.
         this.show('room');
         if (this.videos.length === 0) this.renderPlaceholder();
-        else if (!this.player) void this.create(this.index, false);
+        else if (!this.player) this.start(this.index, false);
       } else {
         this.show('room');
+        // Phones: walking into the 골방 with worship on is a turn to worship.
+        this.wake();
       }
     } else if (this.mode === 'room') {
       if (this.userClosed) this.close(false);
@@ -731,6 +766,28 @@ export class WorshipPlayer {
     this.title.textContent = '';
   }
 
+  /** Phones before any turn to worship: thumbnail, title and ▶ 찬양 듣기 where the video will be. */
+  private renderFacade(index: number) {
+    this.index = index;
+    const v = this.videos[index];
+    this.title.textContent = v.title ?? '';
+    this.renderList();
+    this.updateLinks();
+    const box = el('div', 'worship-facade');
+    if (/^[A-Za-z0-9_-]{6,20}$/.test(v.id)) {
+      const img = el('img', 'worship-facade-thumb');
+      img.alt = '';
+      img.decoding = 'async';
+      img.src = `https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg`;
+      img.addEventListener('error', () => img.remove());
+      box.append(img);
+    }
+    const play = button('▶ 찬양 듣기', 'primary worship-facade-play', () => this.playFromGesture());
+    play.id = 'worship-facade-play';
+    box.append(el('p', 'worship-facade-title', v.title ?? '찬양'), play);
+    this.frame.replaceChildren(box);
+  }
+
   private renderMessage(title: string, detail: string, video?: WorshipVideo) {
     this.frame.replaceChildren();
     const box = el('div', 'worship-placeholder');
@@ -748,6 +805,7 @@ export class WorshipPlayer {
   // ---------------------------------------------------------------- playlist
 
   private playIndex(i: number) {
+    this.activated = true;
     window.clearTimeout(this.skipTimer);
     this.failures = 0;
     this.goTo(i);
@@ -793,6 +851,7 @@ export class WorshipPlayer {
 
   private async create(index: number, autoplay: boolean) {
     this.destroyPlayer();
+    const seq = ++this.createSeq;
     this.index = index;
     const video = this.videos[index];
     this.title.textContent = video.title ?? '';
@@ -817,6 +876,8 @@ export class WorshipPlayer {
     }
     // Only start once the player is actually on screen (RMF: visible before autoplay).
     if (this.mode === 'hidden') return;
+    // A newer create() (or close) took over while the API loaded.
+    if (seq !== this.createSeq) return;
     const mount = el('div');
     this.frame.replaceChildren(mount);
     this.ready = false;
@@ -865,6 +926,7 @@ export class WorshipPlayer {
 
   private playFromGesture() {
     if (this.effective === 'folded') return this.unfoldFromTab();
+    this.activated = true;
     if (!this.player || !this.ready) {
       if (!this.player && this.videos.length) void this.create(this.index, true);
       return;
@@ -912,6 +974,7 @@ export class WorshipPlayer {
   }
 
   private destroyPlayer() {
+    this.createSeq++;
     window.clearTimeout(this.graceTimer);
     window.clearTimeout(this.skipTimer);
     this.listen.hidden = true;
@@ -961,6 +1024,10 @@ export class WorshipPlayer {
       userClosed: this.userClosed,
       error: this.lastError,
       placeholder: !!this.root.querySelector('.worship-placeholder'),
+      /** Phones: the light facade is shown instead of the YouTube player (nothing loaded yet). */
+      facade: !!this.root.querySelector('.worship-facade'),
+      lazy: WORSHIP_LAZY,
+      activated: this.activated,
     };
   }
 }

@@ -69,6 +69,15 @@ const LANTERN_READ_REACH = 2.6;
 const LANTERN_TAP_REACH = 12;
 
 const DOOR_REACH = 2.6;
+/**
+ * Render on demand: a sheet covering this share of the screen slows the world to
+ * COVERED_FPS. Phone sheets span the full width (portrait) or the left two
+ * thirds (landscape) and what's left is mostly the HUD and the worship player,
+ * so half the screen counts there; tablets and desktop need near-full cover.
+ */
+const COVER_FRACTION = 0.8;
+const COVER_FRACTION_PHONE = 0.5;
+const COVERED_FPS = 8;
 
 /**
  * Owns the frame: input -> player -> camera -> world streaming -> HUD -> render.
@@ -105,6 +114,15 @@ export class Game {
   private elapsed = 0;
   private frame = 0;
   private readonly isTouch: boolean;
+  /** Touch device with a phone-sized screen (short side < 600 px; tablets are wider). */
+  private readonly isPhone: boolean;
+  /** ?test=1: test hooks and the __WORLDS_DEBUG__ mirror (never built for real players). */
+  private readonly testMode: boolean;
+  /** Render-on-demand while a sheet covers the world (see shouldDraw). */
+  private coverCheckFrame = -1000;
+  private coverModal: Modal | null = null;
+  private sheetCovers = false;
+  private lastCoveredDraw = 0;
   private readonly terrainChecksum: number;
   private readonly audio: AudioEngine;
   private readonly devotion: Devotion;
@@ -160,6 +178,8 @@ export class Game {
   ) {
     const params = new URLSearchParams(window.location.search);
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    this.isPhone = this.isTouch && Math.min(screen.width, screen.height) < 600;
+    this.testMode = params.get('test') === '1';
     // Shadows are the single most expensive feature; phones and ?shadows=0 skip them.
     const shadows = params.get('shadows') !== null ? params.get('shadows') !== '0' : !this.isTouch;
 
@@ -191,7 +211,7 @@ export class Game {
       start = { x: at.x + (dx / len) * r, z: at.z + (dz / len) * r, yaw: Math.atan2(dx, dz) };
     }
     this.player = new PlayerController(this.world, start.x, start.z, Math.PI + start.yaw);
-    this.terrainChecksum = this.world.terrainChecksum();
+    this.terrainChecksum = this.testMode ? this.world.terrainChecksum() : 0; // QA only
     this.scene.add(this.player.avatar.root);
 
     this.world.chunks.primeAround(this.player.position.x, this.player.position.z);
@@ -422,7 +442,7 @@ export class Game {
     this.chat.onFocusChange(() => this.input.reset());
     window.addEventListener('keydown', this.onKeyDown);
 
-    if (params.get('test') === '1') this.installTestHooks();
+    if (this.testMode) this.installTestHooks();
 
     this.timer.connect(document);
     window.addEventListener('resize', this.resize);
@@ -778,7 +798,8 @@ export class Game {
 
   private async refreshLetters() {
     try {
-      this.setLettersUnread((await api<{ unread: number }>('GET', '/api/library/letters/inbox')).unread);
+      // Just the badge number; the full 받은 편지 loads when that view opens.
+      this.setLettersUnread((await api<{ unread: number }>('GET', '/api/library/letters/unread')).unread);
     } catch {
       /* offline */
     }
@@ -1179,8 +1200,8 @@ export class Game {
   private readonly resize = () => {
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
-    // Pixel ratio is a fill-rate budget: capped lower on touch devices.
-    const maxDpr = this.isTouch ? 1.5 : 1.75;
+    // Pixel ratio is a fill-rate budget: capped lower on touch devices, lowest on phones.
+    const maxDpr = this.isPhone ? 1.25 : this.isTouch ? 1.5 : 1.75;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -1238,12 +1259,11 @@ export class Game {
 
     if (this.inCloset) {
       this.interior.update(dt, this.elapsed, this.world.dayNight.night);
-      this.renderer.render(this.interior.scene, this.interior.camera);
+      if (this.shouldDraw(false)) this.renderer.render(this.interior.scene, this.interior.camera);
     } else if (this.inLibrary) {
       this.library.update(this.camera, this.elapsed, this.world.dayNight.night);
-      if (!this.customize.isOpen || this.frame % 4 === 0) this.renderer.render(this.library.scene, this.camera);
-    } else if (!this.customize.isOpen || this.frame % 4 === 0) {
-      // The 꾸미기 preview has its own renderer: draw the world behind it less often.
+      if (this.shouldDraw(true)) this.renderer.render(this.library.scene, this.camera);
+    } else if (this.shouldDraw(true)) {
       this.renderer.render(this.scene, this.camera);
     }
 
@@ -1282,13 +1302,50 @@ export class Game {
       this.pathGlow.dispose();
       this.pathGlow = null;
     }
-    try {
-      this.publishDebug();
-    } catch (err) {
-      // Debug state is best-effort; never let it stop the animation loop.
-      if (this.frame % 600 === 0) console.warn('debug publish failed', err);
+    if (this.testMode) {
+      try {
+        this.publishDebug();
+      } catch (err) {
+        // Debug state is best-effort; never let it stop the animation loop.
+        if (this.frame % 600 === 0) console.warn('debug publish failed', err);
+      }
     }
   };
+
+  /**
+   * Render on demand: the world is still updated every frame, but drawn less
+   * often when nobody can see it. The 꾸미기 preview has its own renderer, so the
+   * world behind it is drawn every 4th frame; a sheet covering most of the
+   * screen (every phone sheet; near-full ones elsewhere) drops it to COVERED_FPS
+   * behind the dimmed backdrop (input is paused while a sheet is open anyway).
+   * The worship player is DOM and keeps playing either way; closing the sheet
+   * restores the full rate at once.
+   */
+  private shouldDraw(customizeApplies: boolean): boolean {
+    if (customizeApplies && this.customize.isOpen) return this.frame % 4 === 0;
+    const m = Modal.current;
+    if (!m) {
+      this.coverModal = null;
+      this.sheetCovers = false;
+      return true;
+    }
+    // One layout read every 15 frames (the sheet slides in, and phones rotate).
+    if (m !== this.coverModal || this.frame - this.coverCheckFrame >= 15) {
+      this.coverModal = m;
+      this.coverCheckFrame = this.frame;
+      const r = m.sheet.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const w = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+      const h = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      this.sheetCovers = w * h >= (this.isPhone ? COVER_FRACTION_PHONE : COVER_FRACTION) * vw * vh;
+    }
+    if (!this.sheetCovers) return true;
+    const now = performance.now();
+    if (now - this.lastCoveredDraw < 1000 / COVERED_FPS) return false;
+    this.lastCoveredDraw = now;
+    return true;
+  }
 
   private updateAudio() {
     const p = this.player.position;
@@ -1388,7 +1445,7 @@ export class Game {
       player: { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) },
       location: this.world.locate(p.x, p.z)?.name ?? '들판',
       timeOfDay: { hours: +dn.hours.toFixed(2), phase: dn.phase, sun: +dn.sunHeight.toFixed(2) },
-      renderer: { calls: info.calls, triangles: info.triangles },
+      renderer: { calls: info.calls, triangles: info.triangles, pixelRatio: this.renderer.getPixelRatio(), sheetCovers: this.sheetCovers },
       net: this.social.describe(),
       m3: {
         ...this.devotion.describe(),

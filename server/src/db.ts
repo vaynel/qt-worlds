@@ -420,12 +420,20 @@ const MIGRATIONS: string[] = [
   `
   CREATE INDEX IF NOT EXISTS stories_kind ON stories(kind, created_at);
   `,
+  // v12 (perf audit 2026-11-13): the daily lantern limit (user_id + created_at)
+  // and the hourly session sweep (expires_at) were full table scans.
+  `
+  CREATE INDEX IF NOT EXISTS lanterns_user ON lanterns(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
+  // Crash-safe under WAL (a power cut can lose only the last commits, never corrupt).
+  db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 3000');
   // 파기: deleted rows are overwritten in the file, not just unlinked.

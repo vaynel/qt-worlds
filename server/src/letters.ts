@@ -62,6 +62,20 @@ export interface LetterResult {
 
 const SELECT = 'SELECT l.*, u.nickname AS nickname FROM story_letters l JOIN users u ON u.id = l.user_id';
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
+/**
+ * Ids of the (≤300 newest) letters in @viewer's 📬 받은 편지: letters on my books
+ * (not ones I folded away) and my letters on others' visible books. Two
+ * disjoint halves so each uses its own index (story_letters_story / _user);
+ * `+l.parent_id` keeps SQLite off story_letters_parent, which would walk every
+ * top-level letter of every user.
+ */
+const INBOX_LETTERS = `SELECT id FROM (
+    SELECT l.id FROM stories s JOIN story_letters l ON l.story_id = s.id JOIN users lu ON lu.id = l.user_id
+    WHERE s.user_id = @viewer AND +l.parent_id IS NULL AND l.user_id <> @viewer AND l.author_hidden_at IS NULL AND l.hidden_at IS NULL
+    UNION ALL
+    SELECT l.id FROM story_letters l JOIN stories s ON s.id = l.story_id
+    WHERE l.user_id = @viewer AND +l.parent_id IS NULL AND s.user_id <> @viewer AND ${VISIBLE}
+  ) ORDER BY id DESC LIMIT 300`;
 const excerptOf = (text: string, n = 60) => {
   const t = text.replace(/\s+/g, ' ').trim();
   return [...t].length > n ? `${[...t].slice(0, n).join('')}…` : t;
@@ -231,12 +245,7 @@ export class LetterService {
   /** 📬 받은 편지: letters on my books and threads of my letters, newest activity first. */
   inbox(userId: number): { unread: number; items: InboxItem[] } {
     const letters = this.db
-      .prepare(
-        `${SELECT} JOIN stories s ON s.id = l.story_id
-         WHERE l.parent_id IS NULL AND ((s.user_id = @viewer AND l.user_id <> @viewer AND l.author_hidden_at IS NULL) OR (l.user_id = @viewer AND s.user_id <> @viewer))
-           AND (l.hidden_at IS NULL OR l.user_id = @viewer) AND ${VISIBLE}
-         ORDER BY l.id DESC LIMIT 300`,
-      )
+      .prepare(`${SELECT} WHERE l.id IN (${INBOX_LETTERS}) ORDER BY l.id DESC`)
       .all({ viewer: userId }) as Row[];
     const items: InboxItem[] = [];
     let unread = 0;
@@ -266,18 +275,33 @@ export class LetterService {
     return { unread, items: items.slice(0, 100) };
   }
 
+  /**
+   * The 📬 badge number, in one query: the same count as inbox().unread (the
+   * same ≤300 threads; in each, messages from others that are neither deleted
+   * nor hidden and newer than my read pointer) without building the inbox.
+   */
   unreadCount(userId: number): number {
-    return this.inbox(userId).unread;
+    return (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (${INBOX_LETTERS}) t
+           JOIN story_letters m ON m.id = t.id OR m.parent_id = t.id
+           JOIN users mu ON mu.id = m.user_id
+           LEFT JOIN letter_reads r ON r.user_id = @viewer AND r.letter_id = t.id
+           WHERE m.user_id <> @viewer AND m.deleted_at IS NULL AND m.hidden_at IS NULL AND m.id > COALESCE(r.read_id, 0)`,
+        )
+        .get({ viewer: userId }) as { n: number }
+    ).n;
   }
 
   /** 읽음: one thread, or every thread in 받은 편지. */
   markRead(userId: number, body: Record<string, unknown>): { unread: number } {
-    if (body.all === true) this.markThreads(userId, this.inbox(userId).items.map((i) => i.letterId));
-    else {
-      const id = Number(body.letterId);
-      if (!Number.isInteger(id)) throw new HttpError(400, 'bad_letter', '편지를 골라 주세요.');
-      if (this.inbox(userId).items.some((i) => i.letterId === id)) this.markThreads(userId, [id]);
-    }
+    const all = body.all === true;
+    const id = Number(body.letterId);
+    if (!all && !Number.isInteger(id)) throw new HttpError(400, 'bad_letter', '편지를 골라 주세요.');
+    const items = this.inbox(userId).items;
+    if (all) this.markThreads(userId, items.map((i) => i.letterId));
+    else if (items.some((i) => i.letterId === id)) this.markThreads(userId, [id]);
     return { unread: this.unreadCount(userId) };
   }
 

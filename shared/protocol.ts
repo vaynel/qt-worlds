@@ -679,14 +679,13 @@ export const OUTFIT_BAN_DAYS = 7;
 
 /** Calendar date in Korea (YYYY-MM-DD). The day changes at 00:00 KST. */
 export function seoulDate(now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  return `${get('year')}-${get('month')}-${get('day')}`;
+  // Fixed +9 h arithmetic (Korea has no daylight saving): ~100× cheaper than Intl.
+  return kstDateOf(now.getTime());
+}
+
+/** Days since the epoch in Korea: changes exactly at 00:00 KST (cheap day-change checks). */
+export function kstDayNumber(ms: number): number {
+  return Math.floor((ms + 9 * 3600_000) / 86_400_000);
 }
 
 // ------------------------------------------------------------------ 나눔 소품 가게 (M9)
