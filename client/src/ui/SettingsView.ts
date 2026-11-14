@@ -202,7 +202,7 @@ export class SettingsView {
         this.openGuide();
       }),
     );
-    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '옷 그림, 소품 가게, 도서관, 모닥불 음성 관리', () => this.go('admin')));
+    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '운영 통계, 옷 그림, 소품 가게, 도서관, 모닥불 음성 관리', () => this.go('admin')));
 
     const legal = el('div', 'settings-menu-legal');
     const link = (href: string, text: string, id: string) => {
@@ -491,7 +491,15 @@ export class SettingsView {
       look.openAdmin('voice');
     });
     voiceAdmin.id = 'settings-admin-voice';
+    // 운영 통계: a separate page (/admin); the server shows it to admins only.
+    const stats = el('a', 'settings-admin-stats', '📊 운영 통계 대시보드') as HTMLAnchorElement;
+    stats.href = '/admin';
+    stats.target = '_blank';
+    stats.rel = 'noopener';
+    stats.id = 'settings-admin-stats';
     box.append(
+      stats,
+      el('p', 'settings-note', '방문·재방문·나눔 활동을 숫자로만 봐요. 사람들이 쓴 글은 보이지 않아요.'),
       a,
       el('p', 'settings-note', '신고된 옷 그림을 보고 숨김·복구·그림 금지를 정해요.'),
       shopAdmin,

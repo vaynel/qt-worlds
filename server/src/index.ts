@@ -18,6 +18,7 @@ import { LetterService } from './letters.js';
 import { ShotService } from './shots.js';
 import { CampfireVoiceService } from './campfireVoice.js';
 import { WeatherService } from './weather.js';
+import { StatsService } from './stats.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
@@ -80,7 +81,8 @@ const library = new LibraryService(db, groups, dailyWord, footprints, shots);
 const letters = new LetterService(db, library);
 log(`screenshots: ${shotsDir}`);
 const campfireVoice = new CampfireVoiceService(db);
-const accounts = new AccountService(db, looks, shop, { library, footprints, shots, letters }, campfireVoice);
+const stats = new StatsService(db);
+const accounts = new AccountService(db, looks, shop, { library, footprints, shots, letters }, campfireVoice, stats);
 if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
 else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
@@ -125,11 +127,18 @@ const room = new Room({
   campfireVoice,
   campfireVoiceEnabled: ice.configured,
   weather,
+  stats,
 });
 weather.start();
+stats.attach({
+  online: () => room.playerCount,
+  weather: () => weather.current(),
+  dbPath,
+  backupDir: resolve(process.env.BACKUP_DIR ?? resolve(dirname(dbPath), 'backups')),
+});
 shop.events = room;
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only, campfire voice is off');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, weather, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, weather, stats, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -146,6 +155,13 @@ const http = createServer((req, res) => {
     const local = requestInfo(req).local;
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(local ? { ok: true, players: room.playerCount } : { ok: true }));
+    return;
+  }
+  // 운영자 통계 dashboard (/admin, /admin/assets/*): admins only, a plain uncached 404 for everyone else.
+  const path = (req.url ?? '/').split('?')[0];
+  if (path === '/admin' || path.startsWith('/admin/') || path === '/admin.html') {
+    if (staticClient && api.isAdminRequest(req) && staticClient.handleAdmin(req, res)) return;
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' }).end('not found');
     return;
   }
   void api.handle(req, res).then((handled) => {
@@ -205,6 +221,8 @@ const sweep = () => {
   chat.purge();
   const gone = accounts.sweep();
   const voiceGone = campfireVoice.sweep();
+  const statsGone = stats.sweep();
+  if (statsGone) log(`sweep: ${statsGone} usage-stat rows older than 13 months deleted`);
   if (voiceGone) log(`sweep: ${voiceGone} old campfire voice report/mute records deleted`);
   if (gone.lanterns || gone.signups || gone.outfits || gone.rentals || gone.footprints || gone.shots)
     log(
@@ -212,6 +230,8 @@ const sweep = () => {
     );
 };
 const sweeper = setInterval(sweep, 3_600_000);
+// 운영자 통계: online players every 5 minutes (aggregate per KST date and hour; the peak in between counts too).
+const statsTimer = setInterval(() => stats.sample(room.playerCount, room.takePeak()), Number(process.env.WORLDS_STATS_SAMPLE_MS ?? 300_000));
 sweep();
 // Every minute: daily words that are due (Asia/Seoul), batched prayer and 공감 notices,
 // and 📔 밤 일기 알림.
@@ -226,6 +246,7 @@ http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /
 const shutdown = () => {
   clearInterval(heartbeat);
   clearInterval(sweeper);
+  clearInterval(statsTimer);
   clearInterval(shopTimer);
   if (pushTimer) clearInterval(pushTimer);
   weather.stop();

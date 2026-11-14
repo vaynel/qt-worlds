@@ -4,6 +4,7 @@ import { HttpError } from './http.js';
 import { LANTERN_DAYS } from './services.js';
 import { RENTAL_KEEP_DAYS } from './shop.js';
 import type { CampfireVoiceService } from './campfireVoice.js';
+import type { StatsService } from './stats.js';
 import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
 import type { FootprintService } from './footprints.js';
@@ -46,6 +47,7 @@ export class AccountService {
     private readonly shop: ShopService | null = null,
     private readonly library: { library: LibraryService; footprints: FootprintService; shots: ShotService; letters?: LetterService } | null = null,
     private readonly campfireVoice: CampfireVoiceService | null = null,
+    private readonly stats: StatsService | null = null,
   ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
@@ -245,6 +247,8 @@ export class AccountService {
       screenshots: this.library?.shots.export(userId) ?? null,
       // 🔥 모닥불 음성: reports I made and mutes I received (never who reported me; no audio exists).
       campfireVoice: this.campfireVoice?.export(userId) ?? null,
+      // 서비스 이용 통계: only the KST dates I used the app (13 months) and when I first did a few things.
+      usageStats: this.stats?.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
       retention: {
         groupMessagesDays: GROUP_CHAT_DAYS,
@@ -326,7 +330,8 @@ export class AccountService {
       // 발자취 and screenshot rows. ✉️ My letters on others' books go with their whole
       // thread (the book author's replies too: a conversation with nobody on the other
       // side would make no sense, and the replies quote/answer my words); my replies
-      // as a book author vanish with my books; my letter reports and read pointers.
+      // as a book author vanish with my books; my letter reports and read pointers;
+      // my 접속일 (active_days, usage statistics).
       this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
       const remainingGroups = memberOf.filter((g) => !deletedGroups.includes(g));
@@ -334,6 +339,7 @@ export class AccountService {
     })();
     this.library?.shots.removeFiles(shotFiles);
     this.library?.footprints.forget(userId);
+    this.stats?.forget(userId);
     return out;
   }
 

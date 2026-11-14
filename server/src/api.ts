@@ -15,6 +15,7 @@ import type { LetterResult, LetterService } from './letters.js';
 import { readBody, type ShotService } from './shots.js';
 import type { CampfireVoiceService } from './campfireVoice.js';
 import type { WeatherService } from './weather.js';
+import type { StatsService } from './stats.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -129,6 +130,8 @@ export interface ApiDeps {
   campfireVoice: CampfireVoiceService;
   /** 서울 날씨 (test override only; clients get it over /ws). */
   weather?: WeatherService;
+  /** 운영자 통계 (aggregates only; the /admin dashboard). */
+  stats: StatsService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -178,6 +181,7 @@ export class Api {
   private readonly shotLimit = new RateLimiter(60, 3_600_000);
   private readonly letterLimit = new RateLimiter(Number(process.env.LETTER_RATE_LIMIT ?? LETTERS_PER_HOUR), 3_600_000);
   private readonly letterReplyLimit = new RateLimiter(Number(process.env.LETTER_REPLY_RATE_LIMIT ?? LETTER_REPLIES_PER_HOUR), 3_600_000);
+  private readonly statsLimit = new RateLimiter(Number(process.env.STATS_RATE_LIMIT ?? 60), 600_000);
   private readonly admins = adminEmails();
   /** Group chat: burst 5, then 1 every 2 s, per user. */
   private readonly chatBuckets = new Map<number, TokenBucket>();
@@ -389,7 +393,10 @@ export class Api {
       const body = await readJson(req);
       this.limit(this.shopLimit, `user:${u.id}`);
       const out = d.shop.rent(u.id, body.requestId, body.item);
-      if (out.ok && !out.replayed) d.footprints.event(u.id, 'rent', String(out.rental.id), { item: out.rental.item });
+      if (out.ok && !out.replayed) {
+        d.footprints.event(u.id, 'rent', String(out.rental.id), { item: out.rental.item });
+        d.stats.bump('rental');
+      }
       const extra = { shop: d.shop.status(), mine: d.shop.mine(u.id), replayed: out.replayed };
       if (out.ok) sendJson(res, 200, { ok: true, rental: out.rental, ...extra });
       else sendJson(res, out.status, { error: out.error, message: out.message, ...extra });
@@ -467,6 +474,8 @@ export class Api {
       const text = (m.meditation || m.feeling || m.application).replace(/\s+/g, ' ').trim();
       const chars = [...text];
       d.footprints.event(u.id, 'meditation', String(m.id), { place: m.place, excerpt: chars.length > 40 ? `${chars.slice(0, 40).join('')}…` : text });
+      d.stats.bump('meditation');
+      d.stats.milestone(u.id, 'first_meditation_at');
       sendJson(res, 201, m);
     });
     r('GET', '/api/wordbook/meditations/:id', ({ res, user, params }) => sendJson(res, 200, d.wordbook.get(this.signedIn(user).id, id(params[0]))));
@@ -510,6 +519,7 @@ export class Api {
       if (!d.groups.isMember(u.id, gid)) throw new HttpError(404, 'not_found', '모임을 찾을 수 없어요.');
       if (!this.chatAllowed(u.id)) throw new HttpError(429, 'rate_limited', '조금 천천히 보내 주세요.');
       const m = d.chat.post(u.id, gid, body.text);
+      d.stats.bump('chat_group');
       d.room.groupChat(m, false);
       d.room.groupRead(u.id, gid, m.id);
       sendJson(res, 201, m);
@@ -712,6 +722,7 @@ export class Api {
       const u = this.signedIn(user);
       this.limit(this.libraryWriteLimit, `user:${u.id}`);
       const story = lib.createTestimony(u.id, await readJson(req));
+      d.stats.bump('testimony');
       d.room.libraryChanged();
       sendJson(res, 201, story);
     });
@@ -733,6 +744,7 @@ export class Api {
       const sid = id(params[0]);
       const type = (await readJson(req)).type;
       const story = lib.react(u.id, sid, type);
+      if (typeof type === 'string' && story.myReactions.includes(type as never)) d.stats.bump(type === 'pray' ? 'react_pray' : 'react_empathy');
       // 📚 내 이야기 소식: batched per book in PushService (never who).
       if (!story.mine && typeof type === 'string' && story.myReactions.includes(type as never)) void d.push.storyReacted(sid).catch((e) => console.error('push story', e));
       sendJson(res, 200, story);
@@ -790,6 +802,7 @@ export class Api {
       const u = this.signedIn(user);
       const body = await readJson(req);
       const out = lt.write(u.id, id(params[0]), body, () => this.limit(this.letterLimit, `user:${u.id}`));
+      if (out.created) d.stats.bump('letter');
       delivered(out);
       sendJson(res, out.created ? 201 : 200, { thread: out.thread, replayed: !out.created });
     });
@@ -797,6 +810,7 @@ export class Api {
       const u = this.signedIn(user);
       const body = await readJson(req);
       const out = lt.reply(u.id, id(params[0]), body, () => this.limit(this.letterReplyLimit, `user:${u.id}`));
+      if (out.created) d.stats.bump('reply');
       delivered(out);
       sendJson(res, out.created ? 201 : 200, { thread: out.thread, replayed: !out.created });
     });
@@ -840,7 +854,10 @@ export class Api {
     r('POST', '/api/diary', async ({ req, res, user }) => {
       const u = this.signedIn(user);
       this.limit(this.libraryWriteLimit, `user:${u.id}`);
-      const story = lib.publishDiary(u.id, await readJson(req));
+      const body = await readJson(req);
+      const replacing = d.stats.hasDiary(u.id, kstDateOf(lib.now()));
+      const story = lib.publishDiary(u.id, body);
+      if (!replacing) d.stats.bump('diary');
       d.room.libraryChanged();
       sendJson(res, 200, story);
     });
@@ -864,6 +881,7 @@ export class Api {
     r('POST', '/api/footprints/letter', ({ res, user }) => {
       const u = this.signedIn(user);
       const now = d.footprints.now();
+      d.stats.milestone(u.id, 'first_letter_at');
       sendJson(res, 200, { recorded: d.footprints.event(u.id, 'letter', kstDateOf(now), {}, now) });
     });
     // 📸 screenshots: owner-only until a published diary shows them.
@@ -934,13 +952,26 @@ export class Api {
       });
     }
 
+    // ---------------- 운영자 통계 (/admin). Admins only, read-only, aggregates only; everyone else gets a plain 404.
+    r('GET', '/api/admin/stats', ({ req, res, user, info, query }) => {
+      this.statsAdmin(req, user, info);
+      sendJson(res, 200, d.stats.overview(query.get('fresh') === '1'), { 'cache-control': 'private, no-store' });
+    });
+    r('GET', '/api/admin/stats/system', ({ req, res, user, info }) => {
+      this.statsAdmin(req, user, info);
+      sendJson(res, 200, d.stats.system(), { 'cache-control': 'private, no-store' });
+    });
+
     // ---------------- lanterns (visibility enforced in LanternService)
     r('GET', '/api/lanterns', ({ res, user }) => sendJson(res, 200, { lanterns: d.lanterns.listFor(user?.id ?? null) }));
     r('POST', '/api/lanterns', async ({ req, res, user }) => {
       const u = this.signedIn(user);
       const lid = d.lanterns.create(u.id, await readJson(req));
       d.room.lanternChanged(lid);
-      sendJson(res, 201, d.lanterns.detail(lid, u.id));
+      const detail = d.lanterns.detail(lid, u.id);
+      d.stats.bump(detail.group !== null ? 'lantern_group' : detail.anonymous ? 'lantern_anon' : 'lantern_public');
+      d.stats.milestone(u.id, 'first_lantern_at');
+      sendJson(res, 201, detail);
     });
     r('GET', '/api/lanterns/:id', ({ res, user, params }) => {
       const lid = id(params[0]);
@@ -961,6 +992,7 @@ export class Api {
       const type = (await readJson(req)).type;
       const detail = d.lanterns.toggle(u.id, lid, type);
       d.room.lanternChanged(lid);
+      if ((type === 'pray' || type === 'amen') && detail.myReactions.includes(type)) d.stats.bump(type === 'pray' ? 'react_pray' : 'react_empathy');
       if (typeof type === 'string' && detail.myReactions.includes(type as never) && !detail.mine) {
         d.footprints.event(u.id, 'lantern_react', `${kstDateOf(Date.now())}:${lid}:${type}`, { lanternId: lid, type });
       }
@@ -972,6 +1004,24 @@ export class Api {
 
   private limit(limiter: RateLimiter, key: string) {
     if (!limiter.hit(key)) throw new HttpError(429, 'rate_limited', '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.');
+  }
+
+  /**
+   * Stats routes: admin only (404 for everyone else, signed in or not), a cross-origin
+   * caller is refused the same way, and calls are rate limited per account.
+   */
+  private statsAdmin(req: IncomingMessage, user: SessionUser | null, info: RequestInfo): SessionUser {
+    if (!originAllowed(req, info) || req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(404, 'not_found', '찾을 수 없어요.');
+    const u = this.admin(user);
+    this.limit(this.statsLimit, `user:${u.id}`);
+    return u;
+  }
+
+  /** /admin (the dashboard page and its files): only for admins; a plain 404 for everyone else. */
+  isAdminRequest(req: IncomingMessage): boolean {
+    const info = requestInfo(req);
+    if (!originAllowed(req, info) || req.headers['sec-fetch-site'] === 'cross-site') return false;
+    return isAdmin(this.d.sessions.user(req), this.admins);
   }
 
   private admin(user: SessionUser | null): SessionUser {
@@ -1004,6 +1054,8 @@ export class Api {
         matchedPath = true;
         if (route.method !== method) continue;
         const user = this.d.sessions.user(req);
+        // 운영자 통계: a signed-in account used the app today (one row per day; cached in memory).
+        if (user?.nickname) this.d.stats.markActive(user.id);
         // Saving and sharing wait until the account agrees to the current terms.
         const writes = method !== 'GET' && method !== 'HEAD' && method !== 'DELETE';
         if (writes && !route.opts.consentFree && user?.nickname && !user.consented) {

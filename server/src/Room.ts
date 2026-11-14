@@ -42,6 +42,7 @@ import type { LookService } from './looks.js';
 import type { ShopEvents, ShopService } from './shop.js';
 import { TokenBucket } from './rateLimit.js';
 import type { FootprintService } from './footprints.js';
+import type { StatsService } from './stats.js';
 import type { LibraryService } from './library.js';
 import type { CampfireVoiceService } from './campfireVoice.js';
 
@@ -120,6 +121,8 @@ export interface RoomOptions {
   campfireVoiceEnabled?: boolean;
   /** 서울 날씨 for welcome (and weatherChanged() for live updates). */
   weather?: { current(): WeatherState } | null;
+  /** 운영자 통계: aggregate counters, active days and first-time milestones. */
+  stats?: StatsService | null;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -181,6 +184,14 @@ export class Room implements RoomEvents, ShopEvents {
     let n = 0;
     for (const c of this.clients.values()) if (c.joined) n++;
     return n;
+  }
+
+  /** 운영자 통계: the most players online at once since the last call. */
+  private peakSince = 0;
+  takePeak(): number {
+    const p = Math.max(this.peakSince, this.playerCount);
+    this.peakSince = this.playerCount;
+    return p;
   }
 
   attach(ws: WebSocket, user: SessionUser | null = null): void {
@@ -268,7 +279,17 @@ export class Room implements RoomEvents, ShopEvents {
       if (msg.t !== 'hello') return this.strike(client, 'bad_message');
       if (msg.testDate && this.options.allowTestDates) client.testDate = msg.testDate;
       if (msg.test && this.options.testMode) client.testClient = true;
-      return this.join(client, msg.v, msg.nickname);
+      this.join(client, msg.v, msg.nickname);
+      // 운영자 통계: counters only (a fresh page load, guest or not, device class, installed app).
+      if (client.joined) {
+        const stats = this.options.stats;
+        if (stats && msg.fresh) stats.session({ guest: client.userId === null, device: msg.device ?? null, standalone: msg.pwa ?? null });
+        if (stats && client.userId !== null) {
+          stats.markActive(client.userId);
+          stats.milestone(client.userId, 'first_entry_at');
+        }
+      }
+      return;
     }
 
     switch (msg.t) {
@@ -328,6 +349,7 @@ export class Room implements RoomEvents, ShopEvents {
           }
         }
         this.log(`chat ${client.name}: ${text.length} chars, heard by ${heard}`);
+        this.options.stats?.bump('chat_campfire');
         return;
       }
       case 'sit': {
@@ -422,6 +444,7 @@ export class Room implements RoomEvents, ShopEvents {
     const space = spaceOf(client);
     if (space === 'room') return;
     const data = JSON.stringify({ t: 'emote', id: client.id, e } satisfies ServerMessage);
+    this.options.stats?.bump('emote');
     for (const c of this.clients.values()) {
       if (c.joined && spaceOf(c) === space && c.ws.readyState === c.ws.OPEN) c.ws.send(data);
     }
@@ -492,6 +515,7 @@ export class Room implements RoomEvents, ShopEvents {
     this.send(client, { t: 'voiceRoom', groupId, groupName: info.name, selfId: client.id, owner: info.ownerId === client.userId, peers });
     this.voiceBroadcast(groupId, { t: 'voicePeer', peer: this.voiceInfo(client), joined: true }, client);
     this.log(`voice join g${groupId} ${client.name} (${room.size})`);
+    this.options.stats?.bump('voice_group');
   }
 
   /**
@@ -519,6 +543,7 @@ export class Room implements RoomEvents, ShopEvents {
     this.send(client, { t: 'voiceRoom', groupId: CAMPFIRE_VOICE_ROOM, groupName: '모닥불', selfId: client.id, owner: false, peers, campfire: true, silencedUntil: this.silencedUntil(client) });
     this.voiceBroadcast(CAMPFIRE_VOICE_ROOM, { t: 'voicePeer', peer: this.voiceInfo(client), joined: true }, client);
     this.log(`voice join campfire ${client.name} (${room.size})`);
+    this.options.stats?.bump('voice_campfire');
   }
 
   /** API: may this account get campfire TURN credentials (near the fire, or already in its voice room)? */
@@ -653,6 +678,7 @@ export class Room implements RoomEvents, ShopEvents {
     for (const c of this.clients.values()) {
       if (c.joined && c !== client) this.send(c, { t: 'join', player: this.info(client, c) });
     }
+    this.peakSince = Math.max(this.peakSince, this.playerCount);
     this.log(`join ${name} (${client.id}), players=${this.playerCount}`);
   }
 
@@ -850,6 +876,8 @@ export class Room implements RoomEvents, ShopEvents {
     this.currentDate = today;
     this.log(`new day ${today}`);
     for (const c of this.clients.values()) {
+      // 운영자 통계: still here after midnight counts as using the app today too.
+      if (c.joined && c.userId !== null) this.options.stats?.markActive(c.userId, now);
       if (!c.joined || c.testDate) continue;
       const word = this.wordFor(c);
       if (word) this.send(c, { t: 'word', word });

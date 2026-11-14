@@ -327,7 +327,19 @@ export interface WordPassage {
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type ClientMessage =
-  | { t: 'hello'; v: number; nickname: string; testDate?: string; test?: boolean }
+  | {
+      t: 'hello';
+      v: number;
+      nickname: string;
+      testDate?: string;
+      test?: boolean;
+      /** 운영자 통계: the first hello of a page load (reconnects leave it out). */
+      fresh?: boolean;
+      /** Coarse device class only (never the user agent). */
+      device?: 'phone' | 'tablet' | 'desktop';
+      /** Running as an installed app. */
+      pwa?: boolean;
+    }
   | ({ t: 'state' } & StatePayload)
   | { t: 'chat'; text: string }
   /** Sit on a mat (legacy shape: { t: 'sit', mat }), a log or bench seat ({ t: 'sit', kind, seat }). */
@@ -602,7 +614,17 @@ export function parseClientMessage(data: string): ClientMessage | null {
       if (typeof m.v !== 'number') return null;
       if (typeof m.nickname !== 'string') return null;
       const testDate = typeof m.testDate === 'string' && DATE_RE.test(m.testDate) ? m.testDate : undefined;
-      return { t: 'hello', v: m.v, nickname: m.nickname, testDate, test: m.test === true };
+      const device = m.device === 'phone' || m.device === 'tablet' || m.device === 'desktop' ? m.device : undefined;
+      return {
+        t: 'hello',
+        v: m.v,
+        nickname: m.nickname,
+        testDate,
+        test: m.test === true,
+        ...(m.fresh === true ? { fresh: true } : {}),
+        ...(device ? { device } : {}),
+        ...(typeof m.pwa === 'boolean' ? { pwa: m.pwa } : {}),
+      };
     }
     case 'state': {
       if (!finite(m.x, WORLD_LIMIT) || !finite(m.y, 1000) || !finite(m.z, WORLD_LIMIT)) return null;

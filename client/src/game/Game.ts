@@ -85,7 +85,8 @@ const COVERED_FPS = 8;
  * after the local player moves.
  */
 
-type DeepLink = { kind: 'book'; id: number; letter: number | null } | { kind: 'diary' } | { kind: 'inbox' };
+type AdminTab = 'outfits' | 'shop' | 'library' | 'voice';
+type DeepLink = { kind: 'book'; id: number; letter: number | null } | { kind: 'diary' } | { kind: 'inbox' } | { kind: 'admin'; tab: AdminTab };
 /** Links from notifications: /?book=<id>[&letter=<id>], /?diary=1, /?letters=1. */
 function deepLink(q: URLSearchParams): DeepLink | null {
   const book = Number(q.get('book'));
@@ -95,6 +96,9 @@ function deepLink(q: URLSearchParams): DeepLink | null {
   }
   if (q.get('diary') === '1') return { kind: 'diary' };
   if (q.get('letters') === '1') return { kind: 'inbox' };
+  // From the 운영 통계 dashboard's 관리 대기 links (opened only for admins).
+  const admin = q.get('admin');
+  if (admin === 'outfits' || admin === 'shop' || admin === 'library' || admin === 'voice') return { kind: 'admin', tab: admin };
   return null;
 }
 
@@ -855,7 +859,12 @@ export class Game {
   private openLink(link: DeepLink) {
     if (link.kind === 'book') this.libraryView.openStory(link.id, link.letter);
     else if (link.kind === 'diary') this.libraryView.openDiary();
-    else this.libraryView.openMine('inbox');
+    else if (link.kind === 'admin') {
+      if (this.account)
+        void getMe().then((me) => {
+          if ((me as { admin?: boolean }).admin === true) void this.adminView.open(link.tab);
+        });
+    } else this.libraryView.openMine('inbox');
   }
 
   private async refreshShelves() {
@@ -1337,7 +1346,7 @@ export class Game {
         this.pendingLink = null;
         // Tidy the address bar (a reload shouldn't reopen it).
         const q = new URLSearchParams(location.search);
-        for (const k of ['book', 'letter', 'diary', 'letters']) q.delete(k);
+        for (const k of ['book', 'letter', 'diary', 'letters', 'admin']) q.delete(k);
         const qs = q.toString();
         history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`);
         if (!this.pendingGuide) this.openLink(link);

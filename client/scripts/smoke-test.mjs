@@ -119,6 +119,14 @@ try {
   );
   const cssBr = await raw(css, 'br');
   check('CSS and HTML are served brotli too', cssBr.headers.get('content-encoding') === 'br' && html.headers.get('content-encoding') === 'br');
+  // 운영 통계: the dashboard and its API are a plain, uncached 404 for a guest.
+  const adminPage = await raw('/admin');
+  const adminApi = await raw('/api/admin/stats');
+  check(
+    '/admin and /api/admin/stats answer 404 to a guest (no-store, no dashboard markup)',
+    adminPage.status === 404 && adminApi.status === 404 && /no-store/.test(adminPage.headers.get('cache-control') ?? '') && !adminPage.body.toString().includes('운영 통계'),
+    `${adminPage.status} ${adminApi.status}`,
+  );
 
   // ------------------------------------------------------------------ browsers
   step('login');

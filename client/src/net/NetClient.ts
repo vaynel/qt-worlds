@@ -1,3 +1,4 @@
+import { isStandalone } from '../pwa/pwa';
 import {
   PROTOCOL_VERSION,
   type ClientMessage,
@@ -318,6 +319,10 @@ export class NetClient {
         nickname: this.nickname,
         ...(this.testDate ? { testDate: this.testDate } : {}),
         ...(this.testClient ? { test: true } : {}),
+        // 운영자 통계: a coarse device class and "installed app", counted once per page load.
+        ...(this.everWelcomed ? {} : { fresh: true }),
+        device: deviceClass(),
+        pwa: isStandalone(),
       });
     };
 
@@ -545,4 +550,11 @@ export class NetClient {
     this.ws?.close(1000);
     this.ws = null;
   }
+}
+
+/** phone / tablet / desktop from the pointer and screen size only (the user agent is never sent). */
+function deviceClass(): 'phone' | 'tablet' | 'desktop' {
+  const touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  if (!touch) return 'desktop';
+  return Math.min(screen.width, screen.height) >= 600 ? 'tablet' : 'phone';
 }

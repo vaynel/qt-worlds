@@ -23,7 +23,7 @@ export function defaultDbPath(): string {
  * Versioned migrations. Append new entries; never edit an applied one.
  * The DB records the highest applied version in PRAGMA user_version.
  */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   // v1: accounts, sessions, word book, groups, lanterns, reactions
   `
   CREATE TABLE users (
@@ -447,6 +447,91 @@ const MIGRATIONS: string[] = [
     lifted_at INTEGER
   );
   CREATE INDEX voice_sanctions_user ON voice_sanctions(user_id, until);
+  `,
+  // v14: 운영자 통계 (/admin). Aggregates only, no content and no event log:
+  //  - active_days: which KST dates a signed-in account used the app (retention; 13 months);
+  //  - daily_counts: per-day counters (sessions, guest sessions, device class, PWA, activity counts);
+  //  - concurrency: online players sampled every 5 minutes, per KST date and hour (13 months);
+  //  - per-account first-time milestones for the first-day funnel (timestamps, never what was written);
+  //  - stats_meta.collect_start: the day collection began (older numbers are best-effort backfills).
+  // The backfill below derives only dates and counts from rows that already exist.
+  `
+  CREATE TABLE active_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kst_date TEXT NOT NULL,
+    PRIMARY KEY (user_id, kst_date)
+  ) WITHOUT ROWID;
+  CREATE INDEX active_days_date ON active_days(kst_date, user_id);
+  CREATE TABLE daily_counts (
+    kst_date TEXT NOT NULL,
+    key TEXT NOT NULL,
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kst_date, key)
+  ) WITHOUT ROWID;
+  CREATE TABLE concurrency (
+    kst_date TEXT NOT NULL,
+    hour INTEGER NOT NULL CHECK (hour >= 0 AND hour < 24),
+    samples INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    peak INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kst_date, hour)
+  ) WITHOUT ROWID;
+  CREATE TABLE stats_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  INSERT INTO stats_meta (key, value) VALUES ('collect_start', strftime('%Y-%m-%d', 'now', '+9 hours'));
+  ALTER TABLE users ADD COLUMN first_entry_at INTEGER;
+  ALTER TABLE users ADD COLUMN first_letter_at INTEGER;
+  ALTER TABLE users ADD COLUMN first_meditation_at INTEGER;
+  ALTER TABLE users ADD COLUMN first_lantern_at INTEGER;
+  CREATE INDEX IF NOT EXISTS users_created ON users(created_at);
+
+  UPDATE users SET
+    first_meditation_at = (SELECT MIN(created_at) FROM meditations m WHERE m.user_id = users.id),
+    first_lantern_at = (SELECT MIN(created_at) FROM lanterns l WHERE l.user_id = users.id),
+    first_letter_at = (SELECT MIN(at) FROM footprints f WHERE f.user_id = users.id AND f.type = 'letter');
+  UPDATE users SET first_entry_at = MIN(
+    COALESCE(onboarded_at, 9e15),
+    COALESCE((SELECT MIN(at) FROM footprints f WHERE f.user_id = users.id), 9e15),
+    COALESCE(first_meditation_at, 9e15)
+  );
+  UPDATE users SET first_entry_at = NULL WHERE first_entry_at >= 9e15;
+
+  INSERT OR IGNORE INTO active_days (user_id, kst_date) SELECT DISTINCT user_id, kst_date FROM footprint_minutes;
+  INSERT OR IGNORE INTO active_days (user_id, kst_date) SELECT DISTINCT user_id, kst_date FROM footprints;
+  INSERT OR IGNORE INTO active_days (user_id, kst_date)
+    SELECT DISTINCT user_id, strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') FROM sessions;
+  INSERT OR IGNORE INTO active_days (user_id, kst_date)
+    SELECT DISTINCT user_id, strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') FROM meditations;
+  INSERT OR IGNORE INTO active_days (user_id, kst_date)
+    SELECT id, strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') FROM users WHERE nickname IS NOT NULL;
+
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, 'meditation', COUNT(*) FROM meditations GROUP BY d;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d,
+      CASE WHEN group_id IS NOT NULL THEN 'lantern_group' WHEN anonymous = 1 THEN 'lantern_anon' ELSE 'lantern_public' END k, COUNT(*)
+    FROM lanterns GROUP BY d, k;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, kind, COUNT(*) FROM stories GROUP BY d, kind;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, CASE WHEN parent_id IS NULL THEN 'letter' ELSE 'reply' END k, COUNT(*)
+    FROM story_letters GROUP BY d, k;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, 'chat_group', COUNT(*) FROM group_messages WHERE kind = 'msg' GROUP BY d;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT d, k, SUM(c) FROM (
+      SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, CASE WHEN type = 'pray' THEN 'react_pray' ELSE 'react_empathy' END k, COUNT(*) c
+        FROM reactions WHERE type IN ('pray', 'amen') GROUP BY d, k
+      UNION ALL
+      SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+9 hours') d, CASE WHEN type = 'pray' THEN 'react_pray' ELSE 'react_empathy' END k, COUNT(*) c
+        FROM story_reactions GROUP BY d, k
+    ) GROUP BY d, k;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT strftime('%Y-%m-%d', started_at / 1000, 'unixepoch', '+9 hours') d, 'rental', COUNT(*) FROM rentals GROUP BY d;
+  INSERT INTO daily_counts (kst_date, key, n)
+    SELECT kst_date, 'emote', COUNT(*) FROM footprints WHERE type = 'emote' GROUP BY kst_date;
   `,
 ];
 

@@ -379,6 +379,43 @@ export class StaticClient {
     return entry;
   }
 
+  /**
+   * 운영자 통계 dashboard files (dist/admin/, a separate Vite build). The caller has
+   * already checked that the request comes from an admin. Never cached anywhere
+   * (private, no-store), so a CDN can't hand the page or its script to someone else.
+   */
+  handleAdmin(req: IncomingMessage, res: ServerResponse): boolean {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+    const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+    let file: string;
+    if (pathname === '/admin' || pathname === '/admin/' || pathname === '/admin.html') file = join(this.root, 'admin', 'index.html');
+    else {
+      const m = /^\/admin\/assets\/([A-Za-z0-9_.-]+)$/.exec(pathname);
+      if (!m || m[1].startsWith('.')) return false;
+      file = join(this.root, 'admin', 'assets', m[1]);
+    }
+    if (!existsSync(file) || !statSync(file).isFile()) return false;
+    const isHtml = file.endsWith('.html');
+    const entry = this.load(file);
+    const accept = req.headers['accept-encoding'];
+    const brOk = entry.br !== null && acceptsEncoding(accept, 'br');
+    const gzipOk = !brOk && entry.gz !== null && acceptsEncoding(accept, 'gzip');
+    const body = brOk ? entry.br! : gzipOk ? entry.gz! : entry.body;
+    const headers: Record<string, string> = {
+      'content-type': entry.type,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, no-store',
+      vary: 'accept-encoding, cookie',
+      'content-length': String(body.length),
+      ...(isHtml ? { ...securityHeaders(requestInfo(req)), 'x-robots-tag': 'noindex' } : {}),
+    };
+    if (brOk) headers['content-encoding'] = 'br';
+    else if (gzipOk) headers['content-encoding'] = 'gzip';
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return true;
+  }
+
   handle(req: IncomingMessage, res: ServerResponse): boolean {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     const url = new URL(req.url ?? '/', 'http://x');

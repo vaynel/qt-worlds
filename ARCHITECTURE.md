@@ -47,6 +47,7 @@ Line counts are approximate, as of 2026-11-13.
 | `audio/AudioEngine.ts` | 400 | Ambience and settings (전체 / 환경음 / 효과음 / 음성 volumes, mute); ducks the ambience in voice rooms. |
 | `pwa/pwa.ts`, `client/sw/` | 210 | Service worker registration and update toast; `vite.config.ts` generates `dist/sw.js` with the precache list. |
 | `legal/pages.ts`, `config/legal.ts` | 540 | `/privacy` and `/terms` (rendered at build time). |
+| `admin/*` (+ `client/admin/index.html`, `vite.admin.config.ts`) | 1,700 | 📊 운영 통계 dashboard (`/admin`): a separate Vite build into `dist/admin/` (not in the game bundle or the SW precache), hand-rolled SVG charts (`charts.ts`), own CSS (`admin.css`). |
 | `styles.css` | 5,220 | **All CSS in one file**, appended per milestone (see conventions). |
 | `vite-env.d.ts` | 35 | `WorldsDebug` (the `__WORLDS_DEBUG__` shape). |
 
@@ -62,6 +63,7 @@ Line counts are approximate, as of 2026-11-13.
 | `auth.ts`, `account.ts` | 440 / 350 | Sessions, Google OIDC (plus the mock provider), nicknames, consent; export and 회원 탈퇴. |
 | `services.ts` | 630 | WordBook, Group, Lantern and GroupChat services. |
 | `weather.ts` | 230 | 서울 날씨 from MET Norway Locationforecast 2.0 (https, `api.met.no` allow-list, identifying User-Agent, If-Modified-Since, next fetch at max(15 min, Expires) + jitter, timeout, 512 KB cap), symbol_code → kind, last-good/stale fallback, change-only `room.weatherChanged()`. Off in test mode (`/api/test/weather` override). |
+| `stats.ts` | 480 | 📊 운영 통계: `active_days` (KST dates per account, 13 months), `daily_counts` (aggregate counters incl. guest sessions and device class), `concurrency` (5-minute samples), first-time milestones on `users`; the cached (60 s) admin overview with retention/cohort/funnel maths. Aggregates only. |
 | `campfireVoice.ts` | 190 | 🔥 campfire voice reports and automatic mutes (3 reporters / 10 min → 24 h, repeat → 7 days), admin list, export, sweep. |
 | `library.ts`, `letters.ts`, `diary.ts`, `shots.ts`, `footprints.ts` | 590 / 540 / 160 / 250 / 150 | 이야기 도서관: books, letters, diary drafts, screenshots, 발자취. |
 | `shop.ts`, `looks.ts` | 455 / 330 | 나눔 소품 가게 (windows, stock, idempotent rentals); 꾸미기 (appearance, drawn outfits, reports). |
@@ -108,8 +110,8 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   signalling are separate messages.
 - **Spaces:** world, 골방 (per-player interior) and library (a shared interior). Players in another space are sent
   as hidden.
-- **Timers (server):** weather ≥ 15 min (MET Norway, outbound HTTPS to `api.met.no` only), shop clock 1 s, push scheduler 1 min, sweep 1 h (sessions, old chat, photos), footprint
-  sample 20 s, day change checked every tick (cheap arithmetic; it sends the new 오늘의 말씀 at 00:00 KST).
+- **Timers (server):** weather ≥ 15 min (MET Norway, outbound HTTPS to `api.met.no` only), shop clock 1 s, push scheduler 1 min, sweep 1 h (sessions, old chat, photos, stats older than 13 months), footprint
+  sample 20 s, online-player sample 5 min (`WORLDS_STATS_SAMPLE_MS`), day change checked every tick (cheap arithmetic; it sends the new 오늘의 말씀 at 00:00 KST).
 - **Push:** `push.ts` decides due notifications (daily word time, prayer, prop expiry, 공감 batches, letters,
   replies, the diary reminder) per user preferences. `WORLDS_PUSH_MOCK=1` records them instead (tests).
 - **Badges:** the 📬 unread-letters count comes from `GET /api/library/letters/unread` on sign-in (one SQL COUNT),
@@ -140,6 +142,10 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   every layout that made room for it were removed because the owner found it too distracting. Don't re-add worship
   music, a YouTube embed or background worship audio. The HUD is exactly **말씀 · 모임 · ⚙**. The CSP allows only
   our own origin (plus Google sign-in as a form target); nothing is loaded from a third party.
+- **운영 통계 (`/admin`):** admins only (`WORLDS_ADMIN_EMAILS`, verified email); the page, its files and
+  `/api/admin/stats*` are a plain `private, no-store` 404 for everyone else. Responses are aggregates only (never text,
+  names, emails, ids or per-user rows; the st suite deep-scans them). New activity counters go through
+  `stats.bump(key)` at the write point, plus the key in `shared/stats.ts` `ACTIVITY_KEYS` and the dashboard.
 - **Test switches:** `?test=1` turns on client test hooks (`window.__WORLDS_TEST__`) **and** the `__WORLDS_DEBUG__`
   mirror. Real players never pay for either. Server: `WORLDS_TEST_MODE`, `WORLDS_AUTH_MOCK`, `WORLDS_ALLOW_TEST_DATES`
   and `WORLDS_PUSH_MOCK`. The server refuses to start with any of them under `NODE_ENV=production`.
@@ -219,6 +225,7 @@ Which suite covers what:
 | la / lb | library (books, desks, photos, 발자취, the photo viewer); letters, inbox, backups |
 | wx | 서울 날씨 (every kind: particles, fog, clouds, HUD, interiors), quality scaling, render on demand, seasons and Christmas, reduced motion, phone HUD |
 | ev | 😊 표현 (emotes) and 🔥 campfire public voice (relay-only ICE through a local mini TURN, reports, admin, layout) |
+| st | 📊 운영 통계 `/admin`: 404 for guests/non-admins, retention/cohort/funnel numbers on seeded days, privacy deep scan, guest/device counters, export/탈퇴 of `active_days`, phone/desktop/dark layout |
 | smoke | the fast cross-section above |
 
 Harness notes: `freshDb(name)` gives each run its own DB under `server/data/test/`. Tests run SwiftShader WebGL, so

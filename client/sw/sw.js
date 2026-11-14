@@ -47,7 +47,7 @@ const OFFLINE_HTML = `<!doctype html>
   }, 5000);
 </script></body></html>`;
 
-const NEVER = /^\/(api\/|ws$|ws\/|health$|sw\.js$)/;
+const NEVER = /^\/(api\/|ws$|ws\/|health$|sw\.js$|admin(\/|$))/;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
