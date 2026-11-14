@@ -13,6 +13,7 @@ import type { FootprintService } from './footprints.js';
 import type { LibraryService } from './library.js';
 import type { LetterResult, LetterService } from './letters.js';
 import { readBody, type ShotService } from './shots.js';
+import type { CampfireVoiceService } from './campfireVoice.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -31,6 +32,12 @@ export interface RoomEvents {
   libraryChanged(): void;
   /** ✉️ 받은 편지 badge (and a fixed-text toast) for that account's own connections only. */
   letters(userId: number, unread: number, toast?: string, storyId?: number): void;
+  /** 🔥 campfire voice: near the fire (or in its voice room) right now. */
+  campfireVoiceEligible(userId: number): boolean;
+  /** 🔥 the account behind a campfire voice speaker, for a report from someone at the fire. */
+  campfireVoicePeerUser(reporterId: number, targetConnId: string): number | null;
+  /** 🔥 a campfire voice mute started, ended or changed. */
+  campfireVoiceChanged(userId: number): void;
 }
 
 /** ICE servers for WebRTC: short-lived Cloudflare TURN credentials, minted server-side. */
@@ -118,6 +125,7 @@ export interface ApiDeps {
   letters: LetterService;
   footprints: FootprintService;
   shots: ShotService;
+  campfireVoice: CampfireVoiceService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -153,6 +161,7 @@ export class Api {
   private readonly nicknameLimit = new RateLimiter(10, 3_600_000);
   private readonly joinLimit = new RateLimiter(10, 60_000);
   private readonly iceLimit = new RateLimiter(10, 60_000);
+  private readonly voiceReportLimit = new RateLimiter(Number(process.env.VOICE_REPORT_RATE_LIMIT ?? 20), 3_600_000);
   private readonly pushLimit = new RateLimiter(30, 3_600_000);
   private readonly exportLimit = new RateLimiter(Number(process.env.EXPORT_RATE_LIMIT ?? 10), 3_600_000);
   private readonly deleteLimit = new RateLimiter(5, 3_600_000);
@@ -588,11 +597,63 @@ export class Api {
     // ---------------- voice (ICE servers for group members only)
     r('GET', '/api/voice/ice', async ({ res, user, query }) => {
       const u = this.signedIn(user);
+      if (query.get('campfire') === '1') {
+        // 🔥 Public campfire voice: strangers must never learn each other's IP, so
+        // only TURN relay servers are handed out (the client forces relay-only ICE).
+        if (!u.consented) throw new HttpError(403, 'needs_consent', '이용약관에 동의하면 모닥불 음성에 참여할 수 있어요. ⚙ 설정 → 계정에서 동의할 수 있어요.');
+        if (!d.ice.configured) throw new HttpError(503, 'voice_unavailable', '모닥불 음성은 지금 준비 중이에요.');
+        if (!d.room.campfireVoiceEligible(u.id)) throw new HttpError(403, 'voice_not_near', '모닥불 가까이에서만 함께 이야기할 수 있어요.');
+        this.limit(this.iceLimit, `user:${u.id}`);
+        const relay = (await d.ice.forUser(u.id)).flatMap((raw) => {
+          const s = raw as { urls: string[]; username?: string; credential?: string };
+          const urls = s.urls.filter((x) => /^turns?:/.test(x));
+          return urls.length && s.username && s.credential ? [{ urls, username: s.username, credential: s.credential }] : [];
+        });
+        if (relay.length === 0) throw new HttpError(503, 'voice_unavailable', '모닥불 음성 연결을 준비하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        sendJson(res, 200, { iceServers: relay, relayOnly: true });
+        return;
+      }
       const groupId = Number(query.get('group'));
       if (!Number.isInteger(groupId) || !d.groups.isMember(u.id, groupId)) throw new HttpError(403, 'voice_not_member', '모임 사람만 음성 기도방을 쓸 수 있어요.');
       this.limit(this.iceLimit, `user:${u.id}`);
       sendJson(res, 200, { iceServers: await d.ice.forUser(u.id) });
     });
+    // 🚩 음성 신고 (campfire voice). The target is a connection id from the voice
+    // room; the reply never says whether this report muted anyone.
+    r('POST', '/api/voice/campfire/report', async ({ req, res, user }) => {
+      const u = this.signedIn(user);
+      const body = await readJson(req);
+      const target = typeof body.target === 'string' && body.target.length <= 32 ? d.room.campfireVoicePeerUser(u.id, body.target) : null;
+      if (target === null) throw new HttpError(404, 'not_found', '신고할 분을 찾지 못했어요. 모닥불 음성에 함께 있을 때 신고할 수 있어요.');
+      this.limit(this.voiceReportLimit, `user:${u.id}`);
+      const out = d.campfireVoice.report(u.id, target, body.reason);
+      if (out.sanction) {
+        d.room.campfireVoiceChanged(target);
+        console.log(`campfire voice: account muted (level ${out.sanction.level}) after reports`);
+      }
+      sendJson(res, 200, { ok: true });
+    });
+    r('GET', '/api/admin/campfire-voice', ({ res, user }) => {
+      this.admin(user);
+      sendJson(res, 200, { now: d.campfireVoice.now(), people: d.campfireVoice.adminList() });
+    });
+    r('POST', '/api/admin/campfire-voice/:id', async ({ req, res, user, params }) => {
+      const u = this.admin(user);
+      const target = id(params[0]);
+      const body = await readJson(req);
+      const out = d.campfireVoice.adminAction(target, body.action, body.days);
+      d.room.campfireVoiceChanged(target);
+      console.log(`admin ${u.id}: campfire voice ${target} ${String(body.action).slice(0, 10)}`);
+      sendJson(res, 200, out);
+    });
+    if (d.testMode) {
+      // Fake clock for the campfire voice mutes (24 h / 7 days).
+      r('POST', '/api/test/voice/clock', async ({ req, res }) => {
+        const body = await readJson(req);
+        d.campfireVoice.offsetMs = Number(body.offsetMs) || 0;
+        sendJson(res, 200, { now: d.campfireVoice.now() });
+      });
+    }
     r('POST', '/api/groups', async ({ req, res, user }) => {
       const u = this.signedIn(user);
       const g = d.groups.create(u.id, (await readJson(req)).name);

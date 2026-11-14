@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import {
   CAMPFIRE,
+  CAMPFIRE_VOICE_ROOM,
   BENCH_SEAT_COUNT,
   DESK_SEAT_COUNT,
   LIBRARY_DOOR,
@@ -41,6 +42,7 @@ import type { ShopEvents, ShopService } from './shop.js';
 import { TokenBucket } from './rateLimit.js';
 import type { FootprintService } from './footprints.js';
 import type { LibraryService } from './library.js';
+import type { CampfireVoiceService } from './campfireVoice.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
 /** Bad or rate-limited frames tolerated per minute before disconnecting. */
@@ -57,8 +59,8 @@ interface Client {
   seat: number;
   /** What `seat` indexes (meaningful only while seat >= 0). */
   seatKind: SeatKind;
-  buckets: { state: TokenBucket; chat: TokenBucket; seat: TokenBucket; voice: TokenBucket; signal: TokenBucket; voiceState: TokenBucket };
-  /** Voice prayer room this connection is in (group id), or null. */
+  buckets: { state: TokenBucket; chat: TokenBucket; seat: TokenBucket; voice: TokenBucket; signal: TokenBucket; voiceState: TokenBucket; emote: TokenBucket };
+  /** Voice room this connection is in (group id, CAMPFIRE_VOICE_ROOM = the campfire), or null. */
   voiceGroup: number | null;
   voiceMuted: boolean;
   voiceSpeaking: boolean;
@@ -89,6 +91,8 @@ const MAX_SPEED = 11;
 const MOVE_SLACK = 2;
 /** A state this far from your seat means you got up and walked off. */
 const SEAT_LEAVE_DISTANCE = 1.2;
+/** Campfire voice: you join inside the chat radius and leave this far beyond it (no flapping at the edge). */
+const CAMPFIRE_VOICE_SLACK = 1.5;
 
 export interface RoomOptions {
   seed: string;
@@ -109,6 +113,10 @@ export interface RoomOptions {
   footprints?: FootprintService | null;
   /** How often presence minutes (발자취) are sampled. */
   footprintTickMs?: number;
+  /** 🔥 campfire voice reports and mutes. */
+  campfireVoice?: CampfireVoiceService | null;
+  /** Campfire voice needs TURN (relay-only ICE): false disables it. */
+  campfireVoiceEnabled?: boolean;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -160,7 +168,8 @@ export class Room implements RoomEvents, ShopEvents {
       fp.minute(c.userId, 'play');
       if (c.seat >= 0 && c.seatKind === 'mat') fp.minute(c.userId, 'pray');
       if (this.nearCampfire(c)) fp.minute(c.userId, 'fire', fire - 1);
-      if (c.voiceGroup !== null) fp.minute(c.userId, 'voice');
+      // Campfire voice is already campfire time ('fire'); 'voice' is the group prayer rooms.
+      if (c.voiceGroup !== null && c.voiceGroup !== CAMPFIRE_VOICE_ROOM) fp.minute(c.userId, 'voice');
       if (spaceOf(c) === 'library') fp.minute(c.userId, 'library');
     }
   }
@@ -189,6 +198,8 @@ export class Room implements RoomEvents, ShopEvents {
         // ICE trickling comes in bursts; SDP is a handful per renegotiation.
         signal: new TokenBucket(200, 40),
         voiceState: new TokenBucket(20, 8),
+        // 표현: burst 3, then one every 1.5 s.
+        emote: new TokenBucket(3, 1 / 1.5),
       },
       voiceGroup: null,
       voiceMuted: true,
@@ -296,6 +307,7 @@ export class Room implements RoomEvents, ShopEvents {
         }
         client.lastStateAt = now;
         client.state = { x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, speed: msg.speed, ...(msg.inside ? { inside: msg.inside } : {}) };
+        if (client.voiceGroup === CAMPFIRE_VOICE_ROOM && !this.nearCampfire(client, CAMPFIRE_VOICE_SLACK)) this.voiceLeave(client, 'away');
         return;
       }
       case 'chat': {
@@ -365,6 +377,19 @@ export class Room implements RoomEvents, ShopEvents {
       case 'voiceSpeaking': {
         if (!client.buckets.voiceState.take()) return this.strike(client, 'rate_limited', true);
         if (client.voiceGroup === null) return;
+        if (client.voiceGroup === CAMPFIRE_VOICE_ROOM && (msg.t === 'voiceSpeaking' ? msg.speaking : !msg.muted)) {
+          // Muted by reports: may listen, not speak.
+          const until = this.silencedUntil(client);
+          if (until !== null) {
+            if (!client.voiceMuted) {
+              client.voiceMuted = true;
+              client.voiceSpeaking = false;
+              this.voiceBroadcast(client.voiceGroup, { t: 'voicePeer', peer: this.voiceInfo(client), joined: false }, client);
+            }
+            if (msg.t === 'voiceMute') this.send(client, { t: 'voiceSilenced', until });
+            return;
+          }
+        }
         if (msg.t === 'voiceMute') {
           client.voiceMuted = msg.muted;
           if (msg.muted) client.voiceSpeaking = false;
@@ -377,6 +402,29 @@ export class Room implements RoomEvents, ShopEvents {
       case 'voiceKick':
         if (!client.buckets.voice.take()) return this.strike(client, 'rate_limited');
         return this.voiceKick(client, msg.target);
+      case 'emote':
+        if (!client.buckets.emote.take()) return this.strike(client, 'rate_limited');
+        return this.emote(client, msg.e);
+    }
+  }
+
+  // ---------------------------------------------------------------- 표현 (emotes)
+
+  /**
+   * Everyone in the same space sees it (the sender too: the echo is what shows
+   * it, so a rate-limited emote never appears for anyone). A 골방 is private:
+   * nothing leaves it. 발자취 keeps only that it happened.
+   */
+  private emote(client: Client, e: number) {
+    const space = spaceOf(client);
+    if (space === 'room') return;
+    const data = JSON.stringify({ t: 'emote', id: client.id, e } satisfies ServerMessage);
+    for (const c of this.clients.values()) {
+      if (c.joined && spaceOf(c) === space && c.ws.readyState === c.ws.OPEN) c.ws.send(data);
+    }
+    if (client.userId !== null) {
+      const now = Date.now();
+      this.options.footprints?.event(client.userId, 'emote', `${seoulDate()}:${now}:${client.id}`, {}, now);
     }
   }
 
@@ -392,8 +440,16 @@ export class Room implements RoomEvents, ShopEvents {
   }
 
   private voiceInfo(c: Client): VoicePeerInfo {
+    if (c.voiceGroup === CAMPFIRE_VOICE_ROOM) {
+      const silenced = this.silencedUntil(c) !== null;
+      return { id: c.id, name: c.name, muted: c.voiceMuted, speaking: c.voiceSpeaking, owner: false, ...(silenced ? { silenced } : {}) };
+    }
     const owner = c.voiceGroup !== null && c.userId !== null && this.options.groups?.info(c.voiceGroup)?.ownerId === c.userId;
     return { id: c.id, name: c.name, muted: c.voiceMuted, speaking: c.voiceSpeaking, owner };
+  }
+
+  private silencedUntil(c: Client): number | null {
+    return c.userId !== null ? (this.options.campfireVoice?.silencedUntil(c.userId) ?? null) : null;
   }
 
   private voiceBroadcast(groupId: number, msg: ServerMessage, except?: Client) {
@@ -408,6 +464,7 @@ export class Room implements RoomEvents, ShopEvents {
   }
 
   private voiceJoin(client: Client, groupId: number) {
+    if (groupId === CAMPFIRE_VOICE_ROOM) return this.campfireVoiceJoin(client);
     const groups = this.options.groups;
     if (client.userId === null || !groups) return this.voiceError(client, 'voice_login', '로그인하고 모임에 함께하면 음성 기도방을 쓸 수 있어요.');
     const info = groups.info(groupId);
@@ -434,7 +491,66 @@ export class Room implements RoomEvents, ShopEvents {
     this.log(`voice join g${groupId} ${client.name} (${room.size})`);
   }
 
-  private voiceLeave(client: Client, reason: 'left' | 'kicked' | 'removed') {
+  /**
+   * 🔥 모닥불 공개 음성: signed-in and consented, inside the campfire circle,
+   * TURN available (relay-only ICE; never direct P2P between strangers).
+   * One voice room at a time: joining here leaves a group room.
+   */
+  private campfireVoiceJoin(client: Client) {
+    if (client.userId === null) return this.voiceError(client, 'voice_login', '로그인하면 함께 이야기할 수 있어요.');
+    if (!this.options.campfireVoiceEnabled) return this.voiceError(client, 'voice_unavailable', '모닥불 음성은 지금 준비 중이에요.');
+    if (this.options.users && !this.options.users.hasConsented(client.userId)) {
+      return this.voiceError(client, 'voice_consent', '이용약관에 동의하면 모닥불 음성에 참여할 수 있어요. ⚙ 설정 → 계정에서 동의할 수 있어요.');
+    }
+    if (!this.nearCampfire(client)) return this.voiceError(client, 'voice_not_near', '모닥불 가까이에서만 함께 이야기할 수 있어요.');
+    if (client.voiceGroup === CAMPFIRE_VOICE_ROOM) return;
+    const room = this.voiceRooms.get(CAMPFIRE_VOICE_ROOM) ?? new Set<string>();
+    if (room.size >= VOICE_MAX) return this.voiceError(client, 'voice_full', '자리가 꽉 찼어요. 잠시 후 다시 참여해 주세요.');
+    if (client.voiceGroup !== null) this.voiceLeave(client, 'left');
+    client.voiceGroup = CAMPFIRE_VOICE_ROOM;
+    client.voiceMuted = true; // everyone joins muted
+    client.voiceSpeaking = false;
+    const peers = [...room].map((id) => this.clients.get(id)).filter((c): c is Client => !!c).map((c) => this.voiceInfo(c));
+    room.add(client.id);
+    this.voiceRooms.set(CAMPFIRE_VOICE_ROOM, room);
+    this.send(client, { t: 'voiceRoom', groupId: CAMPFIRE_VOICE_ROOM, groupName: '모닥불', selfId: client.id, owner: false, peers, campfire: true, silencedUntil: this.silencedUntil(client) });
+    this.voiceBroadcast(CAMPFIRE_VOICE_ROOM, { t: 'voicePeer', peer: this.voiceInfo(client), joined: true }, client);
+    this.log(`voice join campfire ${client.name} (${room.size})`);
+  }
+
+  /** API: may this account get campfire TURN credentials (near the fire, or already in its voice room)? */
+  campfireVoiceEligible(userId: number): boolean {
+    for (const c of this.clients.values()) {
+      if (c.joined && c.userId === userId && (c.voiceGroup === CAMPFIRE_VOICE_ROOM || this.nearCampfire(c))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * API: the account behind a campfire voice speaker (by connection id), for a
+   * report by someone who is at the campfire too. Null when that doesn't hold.
+   */
+  campfireVoicePeerUser(reporterId: number, targetConnId: string): number | null {
+    const target = this.clients.get(targetConnId);
+    if (!target || target.voiceGroup !== CAMPFIRE_VOICE_ROOM || target.userId === null || target.userId === reporterId) return null;
+    return this.campfireVoiceEligible(reporterId) ? target.userId : null;
+  }
+
+  /** A campfire voice mute started, was lifted or extended: tell that account and the room. */
+  campfireVoiceChanged(userId: number) {
+    for (const c of this.clients.values()) {
+      if (c.userId !== userId || c.voiceGroup !== CAMPFIRE_VOICE_ROOM) continue;
+      const until = this.silencedUntil(c);
+      if (until !== null) {
+        c.voiceMuted = true;
+        c.voiceSpeaking = false;
+      }
+      this.send(c, { t: 'voiceSilenced', until });
+      this.voiceBroadcast(CAMPFIRE_VOICE_ROOM, { t: 'voicePeer', peer: this.voiceInfo(c), joined: false }, c);
+    }
+  }
+
+  private voiceLeave(client: Client, reason: 'left' | 'kicked' | 'removed' | 'away') {
     const groupId = client.voiceGroup;
     if (groupId === null) return;
     const room = this.voiceRooms.get(groupId);
@@ -712,7 +828,7 @@ export class Room implements RoomEvents, ShopEvents {
       if (groups) c.groupIds = groups.groupIds(userId);
       if (c.joined) this.sendLanterns(c);
       if (c.joined && spaceOf(c) === 'library') this.sendLibrary(c);
-      if (c.voiceGroup !== null && !c.groupIds.has(c.voiceGroup)) this.voiceLeave(c, 'removed');
+      if (c.voiceGroup !== null && c.voiceGroup !== CAMPFIRE_VOICE_ROOM && !c.groupIds.has(c.voiceGroup)) this.voiceLeave(c, 'removed');
     }
   }
 
@@ -736,9 +852,9 @@ export class Room implements RoomEvents, ShopEvents {
     }
   }
 
-  private nearCampfire(c: Client): boolean {
+  private nearCampfire(c: Client, slack = 0): boolean {
     if (c.state.inside) return false;
-    return Math.hypot(c.state.x - CAMPFIRE.x, c.state.z - CAMPFIRE.z) <= CAMPFIRE.chatRadius;
+    return Math.hypot(c.state.x - CAMPFIRE.x, c.state.z - CAMPFIRE.z) <= CAMPFIRE.chatRadius + slack;
   }
 
   private seats(kind: SeatKind): (string | null)[] {

@@ -1,5 +1,5 @@
-import type { ErrorCode, VoicePeerInfo, VoiceSignal } from '../../../shared/protocol';
-import { api, ApiError } from '../net/api';
+import { CAMPFIRE_VOICE_ROOM, type ErrorCode, type VoicePeerInfo, type VoiceSignal } from '../../../shared/protocol';
+import { api } from '../net/api';
 import type { NetClient } from '../net/NetClient';
 
 export type VoiceState = 'idle' | 'joining' | 'in';
@@ -60,6 +60,12 @@ export class VoiceClient {
   groupName = '';
   selfId = '';
   owner = false;
+  /** In the 🔥 campfire's public room (relay-only ICE, reports instead of kicks). */
+  campfire = false;
+  /** Campfire voice: muted by reports until (ms), may still listen. */
+  silencedUntil: number | null = null;
+  /** Force TURN relay (campfire: strangers never see each other's IP). */
+  private relayOnly = false;
   muted = true;
   speaking = false;
   private readonly peers = new Map<string, Peer>();
@@ -92,6 +98,7 @@ export class VoiceClient {
       voiceSignal: (from, data) => this.queueSignal(from, data),
       voiceLeft: (reason) => this.onLeft(reason),
       voiceError: (code, message) => this.onError(code, message),
+      voiceSilenced: (until) => this.onSilenced(until),
     });
     document.addEventListener('visibilitychange', this.onVisibility);
     // The page is going away: release the microphone (browser indicator off).
@@ -108,24 +115,34 @@ export class VoiceClient {
 
   // ---------------------------------------------------------------- join / leave
 
+  /** Join a group's prayer room, or the campfire's public room (CAMPFIRE_VOICE_ROOM). */
   async join(groupId: number) {
     if (this.state !== 'idle' && this.groupId === groupId) return;
     if (this.state !== 'idle') this.leave();
+    const campfire = groupId === CAMPFIRE_VOICE_ROOM;
     this.state = 'joining';
     this.groupId = groupId;
     this.wantedGroup = groupId;
+    this.campfire = campfire;
+    this.groupName = campfire ? '모닥불' : '';
     this.hooks.onChange();
     try {
-      const r = await api<{ iceServers: RTCIceServer[] }>('GET', `/api/voice/ice?group=${groupId}`);
+      const r = await api<{ iceServers: RTCIceServer[]; relayOnly?: boolean }>('GET', campfire ? '/api/voice/ice?campfire=1' : `/api/voice/ice?group=${groupId}`);
+      // The campfire never falls back to direct P2P: relay servers or nothing.
+      if (campfire && (!r.relayOnly || !r.iceServers.length)) throw new Error('모닥불 음성은 지금 준비 중이에요.');
       this.iceServers = r.iceServers;
+      this.relayOnly = campfire;
     } catch (err) {
+      if (this.wantedGroup !== groupId) return;
       this.state = 'idle';
       this.groupId = null;
       this.wantedGroup = null;
-      this.hooks.toast(err instanceof ApiError ? err.message : '음성 기도방에 들어가지 못했어요.');
+      this.campfire = false;
+      this.hooks.toast(err instanceof Error && err.message ? err.message : campfire ? '모닥불 음성에 참여하지 못했어요.' : '음성 기도방에 들어가지 못했어요.');
       this.hooks.onChange();
       return;
     }
+    if (this.wantedGroup !== groupId) return;
     this.net.voiceJoin(groupId);
   }
 
@@ -177,11 +194,15 @@ export class VoiceClient {
     this.state = 'idle';
     this.groupId = null;
     this.selfId = '';
+    if (leaving) {
+      this.campfire = false;
+      this.silencedUntil = null;
+    }
     if (wasActive) this.hooks.onActive(false);
     this.hooks.onChange();
   }
 
-  private onRoom(m: { groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[] }) {
+  private onRoom(m: { groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[]; campfire?: boolean; silencedUntil?: number | null }) {
     if (this.wantedGroup !== m.groupId) {
       // We left meanwhile.
       this.net.voiceLeave();
@@ -194,6 +215,8 @@ export class VoiceClient {
     this.groupName = m.groupName;
     this.selfId = m.selfId;
     this.owner = m.owner;
+    this.campfire = m.campfire === true;
+    this.silencedUntil = typeof m.silencedUntil === 'number' ? m.silencedUntil : null;
     // Joined muted (server rule); keep the local mic disabled until unmuted.
     if (this.mic) for (const t of this.mic.getAudioTracks()) t.enabled = false;
     this.muted = true;
@@ -202,7 +225,33 @@ export class VoiceClient {
     if (first) this.hooks.onActive(true);
     this.hooks.onChange();
     // After a reconnect, restore "unmuted" if the mic is already ours (no prompt).
-    if (this.wantUnmuted && this.mic) void this.setMuted(false);
+    if (this.wantUnmuted && this.mic && !this.silenced) void this.setMuted(false);
+  }
+
+  /** Campfire voice: muted by reports right now. */
+  get silenced(): boolean {
+    return this.silencedUntil !== null && this.silencedUntil > Date.now();
+  }
+
+  /** The server started, extended or lifted a campfire-voice mute for us. */
+  private onSilenced(until: number | null) {
+    if (!this.campfire || this.state !== 'in') return;
+    const was = this.silencedUntil !== null;
+    this.silencedUntil = until;
+    if (until !== null) {
+      this.wantUnmuted = false;
+      if (!this.muted) {
+        this.muted = true;
+        for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = false;
+        this.setSpeaking(false);
+      }
+      const hours = Math.max(1, Math.round((until - Date.now()) / 3_600_000));
+      const span = hours >= 48 ? `${Math.round(hours / 24)}일` : `${hours}시간`;
+      this.hooks.toast(`여러 분의 신고가 있어서 ${span} 동안 모닥불 음성에서 말할 수 없어요. 듣기는 계속할 수 있어요.`);
+    } else if (was) {
+      this.hooks.toast('이제 모닥불 음성에서 다시 말할 수 있어요.');
+    }
+    this.hooks.onChange();
   }
 
   private onPeer(info: VoicePeerInfo, joined: boolean) {
@@ -216,11 +265,17 @@ export class VoiceClient {
       p.speaking = info.speaking;
       p.name = info.name;
       p.owner = info.owner;
+      p.silenced = info.silenced === true;
+      this.applyVolume(p);
     }
     this.hooks.onChange();
   }
 
-  private onLeft(reason: 'left' | 'kicked' | 'removed') {
+  private onLeft(reason: 'left' | 'kicked' | 'removed' | 'away') {
+    // 'left' only confirms a leave we asked for (we already cleaned up). It can
+    // arrive after we started joining another room: don't let it undo that.
+    if (reason === 'left') return;
+    if (reason === 'away') this.hooks.toast('모닥불에서 멀어져서 음성 대화에서 나왔어요.');
     if (reason === 'kicked') this.hooks.toast('방장이 음성 기도방에서 내보냈어요. 10분 뒤에 다시 들어올 수 있어요.');
     if (reason === 'removed') this.hooks.toast('모임에서 나와서 음성 기도방도 나왔어요.');
     this.wantedGroup = null;
@@ -230,7 +285,10 @@ export class VoiceClient {
 
   private onError(code: ErrorCode, message: string) {
     this.hooks.toast(message);
-    if (this.state === 'joining' && (code === 'voice_full' || code === 'voice_blocked' || code === 'voice_not_member' || code === 'voice_login')) {
+    if (
+      this.state === 'joining' &&
+      (code === 'voice_full' || code === 'voice_blocked' || code === 'voice_not_member' || code === 'voice_login' || code === 'voice_consent' || code === 'voice_not_near' || code === 'voice_unavailable')
+    ) {
       this.wantedGroup = null;
       this.cleanup();
     }
@@ -240,7 +298,7 @@ export class VoiceClient {
 
   private createPeer(info: VoicePeerInfo, initiator: boolean) {
     this.closePeer(info.id, false);
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, ...(this.relayOnly ? { iceTransportPolicy: 'relay' as const } : {}) });
     const audio = document.createElement('audio');
     audio.autoplay = true;
     audio.setAttribute('playsinline', '');
@@ -357,6 +415,10 @@ export class VoiceClient {
    */
   async setMuted(muted: boolean) {
     if (this.state !== 'in') return;
+    if (!muted && this.campfire && this.silenced) {
+      this.hooks.toast('신고가 쌓여서 지금은 모닥불 음성에서 말할 수 없어요. 듣기는 계속할 수 있어요.');
+      return;
+    }
     if (!muted && !this.mic) {
       if (this.micBusy) return;
       this.micBusy = true;
@@ -470,7 +532,8 @@ export class VoiceClient {
 
   private applyVolume(p: Peer) {
     p.audio.volume = Math.max(0, Math.min(1, (p.volume / 100) * (this.hooks.masterVolume() / 100)));
-    p.audio.muted = p.localMuted;
+    // Muted by reports (campfire): nobody plays them, whatever their client sends.
+    p.audio.muted = p.localMuted || p.silenced === true;
   }
 
   kick(id: string) {
@@ -488,23 +551,36 @@ export class VoiceClient {
   // ---------------------------------------------------------------- diagnostics
 
   async stats() {
-    const out: { id: string; bytesReceived: number; packetsReceived: number; connection: string }[] = [];
+    const out: { id: string; bytesReceived: number; packetsReceived: number; connection: string; localCandidates: string[]; selectedLocal: string | null }[] = [];
     for (const p of this.peers.values()) {
       let bytes = 0;
       let packets = 0;
+      const localTypes = new Set<string>();
+      let selectedLocal: string | null = null;
       try {
         const report = await p.pc.getStats();
+        const locals = new Map<string, string>();
         report.forEach((s) => {
-          const r = s as { type: string; kind?: string; bytesReceived?: number; packetsReceived?: number };
+          const r = s as { type: string; id: string; kind?: string; bytesReceived?: number; packetsReceived?: number; candidateType?: string };
           if (r.type === 'inbound-rtp' && r.kind === 'audio') {
             bytes += r.bytesReceived ?? 0;
             packets += r.packetsReceived ?? 0;
           }
+          if (r.type === 'local-candidate' && r.candidateType) {
+            locals.set(r.id, r.candidateType);
+            localTypes.add(r.candidateType);
+          }
+        });
+        report.forEach((s) => {
+          const r = s as { type: string; selectedCandidatePairId?: string };
+          if (r.type !== 'transport' || !r.selectedCandidatePairId) return;
+          const pair = report.get(r.selectedCandidatePairId) as { localCandidateId?: string } | undefined;
+          if (pair?.localCandidateId) selectedLocal = locals.get(pair.localCandidateId) ?? null;
         });
       } catch {
         /* closed */
       }
-      out.push({ id: p.id, bytesReceived: bytes, packetsReceived: packets, connection: p.pc.connectionState });
+      out.push({ id: p.id, bytesReceived: bytes, packetsReceived: packets, connection: p.pc.connectionState, localCandidates: [...localTypes], selectedLocal });
     }
     return out;
   }
@@ -516,6 +592,8 @@ export class VoiceClient {
       groupName: this.groupName,
       selfId: this.selfId,
       owner: this.owner,
+      campfire: this.campfire,
+      silencedUntil: this.silencedUntil,
       muted: this.muted,
       speaking: this.speaking,
       micTracks: this.mic?.getTracks().map((t) => t.readyState) ?? [],
@@ -530,6 +608,9 @@ export class VoiceClient {
         connection: p.pc.connectionState,
         localMuted: p.localMuted,
         volume: p.volume,
+        silenced: p.silenced === true,
+        audioMuted: p.audio.muted,
+        iceTransportPolicy: p.pc.getConfiguration().iceTransportPolicy ?? 'all',
       })),
       audioElements: this.audioRoot.querySelectorAll('audio').length,
       signaling: { ...this.counters },

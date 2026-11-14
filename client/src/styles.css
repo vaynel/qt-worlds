@@ -476,7 +476,7 @@ input[type='text'] {
 }
 
 #chat-log:empty::before {
-  content: '아직 조용해요. 먼저 인사해 보세요.';
+  content: '모닥불 곁에 있는 사람에게만 들려요. 먼저 인사해 보세요.';
   color: var(--ink-soft);
   font-size: 0.82rem;
 }
@@ -5756,7 +5756,8 @@ body.phone-land .worship-tab {
 /* ---- action, camera, chat, chips ---- */
 body.phone-land #action-btn {
   left: auto;
-  right: calc(var(--safe-right) + 52px);
+  /* camera (right edge) and 😊 (beside it) come first */
+  right: calc(var(--safe-right) + 104px);
   bottom: var(--safe-bottom);
   transform: none;
 }
@@ -5779,7 +5780,9 @@ body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded
   right: auto;
   left: calc(var(--safe-left) + 140px);
   bottom: calc(var(--kb, 0px) + var(--safe-bottom));
-  width: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 140px - 232px));
+  width: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 140px - 284px));
+  /* above the joystick's touch zone (it reaches under the panel's left part) */
+  z-index: 1;
 }
 :root body.phone-land.touch:not(.tablet) #chat-log {
   max-height: clamp(22px, calc(var(--vvh, 100vh) - 300px), 96px);
@@ -6094,4 +6097,167 @@ body.phone-land .sheet.look .look-swatches {
 .quality-option.on {
   border-color: #c4664a;
   background: #fff1e6;
+}
+
+/* =================== 표현 (emotes) and 🔥 모닥불 음성 =================== */
+/* The 😊 button sits beside the 📸 camera button and follows it through every
+   layout (the camera rules are in the L-A block and the phone-landscape block,
+   where the action button moved one slot left to make room): left of it. The
+   grid itself is placed by EmotePicker next to the button, clear of the player. */
+#emote-btn {
+  position: absolute;
+  z-index: 18;
+  right: calc(var(--safe-right) + 54px);
+  bottom: var(--safe-bottom);
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 250, 240, 0.94);
+  color: var(--ink);
+  font-size: 23px;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgba(74, 52, 38, 0.22);
+}
+#emote-btn.on {
+  background: #fff1e6;
+  box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(74, 52, 38, 0.22);
+}
+body.in-world #emote-btn {
+  display: flex;
+}
+body.closet #emote-btn,
+body.overlay-open #emote-btn,
+body.chatting #emote-btn,
+body.closet .emote-grid,
+body.overlay-open .emote-grid {
+  display: none;
+}
+body:not(.touch).worship-on:not(.worship-large) #emote-btn {
+  right: calc(var(--safe-right) + 384px + 54px);
+  bottom: calc(var(--safe-bottom) + 160px);
+}
+body.touch #emote-btn {
+  right: calc(var(--safe-right) + 52px);
+  bottom: calc(var(--safe-bottom) + 66px);
+  width: 44px;
+  height: 44px;
+}
+@media (max-height: 780px) {
+  body.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
+    bottom: calc(var(--safe-bottom) - 6px);
+  }
+}
+/* Phone landscape: the bottom row, between the camera and the action button
+   (the video column fills the right side above them). */
+body.phone-land.touch #emote-btn,
+body.phone-land.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
+  right: calc(var(--safe-right) + 52px);
+  bottom: calc(var(--safe-bottom) + 3px);
+}
+body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #emote-btn {
+  right: calc(var(--safe-right) + 422px + 52px);
+  bottom: calc(var(--safe-bottom) + 58px);
+}
+@media (max-height: 349px) {
+  body.phone-land.in-world.touch.worship-on #emote-btn,
+  body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
+    right: calc(var(--safe-right) + 212px + 52px);
+    bottom: calc(var(--safe-bottom) + 58px);
+  }
+}
+
+.emote-grid {
+  position: fixed;
+  z-index: 24;
+  display: grid;
+  grid-template-columns: repeat(4, 64px);
+  gap: 6px;
+  padding: 8px;
+  border-radius: 20px;
+  border: 1px solid var(--paper-line);
+  background: rgba(255, 250, 240, 0.97);
+  box-shadow: 0 10px 28px rgba(74, 52, 38, 0.25);
+  animation: emote-grid-in 0.16s ease-out;
+}
+.emote-grid[hidden] {
+  display: none;
+}
+@keyframes emote-grid-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+.emote-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 60px;
+  padding: 4px 2px;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink);
+}
+.emote-item:hover,
+.emote-item:focus-visible {
+  background: #fff1e6;
+}
+.emote-emoji {
+  font-size: 26px;
+  line-height: 1.1;
+}
+.emote-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
+/* 🔥 모닥불 음성: the join button in the campfire chat header. It takes the
+   place of the header's hint ("…에게만 들려요"), which moved into the empty
+   log's placeholder (phones already hid it). */
+#chat .chat-head > span {
+  display: none;
+}
+.campfire-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.campfire-voice-btn i {
+  font-style: normal;
+}
+.campfire-voice-btn.on {
+  background: #eaf6ec;
+  color: #2f7a43;
+}
+body.touch:not(.tablet) .campfire-voice-btn .cv-long,
+body.phone-land.touch:not(.tablet) .campfire-voice-btn .cv-text {
+  display: none;
+}
+.voice-chip.campfire .voice-chip-text {
+  color: #8a4a1e;
+}
+.voice-report {
+  min-width: 40px;
+}
+.voice-silenced {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* 🛠️ 관리 → 모닥불 음성 신고: text rows only (no thumbnail column). */
+.admin-item.admin-voice-item {
+  grid-template-columns: 1fr;
+}
+.admin-voice-item .admin-info {
+  min-width: 0;
 }

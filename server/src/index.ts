@@ -16,6 +16,7 @@ import { FootprintService } from './footprints.js';
 import { LibraryService } from './library.js';
 import { LetterService } from './letters.js';
 import { ShotService } from './shots.js';
+import { CampfireVoiceService } from './campfireVoice.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
@@ -77,7 +78,8 @@ const shots = new ShotService(db, shotsDir);
 const library = new LibraryService(db, groups, dailyWord, footprints, shots);
 const letters = new LetterService(db, library);
 log(`screenshots: ${shotsDir}`);
-const accounts = new AccountService(db, looks, shop, { library, footprints, shots, letters });
+const campfireVoice = new CampfireVoiceService(db);
+const accounts = new AccountService(db, looks, shop, { library, footprints, shots, letters }, campfireVoice);
 if (!push.enabled) log('Web Push not configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT): notifications off');
 else if (push.mock) log('WARNING: Web Push mock sender (tests only): nothing is delivered');
 
@@ -97,6 +99,7 @@ else if (!oidc.enabled) log('Google login not configured (GOOGLE_CLIENT_ID / GOO
 }
 if (TEST_MODE) log('WARNING: test mode (date overrides, test teleports) is enabled');
 
+const ice = new IceServers();
 const room = new Room({
   seed: SEED,
   maxPlayers: MAX,
@@ -112,11 +115,12 @@ const room = new Room({
   library,
   footprints,
   footprintTickMs: Number(process.env.WORLDS_FOOTPRINT_TICK_MS ?? 20_000),
+  campfireVoice,
+  campfireVoiceEnabled: ice.configured,
 });
 shop.events = room;
-const ice = new IceServers();
-if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, testMode: TEST_MODE });
+if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only, campfire voice is off');
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -191,6 +195,8 @@ const sweep = () => {
   sessions.sweep();
   chat.purge();
   const gone = accounts.sweep();
+  const voiceGone = campfireVoice.sweep();
+  if (voiceGone) log(`sweep: ${voiceGone} old campfire voice report/mute records deleted`);
   if (gone.lanterns || gone.signups || gone.outfits || gone.rentals || gone.footprints || gone.shots)
     log(
       `sweep: ${gone.lanterns} old lanterns, ${gone.signups} unfinished sign-ups, ${gone.outfits} replaced drawings, ${gone.rentals} old rental records, ${gone.footprints} old 발자취 records, ${gone.shots} unused screenshots deleted`,

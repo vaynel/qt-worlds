@@ -19,7 +19,7 @@ import {
 } from '../../../shared/protocol';
 import type { PlayerController } from '../entities/PlayerController';
 import type { NetClient, NetStatus, Welcome } from '../net/NetClient';
-import { BubbleSlot, RemotePlayers } from '../net/RemotePlayers';
+import { BubbleSlot, EmoteSlot, RemotePlayers, emoteGesture } from '../net/RemotePlayers';
 import type { ChatPanel } from '../ui/ChatPanel';
 import type { Hud } from '../ui/Hud';
 import type { World } from '../world/World';
@@ -66,6 +66,9 @@ export class Social {
   /** 이야기 도서관 reading desk seats (DESK_SEATS order). */
   private desks: (string | null)[] = Array(DESK_SEAT_COUNT).fill(null);
   private readonly localBubble: BubbleSlot;
+  private readonly localEmote: EmoteSlot;
+  /** 표현 seen here (tests): who and which, newest last. */
+  private emoteLog: { id: string; e: number }[] = [];
   private sendTimer = 0;
   private lastSent = { x: NaN, z: NaN, yaw: NaN, t: 0 };
   private localId: string;
@@ -80,6 +83,7 @@ export class Social {
     this.remotes = new RemotePlayers(options.shadows);
     options.scene.add(this.remotes.group);
     this.localBubble = new BubbleSlot(options.player.avatar.root);
+    this.localEmote = new EmoteSlot(options.player.avatar.root, this.localBubble);
     this.localId = options.welcome?.id ?? 'local';
     this.localName = options.welcome?.name ?? '나';
 
@@ -112,6 +116,7 @@ export class Social {
           this.remotes.applySnapshot(players, this.localId, nowSeconds());
         },
         chat: (id, name, text) => this.receiveChat(id, name, text),
+        emote: (id, e) => this.receiveEmote(id, e),
         mats: (mats) => this.applyMats(mats),
         logs: (logs) => this.applyLogs(logs),
         benches: (benches) => this.applyBenches(benches),
@@ -304,6 +309,30 @@ export class Social {
     else this.remotes.showBubble(id, text, t);
   }
 
+  // ------------------------------------------------------------------ 표현 (emotes)
+
+  /** Shown when the server echoes it back (so a rate-limited one shows for nobody). */
+  sendEmote(e: number) {
+    if (this.o.space() === 'room') return;
+    if (!this.online) {
+      this.o.hud.toast(this.o.net ? '연결이 돌아오면 표현할 수 있어요.' : '함께 있을 때 표현할 수 있어요.', nowSeconds());
+      return;
+    }
+    this.sendStateNow();
+    this.o.net!.emote(e);
+  }
+
+  private receiveEmote(id: string, e: number) {
+    const t = nowSeconds();
+    this.emoteLog.push({ id, e });
+    if (this.emoteLog.length > 30) this.emoteLog.shift();
+    if (id === this.localId) {
+      this.localEmote.show(e, t);
+      // Seated: the bubble only (the avatar skips gestures while seated anyway).
+      this.o.player.avatar.gesture(emoteGesture(e));
+    } else this.remotes.showEmote(id, e, t);
+  }
+
   // ------------------------------------------------------------------ frame
 
   private ignoreSnapsUntil = 0;
@@ -311,6 +340,7 @@ export class Social {
   /** Entered or left an interior: hide everyone until snapshots of the new space arrive. */
   spaceChanged() {
     this.remotes.hideAll();
+    this.localEmote.clear();
     this.ignoreSnapsUntil = nowSeconds() + 0.45;
     this.forceSend();
   }
@@ -338,6 +368,7 @@ export class Social {
 
     this.remotes.update(dt, t, elapsed, this.o.tagView?.());
     this.localBubble.update(t);
+    this.localEmote.update(t);
 
     // Campfire zone (a little inside the server's radius so both agree).
     const d = Math.hypot(p.position.x - CAMPFIRE.x, p.position.z - CAMPFIRE.z);
@@ -385,6 +416,9 @@ export class Social {
       chatFolded: this.o.chat.isFolded,
       chatUnread: this.o.chat.unreadCount,
       chatLog: [...this.chatLog],
+      emote: this.localEmote.current,
+      gesture: this.o.player.avatar.gestureNow,
+      emoteLog: [...this.emoteLog],
     };
   }
 

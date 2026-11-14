@@ -41,7 +41,8 @@ Line counts are approximate, as of 2026-11-13.
 | `ui/LibraryView.ts` | 1,490 | Library sheets: bookcases, reader, writer, diary/photos, letters, 받은 편지 inbox, reports. |
 | `ui/*View.ts`, `ui/*.ts` | ~5,000 | One file per sheet or widget: `WordBookView`, `MeditationView`, `SettingsView`, `NotifySettings`, `GroupsView`, `ShopView`, `CustomizeView`, `OutfitPainter`, `AdminView`, `ReportView`, `Guide`, `Legal`, `Hud`, `ChatPanel`, `VoicePanel`, `EntryScreen` … |
 | `ui/dom.ts` | 100 | `el()`, `button()` and **`Modal`** (every sheet: one open at a time, Esc, focus return, `worlds-modal` event). |
-| `voice/VoiceClient.ts` | 540 | WebRTC voice prayer rooms (signalling over `/ws`). |
+| `voice/VoiceClient.ts` | 600 | WebRTC voice rooms (signalling over `/ws`): group prayer rooms, and the 🔥 campfire's public room (room 0, relay-only ICE). |
+| `ui/EmotePicker.ts`, `ui/CampfireVoice.ts` | 100 / 160 | 😊 표현 button and grid (keys 1–8); the campfire voice join button, room-switch prompt and 🚩 음성 신고 sheet. |
 | `audio/AudioEngine.ts` | 400 | Ambience and settings (volumes, mute). |
 | `pwa/pwa.ts`, `client/sw/` | 210 | Service worker registration and update toast; `vite.config.ts` generates `dist/sw.js` with the precache list. |
 | `legal/pages.ts`, `config/legal.ts` | 540 | `/privacy` and `/terms` (rendered at build time). |
@@ -60,6 +61,7 @@ Line counts are approximate, as of 2026-11-13.
 | `db.ts` | 450 | `openDb` (pragmas) and the **append-only `MIGRATIONS` array** (`PRAGMA user_version`). |
 | `auth.ts`, `account.ts` | 440 / 350 | Sessions, Google OIDC (plus the mock provider), nicknames, consent; export and 회원 탈퇴. |
 | `services.ts` | 630 | WordBook, Group, Lantern and GroupChat services. |
+| `campfireVoice.ts` | 190 | 🔥 campfire voice reports and automatic mutes (3 reporters / 10 min → 24 h, repeat → 7 days), admin list, export, sweep. |
 | `library.ts`, `letters.ts`, `diary.ts`, `shots.ts`, `footprints.ts` | 590 / 540 / 160 / 250 / 150 | 이야기 도서관: books, letters, diary drafts, screenshots, 발자취. |
 | `shop.ts`, `looks.ts` | 455 / 330 | 나눔 소품 가게 (windows, stock, idempotent rentals); 꾸미기 (appearance, drawn outfits, reports). |
 | `push.ts` | 510 | Web Push: subscriptions, preferences, daily/prayer/prop/story/letter/reply/diary kinds. |
@@ -218,6 +220,7 @@ Which suite covers what:
 | m10 | HUD and sheets |
 | b1 / p13 | phone and tablet worship layouts with sheets; phone landscape |
 | la / lb | library (books, desks, photos, 발자취); letters, inbox, backups |
+| ev | 😊 표현 (emotes) and 🔥 campfire public voice (relay-only ICE through a local mini TURN, reports, admin, layout) |
 | smoke | the fast cross-section above |
 
 Harness notes: `freshDb(name)` gives each run its own DB under `server/data/test/`. Tests run SwiftShader WebGL, so

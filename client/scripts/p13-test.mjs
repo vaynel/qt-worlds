@@ -7,7 +7,7 @@
 //     and nothing is drawn over it (elementFromPoint) nor does it touch the sheet;
 //     접기 stays paused;
 //   - the HUD tool row stays clear (neither the player nor the sheet covers it);
-//   - with no sheet open, the HUD, joystick, action button, camera button, chat
+//   - with no sheet open, the HUD, joystick, action button, camera and 😊 buttons, chat
 //     panel / pill, prop dock, voice chip and the player overlap nothing;
 //   - with the on-screen keyboard simulated (viewport ≈ 45% height) the focused
 //     field is visible (meditation, a letter, the testimony form, the campfire
@@ -158,6 +158,7 @@ function probe(page) {
       joystick: q('#stick-base'),
       action: q('#action-btn'),
       camera: q('#camera-btn'),
+      emote: q('#emote-btn'),
       chat: chatEl && !chatEl.classList.contains('folded') ? vis(chatEl) : null,
       pill: q('#chat-pill'),
       voice: q('#voice-chip'),
@@ -203,7 +204,7 @@ function videoProblems(r, ws, { mustShow }) {
 }
 
 /** Floating world UI with no sheet open: no pair may overlap. */
-const FLOATING = ['card', 'tab', 'tools', 'place', 'clock', 'joystick', 'action', 'camera', 'chat', 'pill', 'voice', 'dock', 'letter', 'meditateBtn'];
+const FLOATING = ['card', 'tab', 'tools', 'place', 'clock', 'joystick', 'action', 'camera', 'emote', 'chat', 'pill', 'voice', 'dock', 'letter', 'meditateBtn'];
 function floatingOverlaps(r) {
   const hits = [];
   for (let i = 0; i < FLOATING.length; i++)
@@ -304,7 +305,7 @@ try {
       check(`${dev} world ${st}: HUD, joystick, action, camera, chat, player overlap nothing`, hits.length === 0, hits.join(' ') || `card ${fmt(r.card)} action ${fmt(r.action)} camera ${fmt(r.camera)} chat ${fmt(r.chat)}`);
       const vp = videoProblems(r, ws, { mustShow: st !== 'folded' });
       check(`${dev} world ${st}: video rule`, vp.length === 0, vp.join('; ') || fmt(r.frame));
-      const offscreen = ['card', 'tab', 'action', 'camera', 'chat', 'pill', 'joystick'].filter((k) => r[k] && !inside(r[k], r.vw, r.vh));
+      const offscreen = ['card', 'tab', 'action', 'camera', 'emote', 'chat', 'pill', 'joystick'].filter((k) => r[k] && !inside(r[k], r.vw, r.vh));
       check(`${dev} world ${st}: controls inside the screen`, offscreen.length === 0, offscreen.map((k) => `${k} ${fmt(r[k])}`).join(' ') || 'ok');
       await shot(p, dev, `world-${st}`);
     }

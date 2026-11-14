@@ -149,6 +149,10 @@ export function diaryLines(events: FootprintEvent[], minutes: FootprintMinute[])
     add('library', libraryAt, desk ? '이야기 도서관 책상에 앉아 조용히 머물렀어요 📚' : '이야기 도서관에 들렀어요 📚');
   }
 
+  // 표현: how many, never which or to whom.
+  const emotes = of('emote');
+  if (emotes.length) add('emote', emotes[0].minute, `표현을 ${emotes.length}번 나눴어요 😊`);
+
   const shots = of('shot');
   if (shots.length) add('shot', shots[0].minute, `오늘의 풍경을 사진 ${shots.length}장에 담았어요 📸`);
 

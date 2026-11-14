@@ -3,6 +3,7 @@ import type { DB } from './db.js';
 import { HttpError } from './http.js';
 import { LANTERN_DAYS } from './services.js';
 import { RENTAL_KEEP_DAYS } from './shop.js';
+import type { CampfireVoiceService } from './campfireVoice.js';
 import type { LookService } from './looks.js';
 import type { ShopService } from './shop.js';
 import type { FootprintService } from './footprints.js';
@@ -44,6 +45,7 @@ export class AccountService {
     private readonly looks: LookService | null = null,
     private readonly shop: ShopService | null = null,
     private readonly library: { library: LibraryService; footprints: FootprintService; shots: ShotService; letters?: LetterService } | null = null,
+    private readonly campfireVoice: CampfireVoiceService | null = null,
   ) {}
 
   /** Everything we hold about this account, as plain JSON. Only this user's rows. */
@@ -241,6 +243,8 @@ export class AccountService {
       library: this.library ? { ...this.library.library.export(userId), ...(this.library.letters?.export(userId) ?? {}) } : null,
       footprints: this.library?.footprints.export(userId) ?? null,
       screenshots: this.library?.shots.export(userId) ?? null,
+      // 🔥 모닥불 음성: reports I made and mutes I received (never who reported me; no audio exists).
+      campfireVoice: this.campfireVoice?.export(userId) ?? null,
       sessions: sessions.map((s) => ({ createdAt: iso(s.created_at), expiresAt: iso(s.expires_at), keepSignedIn: s.persistent === 1 })),
       retention: {
         groupMessagesDays: GROUP_CHAT_DAYS,

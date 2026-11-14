@@ -426,6 +426,28 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS lanterns_user ON lanterns(user_id, created_at);
   CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
   `,
+  // v13: 🔥 모닥불 공개 음성 moderation. Reports against speakers and the
+  // automatic campfire-voice mutes (no audio is ever stored).
+  `
+  CREATE TABLE voice_reports (
+    id INTEGER PRIMARY KEY,
+    target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (reason IN ('abuse', 'sexual', 'harass', 'other')),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX voice_reports_target ON voice_reports(target_id, created_at);
+  CREATE INDEX voice_reports_reporter ON voice_reports(reporter_id);
+  CREATE TABLE voice_sanctions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    until INTEGER NOT NULL,
+    lifted_at INTEGER
+  );
+  CREATE INDEX voice_sanctions_user ON voice_sanctions(user_id, until);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

@@ -5,7 +5,7 @@ const DAY_MS = 86_400_000;
 const KST_MS = 9 * 3600_000;
 
 /** Discrete things that happened (each with a stable idempotency key). */
-export type FootprintType = 'letter' | 'meditation' | 'lantern_read' | 'lantern_react' | 'sit' | 'rent' | 'story_read' | 'shot' | 'library';
+export type FootprintType = 'letter' | 'meditation' | 'lantern_read' | 'lantern_react' | 'sit' | 'rent' | 'story_read' | 'shot' | 'library' | 'emote';
 /** Time spent, counted per KST minute (a reconnect or a second tab never counts twice). */
 export type MinuteKind = 'play' | 'pray' | 'fire' | 'voice' | 'library';
 

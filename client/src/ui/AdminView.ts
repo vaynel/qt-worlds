@@ -1,4 +1,4 @@
-import { PROPS, REPORT_LABELS, SHOP_STOCK_MAX, STORY_PROMPTS, STORY_REPORT_LABELS, VISIBILITY_LABELS, type PropId, type ReportReason, type StoryDetail, type StoryReportReason } from '../../../shared/protocol';
+import { PROPS, VOICE_REPORT_LABELS, type VoiceReportReason, REPORT_LABELS, SHOP_STOCK_MAX, STORY_PROMPTS, STORY_REPORT_LABELS, VISIBILITY_LABELS, type PropId, type ReportReason, type StoryDetail, type StoryReportReason } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { button, el, Modal } from './dom';
 import { drawThumb } from './OutfitPainter';
@@ -69,7 +69,17 @@ interface AdminLetter {
   createdAt: string;
 }
 
-export type AdminTab = 'outfits' | 'shop' | 'library';
+interface AdminVoicePerson {
+  userId: number;
+  nickname: string;
+  reports: number;
+  reasons: Partial<Record<VoiceReportReason, number>>;
+  lastReportAt: number | null;
+  active: { id: number; level: number; startedAt: number; until: number } | null;
+  past: number;
+}
+
+export type AdminTab = 'outfits' | 'shop' | 'library' | 'voice';
 
 export class AdminView {
   private readonly modal = new Modal('admin-overlay', '운영 관리');
@@ -93,7 +103,7 @@ export class AdminView {
   }
 
   private reload() {
-    return this.tab === 'shop' ? this.loadShop() : this.tab === 'library' ? this.loadLibrary() : this.load();
+    return this.tab === 'shop' ? this.loadShop() : this.tab === 'library' ? this.loadLibrary() : this.tab === 'voice' ? this.loadVoice() : this.load();
   }
 
   /** Header with the two admin areas. */
@@ -104,6 +114,7 @@ export class AdminView {
       ['outfits', '옷 그림'],
       ['shop', '소품 가게'],
       ['library', '도서관'],
+      ['voice', '모닥불 음성'],
     ] as const) {
       const b = button(label, 'chip', () => void this.open(key));
       b.id = `admin-tab-${key}`;
@@ -269,6 +280,72 @@ export class AdminView {
     actions.append(keep, restore, banWrap);
     li.append(thumb, info, actions);
     return li;
+  }
+
+  // ------------------------------------------------------------------ 🔥 모닥불 음성 신고
+
+  private async loadVoice(note = '') {
+    let data: { now: number; people: AdminVoicePerson[] };
+    try {
+      data = await api<{ now: number; people: AdminVoicePerson[] }>('GET', '/api/admin/campfire-voice');
+    } catch (err) {
+      this.modal.sheet.replaceChildren(el('p', 'settings-note', err instanceof ApiError ? err.message : '불러오지 못했어요.'));
+      return;
+    }
+    if (!this.modal.isOpen) return;
+    const sheet = this.modal.sheet;
+    sheet.replaceChildren();
+    this.status = el('p', 'groups-status');
+    this.status.setAttribute('role', 'status');
+    this.status.textContent = note;
+    const body = el('div', 'admin-body admin-voice');
+    body.append(
+      el('p', 'settings-note', '모닥불 음성에서 신고된 분이에요 (최근 30일). 서로 다른 3명이 10분 안에 신고하면 24시간, 다시 그러면 7일 동안 말할 수 없어요 (듣기는 돼요). 목소리는 녹음되지 않아서 신고 이유만 남아요.'),
+      this.status,
+    );
+    const ul = el('ul', 'admin-list');
+    ul.id = 'admin-voice-list';
+    if (data.people.length === 0) body.append(el('p', 'settings-note', '신고된 분이 없어요.'));
+    const left = (until: number) => {
+      const h = Math.max(1, Math.round((until - data.now) / 3_600_000));
+      return h >= 48 ? `${Math.round(h / 24)}일 남음` : `${h}시간 남음`;
+    };
+    for (const p of data.people) {
+      const li = el('li', 'admin-item admin-voice-item');
+      li.dataset.user = String(p.userId);
+      const info = el('div', 'admin-info');
+      info.append(
+        el('strong', 'admin-owner', p.nickname),
+        el('span', `admin-state ${p.active ? 'hidden' : ''}`, p.active ? `말하기 제한 중 · ${day(p.active.until)}까지 (${left(p.active.until)}) · ${p.active.level}번째` : '제한 없음'),
+        el('span', '', `신고 ${p.reports}건 · ${Object.entries(p.reasons).map(([k, n]) => `${VOICE_REPORT_LABELS[k as VoiceReportReason] ?? k} ${n}`).join(', ') || '-'}${p.lastReportAt ? ` · 마지막 신고 ${day(p.lastReportAt)}` : ''}`),
+        el('span', '', `지난 제한 ${p.past}번`),
+      );
+      const actions = el('div', 'admin-actions');
+      const act = async (action: 'lift' | 'extend', days?: number) => {
+        try {
+          await api('POST', `/api/admin/campfire-voice/${p.userId}`, { action, days });
+          await this.loadVoice(action === 'lift' ? `${p.nickname} 님의 말하기 제한을 풀었어요.` : `${p.nickname} 님의 말하기 제한을 ${days}일 늘렸어요.`);
+        } catch (err) {
+          if (this.status) this.status.textContent = err instanceof ApiError ? err.message : '처리하지 못했어요.';
+        }
+      };
+      const lift = button('제한 해제', 'chip admin-voice-lift', () => void act('lift'));
+      lift.disabled = !p.active;
+      const days = el('input', 'admin-days');
+      days.type = 'number';
+      days.min = '1';
+      days.max = '365';
+      days.value = '7';
+      days.setAttribute('aria-label', '연장 일수');
+      const extend = button(p.active ? '일 연장' : '일 제한', 'chip admin-voice-extend', () => void act('extend', Number(days.value)));
+      const wrap = el('span', 'admin-ban-wrap');
+      wrap.append(days, extend);
+      actions.append(lift, wrap);
+      li.append(info, actions);
+      ul.append(li);
+    }
+    body.append(ul);
+    sheet.append(this.top('모닥불 음성 신고'), body);
   }
 
   // ------------------------------------------------------------------ 도서관 관리

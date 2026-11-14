@@ -196,3 +196,30 @@ export function createBubble(text: string): THREE.Sprite {
   lines.forEach((l, i) => ctx.fillText(l, width / 2, 11 * SCALE + lineH * (i + 0.5)));
   return spriteFrom(canvas, 0.3 * lines.length + 0.36);
 }
+
+/**
+ * 표현 bubble: a big emoji over a short label. The emoji is drawn as text, so
+ * it comes from the device's own emoji font (machines without one show a box).
+ */
+export function createEmoteBubble(emoji: string, label: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  const emojiFont = `${40 * SCALE}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", ${UI_FONT}`;
+  const labelFont = `700 ${18 * SCALE}px ${UI_FONT}`;
+  ctx.font = labelFont;
+  const labelW = ctx.measureText(label).width;
+  const width = Math.ceil(Math.max(labelW, 56 * SCALE) + 34 * SCALE);
+  const height = 86 * SCALE;
+  canvas.width = width;
+  canvas.height = height + 14 * SCALE;
+  pill(ctx, width, height, 26 * SCALE, true, 'rgba(255, 250, 238, 0.97)', 'rgba(214, 150, 74, 0.6)');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = emojiFont;
+  ctx.fillStyle = '#3f2c20';
+  ctx.fillText(emoji, width / 2, 33 * SCALE);
+  ctx.font = labelFont;
+  ctx.fillStyle = '#7a4e2c';
+  ctx.fillText(label, width / 2, 69 * SCALE);
+  return spriteFrom(canvas, 0.95);
+}

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { validProps, type Look, type PlayerSnap, type PropWear, type SeatKind } from '../../../shared/protocol';
+import { EMOTES, validProps, type Look, type PlayerSnap, type PropWear, type SeatKind } from '../../../shared/protocol';
 import { Avatar, colorsForId, seatHeight, type AvatarLook } from '../entities/Avatar';
 import { avatarLook, outfitCache, safeAppearance } from '../game/looks';
-import { createBubble, disposeSprite } from '../world/labels';
+import { createBubble, createEmoteBubble, disposeSprite } from '../world/labels';
 import { NameTag, type TagView } from '../world/NameTag';
 
 /** Render remote players this far in the past so there are always two samples to blend. */
@@ -11,6 +11,8 @@ const MAX_SAMPLES = 24;
 /** Larger jumps between samples are treated as teleports, not motion. */
 const SNAP_DISTANCE = 12;
 export const BUBBLE_SECONDS = 7;
+/** 표현 bubbles stay about 3 s. */
+export const EMOTE_SECONDS = 3;
 
 interface Sample {
   t: number;
@@ -35,6 +37,7 @@ interface Remote {
   kind: SeatKind;
   inside: boolean;
   bubbleSlot: BubbleSlot;
+  emoteSlot: EmoteSlot;
   guest: boolean;
   /** Saved appearance (null = hashed default colours). */
   look: Look | null;
@@ -83,6 +86,64 @@ export class BubbleSlot {
 }
 
 /**
+ * 표현 bubble over an avatar: pops in with a little overshoot, drifts up and
+ * fades. A chat bubble showing at the same time pushes it higher.
+ */
+export class EmoteSlot {
+  private sprite: THREE.Sprite | null = null;
+  private start = 0;
+  private baseScale = new THREE.Vector2(1, 1);
+  current: number | null = null;
+
+  constructor(
+    private readonly parent: THREE.Object3D,
+    private readonly chat: BubbleSlot,
+  ) {}
+
+  show(e: number, now: number): void {
+    const def = EMOTES[e];
+    if (!def) return;
+    this.clear();
+    this.sprite = createEmoteBubble(def.emoji, def.label);
+    this.baseScale.set(this.sprite.scale.x, this.sprite.scale.y);
+    this.sprite.renderOrder = 13;
+    this.parent.add(this.sprite);
+    this.start = now;
+    this.current = e;
+    this.update(now);
+  }
+
+  update(now: number): void {
+    const s = this.sprite;
+    if (!s) return;
+    const t = now - this.start;
+    if (t > EMOTE_SECONDS) return this.clear();
+    // easeOutBack pop over 0.3 s, then a slow float upwards.
+    const p = Math.min(1, t / 0.3);
+    const c = 1.9;
+    const pop = 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2);
+    const k = 0.55 + 0.45 * pop;
+    s.scale.set(this.baseScale.x * k, this.baseScale.y * k, 1);
+    s.position.set(0, (this.chat.showing ? 3.25 : 2.5) + t * 0.06, 0);
+    s.material.opacity = Math.min(1, (EMOTE_SECONDS - t) / 0.5, t / 0.12);
+  }
+
+  clear(): void {
+    this.current = null;
+    if (!this.sprite) return;
+    this.parent.remove(this.sprite);
+    disposeSprite(this.sprite);
+    this.sprite = null;
+  }
+}
+
+/** Arm gesture that goes with an emote (null = bubble only). */
+export function emoteGesture(e: number): 'pray' | 'wave' | 'raise' | null {
+  const emoji = EMOTES[e]?.emoji;
+  return emoji === '🙏' ? 'pray' : emoji === '👋' ? 'wave' : emoji === '🙌' ? 'raise' : null;
+}
+
+/**
  * Other players: created on join, interpolated between server snapshots,
  * removed on leave or when the session resets after a reconnect.
  */
@@ -120,11 +181,13 @@ export class RemotePlayers {
       kind: 'mat',
       inside: false,
       bubbleSlot: new BubbleSlot(avatar.root),
+      emoteSlot: null as unknown as EmoteSlot,
       guest,
       look: null,
       outfitId: null,
       props: [],
     };
+    p.emoteSlot = new EmoteSlot(avatar.root, p.bubbleSlot);
     this.players.set(id, p);
     if (look) this.setLook(id, look);
     if (props.length) this.setProps(id, props);
@@ -197,6 +260,7 @@ export class RemotePlayers {
     const p = this.players.get(id);
     if (!p) return;
     p.bubbleSlot.clear();
+    p.emoteSlot.clear();
     p.tag.dispose();
     this.group.remove(p.avatar.root);
     p.avatar.dispose();
@@ -237,6 +301,7 @@ export class RemotePlayers {
       p.samples.length = 0;
       p.avatar.root.visible = false;
       p.bubbleSlot.clear();
+      p.emoteSlot.clear();
     }
   }
 
@@ -259,6 +324,15 @@ export class RemotePlayers {
     const p = this.players.get(id);
     if (!p) return false;
     p.bubbleSlot.show(text, now);
+    return true;
+  }
+
+  /** 표현 from someone here: bubble, plus a small gesture when standing. */
+  showEmote(id: string, e: number, now: number): boolean {
+    const p = this.players.get(id);
+    if (!p) return false;
+    p.emoteSlot.show(e, now);
+    p.avatar.gesture(emoteGesture(e));
     return true;
   }
 
@@ -301,6 +375,7 @@ export class RemotePlayers {
       p.avatar.setDeskReading(seat >= 0 && kind === 'desk');
       p.avatar.animate(dt, speed, elapsed);
       p.bubbleSlot.update(now);
+      p.emoteSlot.update(now);
       if (view && p.avatar.root.visible) p.tag.update(view);
     }
   }
@@ -316,6 +391,8 @@ export class RemotePlayers {
     pose: 'pray' | 'sit' | 'stand';
     reading: boolean;
     bubble: boolean;
+    emote: number | null;
+    gesture: string | null;
     visible: boolean;
     inside: boolean;
     tag: string;
@@ -336,6 +413,8 @@ export class RemotePlayers {
       pose: p.avatar.pose,
       reading: p.avatar.reading,
       bubble: p.bubbleSlot.showing,
+      emote: p.emoteSlot.current,
+      gesture: p.avatar.gestureNow,
       visible: p.avatar.root.visible,
       inside: p.inside,
       tag: p.tag.text,

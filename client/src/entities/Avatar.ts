@@ -680,6 +680,54 @@ export class Avatar {
     return this.read > 0.5;
   }
 
+  private gestureKind: 'pray' | 'wave' | 'raise' | null = null;
+  private gestureT = 0;
+
+  /**
+   * 표현 gesture (~2.4 s): 🙏 joins the hands (the prayer pose's arms), 👋 waves,
+   * 🙌 raises both arms. Only while standing; seated poses are left alone.
+   */
+  gesture(kind: 'pray' | 'wave' | 'raise' | null): void {
+    this.gestureKind = kind;
+    this.gestureT = 0;
+  }
+
+  /** The gesture playing now (tests). */
+  get gestureNow(): string | null {
+    return this.gestureKind;
+  }
+
+  private applyGesture(dt: number, free: number) {
+    const kind = this.gestureKind;
+    if (!kind) return;
+    this.gestureT += dt;
+    const t = this.gestureT;
+    const DUR = 2.4;
+    if (t >= DUR) {
+      this.gestureKind = null;
+      return;
+    }
+    // Ease in over 0.25 s, out over the last 0.4 s; nothing while seated.
+    const w = Math.min(1, t / 0.25, (DUR - t) / 0.4) * Math.max(0, Math.min(1, (free - 0.9) * 10));
+    if (w <= 0) return;
+    const blend = (o: THREE.Object3D, x: number, z: number) => {
+      o.rotation.x += (x - o.rotation.x) * w;
+      o.rotation.z += (z - o.rotation.z) * w;
+    };
+    if (kind === 'pray') {
+      blend(this.armL, -1.05, 0.5);
+      blend(this.armR, -1.05, -0.5);
+      this.head.rotation.x += (0.3 - this.head.rotation.x) * w;
+    } else if (kind === 'wave') {
+      blend(this.armR, -2.55, 0.35 + Math.sin(t * 11) * 0.32);
+    } else {
+      const lift = Math.sin(t * 5) * 0.06;
+      blend(this.armL, -2.75 + lift, -0.38);
+      blend(this.armR, -2.75 + lift, 0.38);
+      this.head.rotation.x += (-0.18 - this.head.rotation.x) * w;
+    }
+  }
+
   /** Current pose for tests: 'pray', 'sit' or 'stand'. */
   get pose(): 'pray' | 'sit' | 'stand' {
     return this.sitTarget ? 'sit' : this.seatedTarget ? 'pray' : 'stand';
@@ -729,6 +777,7 @@ export class Avatar {
     this.body.position.y = bob + breathe - 0.4 * s + (this.sitHeight - SIT_ROBE_BOTTOM) * q;
     this.body.rotation.x = 0.06 * moving + 0.08 * s + (low ? 0.02 : 0.1) * q;
     if (this.propKey || this.deskReading || this.read > 0.001) this.animateProps(dt, speed, elapsed, moving);
+    if (this.gestureKind) this.applyGesture(dt, free);
   }
 
   dispose(): void {

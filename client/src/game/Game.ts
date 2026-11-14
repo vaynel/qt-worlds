@@ -18,6 +18,8 @@ import { PathGlow } from '../world/PathGlow';
 import { VoiceClient } from '../voice/VoiceClient';
 import { VoicePanel } from '../ui/VoicePanel';
 import { MicHelp } from '../ui/MicHelp';
+import { EmotePicker } from '../ui/EmotePicker';
+import { CampfireVoiceUi } from '../ui/CampfireVoice';
 import { Guide } from '../ui/Guide';
 import { InstallGuide } from '../ui/InstallGuide';
 import { api } from '../net/api';
@@ -30,7 +32,7 @@ import { LANDMARKS, SPAWN } from '../world/config';
 import { parseTimeOverride } from '../world/DayNight';
 import { Interior } from '../world/Interior';
 import { World } from '../world/World';
-import { BENCHES, BENCH_SEATS, CAMPFIRE, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
+import { BENCHES, BENCH_SEATS, CAMPFIRE, CAMPFIRE_VOICE_ROOM, LOG_SEATS, type AccountInfo } from '../../../shared/protocol';
 import { Devotion } from './Devotion';
 import type { Look } from '../../../shared/protocol';
 import { Avatar, DEFAULT_AVATAR } from '../entities/Avatar';
@@ -155,6 +157,10 @@ export class Game {
   private voice: VoiceClient | null = null;
   private voicePanel: VoicePanel | null = null;
   private readonly micHelp = new MicHelp();
+  /** 표현 (emotes): 😊 button + grid, keys 1–8. */
+  private emotes!: EmotePicker;
+  /** 🔥 모닥불 공개 음성: chat header button, switch prompt, 🚩 음성 신고. */
+  private campfireUi!: CampfireVoiceUi;
   private pathGlow: PathGlow | null = null;
   private readonly guideDue: boolean;
   private readonly raycaster = new THREE.Raycaster();
@@ -263,7 +269,11 @@ export class Game {
         micHelp: () => this.micHelp.help(),
       });
       this.voice = voice;
-      this.voicePanel = new VoicePanel(voice, (gid) => void this.groupsView.open(gid, 'chat'));
+      this.voicePanel = new VoicePanel(
+        voice,
+        (gid) => (gid === CAMPFIRE_VOICE_ROOM ? this.chat.setFolded(false) : void this.groupsView.open(gid, 'chat')),
+        (id, name) => this.campfireUi.openReport(id, name),
+      );
       session.audio.onSettingsChange(() => voice.applyAllVolumes());
     }
     this.store = session.store;
@@ -276,12 +286,20 @@ export class Game {
     this.lanternCard = new LanternCard(() => !!this.account, needLogin, () => undefined);
     this.groupsView = new GroupsView({
       onChanged: () => undefined,
-      onVoice: (groupId) => void this.voice?.join(groupId),
+      onVoice: (groupId) => void this.joinGroupVoice(groupId),
       onVoiceLeave: () => this.voice?.leave(),
       currentVoice: () => this.voice?.groupId ?? null,
       onUnread: (n) => this.hud.setGroupsUnread(n),
     });
     this.groupsView.setMe(session.account?.id ?? null);
+    this.campfireUi = new CampfireVoiceUi({
+      voice: () => this.voice,
+      signedIn: () => !!this.account,
+      needLogin: (reason) => this.loginPrompt.open(reason, ''),
+      openPanel: () => this.voicePanel?.open(),
+      toast: (text) => this.hud.toast(text, this.elapsed, 4),
+    });
+    this.emotes = new EmotePicker((e) => this.social.sendEmote(e));
     this.reportView = new ReportView(this.social.remotes, () => !!this.account, (reason) => this.loginPrompt.open(reason, ''));
     if (session.account) {
       void getMe().then((me) => {
@@ -464,12 +482,28 @@ export class Game {
     } else if (e.code === 'Enter' && this.chat.isVisible) {
       e.preventDefault();
       this.chat.focus();
+    } else if (/^(Digit|Numpad)[1-8]$/.test(e.code) && !this.inCloset && !this.transitioning && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // 표현: 1–8 fire directly.
+      e.preventDefault();
+      this.emotes.fire(Number(e.code.slice(-1)) - 1);
     }
   };
+
+  /** One voice room at a time: leaving the campfire's for a group's asks first. */
+  private async joinGroupVoice(groupId: number) {
+    const v = this.voice;
+    if (!v) return;
+    if (v.campfire && v.state !== 'idle') {
+      const go = await this.campfireUi.confirmSwitch('모닥불 음성에서 나와 모임 음성 기도방에 들어갈까요?', '음성 기도방 들어가기');
+      if (!go) return;
+    }
+    await v.join(groupId);
+  }
 
   /** Voice state changed: panel, chip and speaking rings on name tags. */
   private onVoiceChange() {
     this.voicePanel?.update();
+    this.campfireUi?.update();
     const v = this.voice;
     if (!v) return;
     this.social.remotes.clearSpeaking();
@@ -972,6 +1006,10 @@ export class Game {
         this.rig.snap(this.player.position);
       },
       voiceJoin: (groupId: number) => this.voice?.join(groupId),
+      /** 표현 through the real path (server echo shows it). */
+      emote: (e: number) => this.emotes.fire(e),
+      /** 🔥 campfire voice: the ICE config of every peer connection. */
+      voicePcConfig: () => this.voice?.describe().peers.map((p) => ({ id: p.id, iceTransportPolicy: p.iceTransportPolicy })) ?? [],
       voiceLeave: () => this.voice?.leave(),
       voiceMute: (muted: boolean) => this.voice?.setMuted(muted),
       voiceStats: () => this.voice?.stats(),
@@ -1478,6 +1516,8 @@ export class Game {
         nearLantern: this.nearLantern,
         guide: this.guide.describe(),
         voice: this.voice?.describe() ?? null,
+        emoteOpen: this.emotes.isOpen,
+        voiceReportOpen: this.campfireUi.reportOpen,
         localTag: this.localTag ? { text: this.localTag.text, guest: this.localTag.isGuest, visible: this.localTag.visible } : null,
       },
       m8: {

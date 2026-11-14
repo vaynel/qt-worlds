@@ -162,6 +162,12 @@ export class Users {
     this.db.prepare('UPDATE users SET onboarded_at = COALESCE(onboarded_at, ?) WHERE id = ?').run(Date.now(), userId);
   }
 
+  /** Agreed to the current TERMS_VERSION right now (live: consent can change mid-session). */
+  hasConsented(userId: number): boolean {
+    const row = this.db.prepare('SELECT terms_agreed_at, terms_version FROM users WHERE id = ?').get(userId) as { terms_agreed_at: number | null; terms_version: string | null } | undefined;
+    return !!row && row.terms_agreed_at !== null && row.terms_version === TERMS_VERSION;
+  }
+
   /** Guests may not use a registered nickname. */
   isRegistered(name: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM users WHERE nickname_key = ?').get(nicknameKey(cleanText(name)));

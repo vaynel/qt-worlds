@@ -5,7 +5,7 @@
 // Covers: /health, /api/me, CSP, brotli/gzip; login + consent; the world renders;
 // the HUD's four buttons; the phone worship facade (nothing from YouTube until a
 // tap) and the desktop player; 말씀 → a meditation saves → a lantern is shared;
-// campfire chat both ways; the 📬 badge via /letters/unread (no inbox download);
+// campfire chat both ways; 😊 표현 and the 🎙️ campfire voice button; the 📬 badge via /letters/unread (no inbox download);
 // a library bookcase list; the ⚙ menu pages; render-on-demand under a phone sheet.
 // Waits are predicates (until/waitFor…), never fixed sleeps.
 //   cd client && npm run build && (cd ../server && npm run build) && npm run test:smoke
@@ -240,6 +240,23 @@ try {
   await A.press('#chat-input', 'Enter');
   await until(B, (t) => window.__WORLDS_DEBUG__.net.chatLog.some((l) => l.includes(t)), '반가워요', 10000);
   check('campfire chat both ways (desktop → phone → desktop)', true);
+
+  step('emote + campfire voice');
+  // (the 😊 button, like 📸, steps aside while typing)
+  await A.evaluate(() => document.activeElement?.blur());
+  await B.evaluate(() => document.activeElement?.blur());
+  check('😊 표현 button shown (phone + desktop)', (await A.isVisible('#emote-btn')) && (await B.isVisible('#emote-btn')));
+  const aConn = (await debug(A)).net.id;
+  await A.tap('#emote-btn');
+  await until(A, () => window.__WORLDS_DEBUG__.m4.emoteOpen === true, null, 5000);
+  await A.tap('#emote-grid .emote-item[data-e="3"]');
+  await until(B, (id) => window.__WORLDS_DEBUG__.net.emoteLog.some((e) => e.id === id && e.e === 3), aConn, 10000);
+  check('표현: phone taps 😊 → 반가워요, the desktop player sees it', true);
+  check('🔥 "🎙️ 모닥불 음성 참여" in the campfire chat header', (await B.textContent('#campfire-voice-btn')).includes('모닥불 음성 참여'));
+  // This server has no TURN: campfire voice stays off (never direct P2P between strangers).
+  await B.click('#campfire-voice-btn');
+  await until(B, () => document.getElementById('toast').textContent.includes('준비 중'), null, 10000);
+  check('campfire voice without TURN: refused with a message, voice stays idle', (await debug(B)).m4.voice.state === 'idle');
 
   step('library');
   const door = await B.evaluate(() => window.__WORLDS_TEST__.libraryDoor());

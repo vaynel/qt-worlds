@@ -69,12 +69,16 @@ export interface NetHandlers {
   lantern(l: LanternInfo): void;
   lanternGone(id: number): void;
   correct(x: number, y: number, z: number): void;
-  voiceRoom(m: { groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[] }): void;
+  voiceRoom(m: { groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[]; campfire?: boolean; silencedUntil?: number | null }): void;
   voicePeer(peer: VoicePeerInfo, joined: boolean): void;
   voicePeerLeft(id: string): void;
   voiceSignal(from: string, data: VoiceSignal): void;
-  voiceLeft(reason: 'left' | 'kicked' | 'removed'): void;
+  voiceLeft(reason: 'left' | 'kicked' | 'removed' | 'away'): void;
   voiceError(code: ErrorCode, message: string): void;
+  /** 🔥 campfire voice: muted by reports until (null = may speak). */
+  voiceSilenced(until: number | null): void;
+  /** 표현: someone in our space (or we) showed an emote. */
+  emote(id: string, e: number): void;
   groupChat(message: GroupMessage): void;
   groupChatUpdate(message: GroupMessage): void;
   groupRead(groupId: number, lastReadId: number): void;
@@ -230,6 +234,12 @@ export class NetClient {
         break;
       case 'voiceError':
         this.handlers.voiceError?.(msg.code, msg.message);
+        break;
+      case 'voiceSilenced':
+        this.handlers.voiceSilenced?.(typeof msg.until === 'number' ? msg.until : null);
+        break;
+      case 'emote':
+        this.handlers.emote?.(msg.id, msg.e);
         break;
       case 'groupChat':
         this.handlers.groupChat?.(msg.message);
@@ -401,6 +411,7 @@ export class NetClient {
         case 'voiceSignal':
         case 'voiceLeft':
         case 'voiceError':
+        case 'voiceSilenced':
         case 'groupChat':
         case 'groupChatUpdate':
         case 'groupRead':
@@ -408,6 +419,9 @@ export class NetClient {
           break;
         case 'letters':
           if (typeof msg.unread === 'number') this.dispatch(msg);
+          break;
+        case 'emote':
+          if (typeof msg.id === 'string' && Number.isInteger(msg.e)) this.dispatch(msg);
           break;
         case 'error':
           if (msg.code === 'bad_nickname' || msg.code === 'full' || msg.code === 'version' || msg.code === 'name_taken') {
@@ -502,6 +516,10 @@ export class NetClient {
 
   voiceKick(target: string): void {
     this.raw({ t: 'voiceKick', target });
+  }
+
+  emote(e: number): void {
+    this.raw({ t: 'emote', e });
   }
 
   /** Test hook: drop the socket as a network blip would (auto-reconnects). */

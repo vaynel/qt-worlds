@@ -37,7 +37,7 @@ export interface SettingsLook {
   /** 👕 꾸미기; `back` returns to this menu. */
   open: (back: () => void) => void;
   isAdmin: () => boolean;
-  openAdmin: (tab?: 'outfits' | 'shop' | 'library') => void;
+  openAdmin: (tab?: 'outfits' | 'shop' | 'library' | 'voice') => void;
 }
 
 /** 이야기 도서관 entry points from ⚙. */
@@ -203,7 +203,7 @@ export class SettingsView {
         this.openGuide();
       }),
     );
-    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '옷 그림, 소품 가게, 도서관 관리', () => this.go('admin')));
+    if (this.available('admin')) list.append(this.item('admin', '🛠️', '관리', '옷 그림, 소품 가게, 도서관, 모닥불 음성 관리', () => this.go('admin')));
 
     const legal = el('div', 'settings-menu-legal');
     const link = (href: string, text: string, id: string) => {
@@ -483,6 +483,11 @@ export class SettingsView {
       look.openAdmin('library');
     });
     libAdmin.id = 'settings-admin-library';
+    const voiceAdmin = button('모닥불 음성 신고', '', () => {
+      this.modal.close();
+      look.openAdmin('voice');
+    });
+    voiceAdmin.id = 'settings-admin-voice';
     box.append(
       a,
       el('p', 'settings-note', '신고된 옷 그림을 보고 숨김·복구·그림 금지를 정해요.'),
@@ -490,6 +495,8 @@ export class SettingsView {
       el('p', 'settings-note', '소품 가게의 시간대별 수량을 정해요.'),
       libAdmin,
       el('p', 'settings-note', '신고되거나 숨겨진 도서관 책을 보고 복구·숨김 유지·삭제·글쓰기 금지를 정해요.'),
+      voiceAdmin,
+      el('p', 'settings-note', '모닥불 음성에서 신고된 분과 말하기 제한을 보고 해제·연장을 정해요.'),
     );
     return [box];
   }

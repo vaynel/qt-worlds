@@ -11,7 +11,7 @@ export const PROTOCOL_VERSION = 1;
  * Bump it (to the new 시행일) when the texts change materially: every account
  * is then asked to agree again on its next visit.
  */
-export const TERMS_VERSION = '2026-11-12';
+export const TERMS_VERSION = '2026-11-14';
 /** Minimum age for an account (만 14세 이상; PIPA art. 22-2). */
 export const MIN_AGE = 14;
 
@@ -42,7 +42,38 @@ export interface VoicePeerInfo {
   speaking: boolean;
   /** Group creator (may kick). */
   owner: boolean;
+  /** 🔥 campfire voice: muted by reports for a while (listeners don't play them). */
+  silenced?: boolean;
 }
+
+/**
+ * 🔥 모닥불 공개 음성: the public voice room at the campfire. It travels as
+ * voice room "group" 0 (real groups start at 1). Signed-in, consented people
+ * inside the campfire circle only; relay-only ICE (TURN) so strangers never
+ * see each other's IP address; nothing is recorded.
+ */
+export const CAMPFIRE_VOICE_ROOM = 0;
+export const VOICE_REPORT_REASONS = ['abuse', 'sexual', 'harass', 'other'] as const;
+export type VoiceReportReason = (typeof VOICE_REPORT_REASONS)[number];
+export const VOICE_REPORT_LABELS: Record<VoiceReportReason, string> = { abuse: '욕설·혐오', sexual: '음란', harass: '괴롭힘', other: '기타' };
+/** Distinct reporters within VOICE_REPORT_WINDOW_MS that mute someone from campfire voice. */
+export const VOICE_REPORTS_TO_MUTE = 3;
+export const VOICE_REPORT_WINDOW_MS = 10 * 60 * 1000;
+/** First mute: a day; any later one (not lifted by an admin): a week. */
+export const VOICE_MUTE_MS = 24 * 3600 * 1000;
+export const VOICE_MUTE_REPEAT_MS = 7 * 24 * 3600 * 1000;
+
+/** 표현 (emotes): fixed content, so guests may use them too. Index = wire id. */
+export const EMOTES = [
+  { emoji: '🙏', label: '기도해요' },
+  { emoji: '✝️', label: '아멘' },
+  { emoji: '🙌', label: '할렐루야' },
+  { emoji: '😊', label: '반가워요' },
+  { emoji: '🥹', label: '감동이에요' },
+  { emoji: '🤗', label: '위로해요' },
+  { emoji: '👋', label: '안녕하세요' },
+  { emoji: '❤️', label: '사랑해요' },
+] as const;
 
 /** Group text chat (모임 채팅). */
 export const GROUP_CHAT_MAX = 500;
@@ -307,7 +338,9 @@ export type ClientMessage =
   | { t: 'voiceSignal'; to: string; data: VoiceSignal }
   | { t: 'voiceMute'; muted: boolean }
   | { t: 'voiceSpeaking'; speaking: boolean }
-  | { t: 'voiceKick'; target: string };
+  | { t: 'voiceKick'; target: string }
+  /** 표현: one of EMOTES (index). */
+  | { t: 'emote'; e: number };
 
 export interface PlayerInfo {
   id: string;
@@ -348,7 +381,10 @@ export type ErrorCode =
   | 'voice_not_member'
   | 'voice_full'
   | 'voice_blocked'
-  | 'voice_login';
+  | 'voice_login'
+  | 'voice_consent'
+  | 'voice_not_near'
+  | 'voice_unavailable';
 
 /** Logged-in account as the server sees it. */
 export interface AccountInfo {
@@ -416,13 +452,17 @@ export type ServerMessage =
   | { t: 'lantern'; lantern: LanternInfo }
   | { t: 'lanternGone'; id: number }
   /** You are in a voice room: everyone already there (connect to each). */
-  | { t: 'voiceRoom'; groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[] }
+  | { t: 'voiceRoom'; groupId: number; groupName: string; selfId: string; owner: boolean; peers: VoicePeerInfo[]; campfire?: boolean; silencedUntil?: number | null }
   /** Someone joined or changed mute/speaking. */
   | { t: 'voicePeer'; peer: VoicePeerInfo; joined: boolean }
   | { t: 'voicePeerLeft'; id: string }
   | { t: 'voiceSignal'; from: string; data: VoiceSignal }
   /** You left the room (left, kicked, removed from the group, error). */
-  | { t: 'voiceLeft'; reason: 'left' | 'kicked' | 'removed' }
+  | { t: 'voiceLeft'; reason: 'left' | 'kicked' | 'removed' | 'away' }
+  /** 🔥 campfire voice: you may (null) or may not speak until `until` (reports). */
+  | { t: 'voiceSilenced'; until: number | null }
+  /** 표현: someone in your space (or you) showed an emote. */
+  | { t: 'emote'; id: string; e: number }
   | { t: 'voiceError'; code: ErrorCode; message: string }
   /** New group chat message (members only). */
   | { t: 'groupChat'; message: GroupMessage }
@@ -563,7 +603,10 @@ export function parseClientMessage(data: string): ClientMessage | null {
     case 'stand':
       return { t: 'stand' };
     case 'voiceJoin':
-      return Number.isInteger(m.groupId) && (m.groupId as number) > 0 ? { t: 'voiceJoin', groupId: m.groupId as number } : null;
+      // 0 = the campfire's public room (CAMPFIRE_VOICE_ROOM).
+      return Number.isInteger(m.groupId) && (m.groupId as number) >= 0 ? { t: 'voiceJoin', groupId: m.groupId as number } : null;
+    case 'emote':
+      return Number.isInteger(m.e) && (m.e as number) >= 0 && (m.e as number) < EMOTES.length ? { t: 'emote', e: m.e as number } : null;
     case 'voiceLeave':
       return { t: 'voiceLeave' };
     case 'voiceMute':
