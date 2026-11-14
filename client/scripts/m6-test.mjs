@@ -34,7 +34,7 @@ import {
 
 const PORT = 5186;
 const BASE = `http://127.0.0.1:${PORT}/`;
-const Q = '?test=1&shadows=0&time=14:00&noguide=1&noworship=1';
+const Q = '?test=1&shadows=0&time=14:00&noguide=1';
 const DB = freshDb('m6');
 const DIST_A = resolve(clientDir, 'dist');
 const DIST_B = resolve(serverDir, 'data/test/m6-dist-b');
@@ -433,7 +433,7 @@ try {
   browser = await launch();
   const swCtx = await browser.newContext(desktop);
   const S = await swCtx.newPage();
-  await S.goto(BASE + '?test=1&noworship=1');
+  await S.goto(BASE + '?test=1');
   await S.waitForSelector('#entry-signed-out:not([hidden])');
   await S.evaluate(() => navigator.serviceWorker.ready);
   check('the service worker registers and activates on the first visit (production build)', await S.evaluate(async () => !!(await navigator.serviceWorker.getRegistration('/'))?.active));
@@ -588,7 +588,7 @@ try {
   const iCtx = await browser.newContext(desktop);
   await iCtx.addInitScript(BIP_STUB);
   const I = await iCtx.newPage();
-  await join(I, BASE, '설치손님', '?test=1&shadows=0&time=14:00&noworship=1');
+  await join(I, BASE, '설치손님', '?test=1&shadows=0&time=14:00');
   await I.waitForSelector('.guide-skip', { timeout: 30000 });
   await I.click('.guide-skip');
   await I.waitForSelector('#install-offer', { timeout: 10000 });

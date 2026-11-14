@@ -28,9 +28,6 @@ export async function layoutBoxes(page) {
       chat: q('#chat'),
       input: q('#chat-input'),
       log: q('#chat-log'),
-      worship: q('#worship.dock:not(.folded)'),
-      handle: q('#worship-handle'),
-      tab: q('#worship-tab'),
       voice: q('#voice-chip'),
       joystick: q('#stick-base'),
       stickZone: q('#stick-zone'),
@@ -38,6 +35,8 @@ export async function layoutBoxes(page) {
       place: q('.place-card'),
       clock: q('.clock-card'),
       action: q('#action-btn'),
+      emote: q('#emote-btn'),
+      camera: q('#camera-btn'),
       bodyClass: document.body.className,
     };
   });

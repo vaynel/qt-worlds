@@ -21,7 +21,7 @@ interface Peer extends VoicePeerInfo {
 export interface VoiceHooks {
   onChange: () => void;
   toast: (text: string) => void;
-  /** Joined (true) / left (false): duck worship and ambience. */
+  /** Joined (true) / left (false): duck the ambience. */
   onActive: (active: boolean) => void;
   /** Master 음성 volume 0..100. */
   masterVolume: () => number;

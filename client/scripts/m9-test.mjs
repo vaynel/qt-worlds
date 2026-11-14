@@ -12,7 +12,7 @@
 //    (in-app toast + mock push, honours the 소품 만료 알림 toggle); return idempotent
 //  - admin: per-window stock and defaults; 404 for everyone else
 //  - export includes rentals; 회원 탈퇴 removes them
-//  - phone 390×844: HUD dock clear of joystick, worship player, chat, HUD; sheet fits
+//  - phone 390×844: HUD dock clear of joystick, buttons, chat, HUD; sheet fits
 //  - screenshots docs/screenshots/m9-*
 // Builds its own client into data/test/m9-dist and serves it from the server.
 // Port: TEST_SERVER_PORT (default 5189).
@@ -62,7 +62,7 @@ const D0 = '2026-11-12';
 const D1 = '2026-11-13';
 const D2 = '2026-11-14';
 const kst = (day, hm) => Date.parse(`${day}T${hm}:00+09:00`);
-const Q = (time, extra = '') => `?test=1&shadows=0&time=${time}&noworship=1&noguide=1${extra}`;
+const Q = (time, extra = '') => `?test=1&shadows=0&time=${time}&noguide=1${extra}`;
 const shot = (page, name) => page.screenshot({ path: resolve(shotDir, `m9-${name}.png`) });
 
 const serverEnv = {
@@ -176,23 +176,6 @@ async function toStall(page, dist = 2.0) {
   return s;
 }
 
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var fire = function (s) { if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); };
-  this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); };
-  this.cueVideoById = function () { fire(5); };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () {};
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 
 let browser;
 let server;
@@ -200,7 +183,7 @@ const pageErrors = [];
 const watch = (page, name) => {
   page.on('pageerror', (e) => pageErrors.push(`${name}: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !/favicon|Failed to load resource|youtube|ERR_|WebGL|GPU stall|swiftshader|WebSocket/i.test(m.text())) pageErrors.push(`${name}: ${m.text()}`);
+    if (m.type() === 'error' && !/favicon|Failed to load resource|ERR_|WebGL|GPU stall|swiftshader|WebSocket/i.test(m.text())) pageErrors.push(`${name}: ${m.text()}`);
   });
 };
 const online = (page) => until(page, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
@@ -638,7 +621,6 @@ try {
   step('phone');
   await setClock(kst(D2, '19:35'));
   const pctx = await browser.newContext(mobile);
-  await pctx.route('https://www.youtube.com/iframe_api', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   const Ph = await pctx.newPage();
   watch(Ph, 'Ph');
   await loginJoin(Ph, BASE, 'm9-phone', '폰', '?test=1&shadows=0&time=12:30&noguide=1');
@@ -646,7 +628,6 @@ try {
   const phR = [await phAgent.rent('bible'), await phAgent.rent('hat')];
   check('phone account rents bible + hat', phR.every((r) => r.status === 200), phR.map((r) => `${r.status} ${r.data?.error ?? ''}`).join(', '));
   await until(Ph, () => window.__WORLDS_DEBUG__.m9.rentals.length === 2, null, 40000);
-  await until(Ph, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000).catch(() => undefined);
   // Sit on the plaza bench with the open bible.
   const { seats: bseats } = await Ph.evaluate(() => window.__WORLDS_TEST__.benchSeats());
   const s0 = bseats[0];
@@ -664,11 +645,11 @@ try {
     place: await box(Ph, '.place-card'),
     clock: await box(Ph, '.clock-card'),
     tools: await box(Ph, '#tools'),
-    worship: (await Ph.isVisible('#worship')) ? await box(Ph, '#worship') : null,
-    worshipHandle: (await Ph.isVisible('#worship-handle')) ? await box(Ph, '#worship-handle') : null,
+    emote: (await Ph.isVisible('#emote-btn')) ? await box(Ph, '#emote-btn') : null,
+    camera: (await Ph.isVisible('#camera-btn')) ? await box(Ph, '#camera-btn') : null,
   };
   const hits = Object.entries(others).filter(([, b]) => overlaps(dock, b)).map(([k]) => k);
-  check('phone: HUD dock (2 prop chips) overlaps nothing (joystick, action, HUD, worship player)', dock && dock.height > 60 && hits.length === 0, `${JSON.stringify(dock)} hits ${hits.join(',')}`);
+  check('phone: HUD dock (2 prop chips) overlaps nothing (joystick, action, 😊, 📷, HUD)', dock && dock.height > 60 && hits.length === 0, `${JSON.stringify(dock)} hits ${hits.join(',')}`);
   check('phone: dock stays on screen', dock.x >= 0 && dock.x + dock.width <= 390 && dock.y + dock.height <= 844);
   await shot(Ph, 'hud-chip-phone');
   // The HUD hours chip was removed; open the sheet through the game's own path.
@@ -676,8 +657,7 @@ try {
   await until(Ph, () => window.__WORLDS_DEBUG__.m9.sheet);
   await sleep(700);
   const sheet = await box(Ph, '.sheet.shop-sheet');
-  const wb = (await Ph.isVisible('#worship')) ? await box(Ph, '#worship') : null;
-  check('phone: shop sheet fits the screen and clears the worship player', sheet && sheet.x >= 0 && sheet.x + sheet.width <= 390.5 && sheet.y + sheet.height <= 844.5 && !overlaps(sheet, wb), `${JSON.stringify(sheet)} vs ${JSON.stringify(wb)}`);
+  check('phone: shop sheet fits the screen', sheet && sheet.x >= 0 && sheet.x + sheet.width <= 390.5 && sheet.y + sheet.height <= 844.5, JSON.stringify(sheet));
   const btnHeights = await Ph.locator('.shop-rent').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
   check('phone: 빌리기 buttons are ≥ 44 px tall', btnHeights.every((h) => h >= 43.5), btnHeights.join(','));
   await shot(Ph, 'shop-sheet-phone');

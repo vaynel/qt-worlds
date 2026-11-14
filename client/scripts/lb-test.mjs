@@ -37,18 +37,6 @@ const TODAY = P.kstDateOf(Date.now());
 const kst = (date, hm) => Date.parse(`${date}T${hm}:00+09:00`);
 const NICK = { a: '아론', b: '보아스', c: '사무엘', d: '다윗', e: '에스더', r1: '룻', r2: '레아', r3: '라헬', x: '요셉', y: '야곱', p: '바울', admin: '관리자' };
 
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var fire = function (s) { if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); }; this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); }; this.cueVideoById = function () { fire(5); };
-  this.seekTo = function () {}; this.setVolume = function () {}; this.mute = function () {}; this.unMute = function () {}; this.destroy = function () {};
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  var f = document.createElement('iframe'); f.src = 'about:blank'; f.style.width = '100%'; f.style.height = '100%'; f.style.border = '0'; el.replaceWith(f);
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 /** Notification + PushManager stubs (headless Chromium can't subscribe for real), as in m6. */
 const PUSH_STUB = () => {
   window.__perm = 'granted';
@@ -133,7 +121,6 @@ async function account(hint, nickname) {
 async function contextFor(browser, agent, opts = {}) {
   const ctx = await browser.newContext({ deviceScaleFactor: 1, ...opts });
   await ctx.addCookies([...agent.jar].map(([name, value]) => ({ name, value, url: ORIGIN })));
-  await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   return ctx;
 }
 async function enterWorld(page, query) {

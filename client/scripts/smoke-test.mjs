@@ -3,8 +3,8 @@
 // on one port, CSP headers) with mock login and a throwaway DB, two browsers:
 //   A = phone (390×844, touch), B = desktop (1280×720).
 // Covers: /health, /api/me, CSP, brotli/gzip; login + consent; the world renders;
-// the HUD's four buttons; the phone worship facade (nothing from YouTube until a
-// tap) and the desktop player; 말씀 → a meditation saves → a lantern is shared;
+// the HUD's three buttons; nothing ever loads from YouTube (worship was removed
+// 2026-11-14); 말씀 → a meditation saves → a lantern is shared;
 // campfire chat both ways; 😊 표현 and the 🎙️ campfire voice button; the 📬 badge via /letters/unread (no inbox download);
 // a library bookcase list; the ⚙ menu pages; render-on-demand under a phone sheet; 서울 날씨 in welcome and on the HUD.
 // Waits are predicates (until/waitFor…), never fixed sleeps.
@@ -53,29 +53,7 @@ for (const f of [resolve(DIST, 'index.html'), resolve(serverDir, 'dist/server/sr
 const VAPID = createRequire(resolve(serverDir, 'package.json'))('web-push').generateVAPIDKeys(); // throwaway: shows ⚙ 알림
 const P = await import(pathToFileURL(resolve(serverDir, 'dist/shared/protocol.js')).href);
 
-// Desktop gets a YouTube stub (no network; reports PLAYING like the real player).
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var fire = function (s) { if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); };
-  this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); };
-  this.cueVideoById = function () { fire(5); };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () {};
-  this.getPlayerState = function () { return 1; };
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
-const stubYouTube = (ctx) => ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
-
 const modalIs = (p, name, ms = 15000) => until(p, (n) => window.__WORLDS_DEBUG__.m3.modal === n, name, ms);
-const worship = async (p) => (await debug(p)).m3.worship;
 /** GET with the body exactly as sent (fetch would decode br/gzip for us). */
 const raw = (path, enc) =>
   new Promise((resolveRaw, reject) => {
@@ -114,7 +92,7 @@ try {
   check('/api/me answers (guest: user null)', me.user === null, JSON.stringify(me).slice(0, 80));
   const html = await raw('/', 'gzip, deflate, br');
   const csp = html.headers.get('content-security-policy') ?? '';
-  check('HTML has the CSP header (self + YouTube frame + i.ytimg.com images)', /default-src 'self'/.test(csp) && /youtube-nocookie/.test(csp) && /i\.ytimg\.com/.test(csp), csp.slice(0, 60));
+  check('HTML has the CSP header (self only; no YouTube, no third-party frames or images)', /default-src 'self'/.test(csp) && /script-src 'self';/.test(csp) && !/youtube|ytimg|frame-src/i.test(csp), csp);
   const indexHtml = readFileSync(resolve(DIST, 'index.html'), 'utf8');
   const js = indexHtml.match(/\/assets\/[^"']+\.js/)?.[0];
   const css = indexHtml.match(/\/assets\/[^"']+\.css/)?.[0];
@@ -146,18 +124,18 @@ try {
   step('login');
   const ctxA = await browser.newContext({ viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  await stubYouTube(ctxB);
   const A = await ctxA.newPage();
   const B = await ctxB.newPage();
   const errors = [];
   const ytRequests = [];
   const inboxRequests = [];
   for (const [n, p] of [['A', A], ['B', B]]) p.on('pageerror', (e) => errors.push(`${n}: ${String(e).split('\n')[0]}`));
-  A.on('request', (r) => {
-    const u = r.url();
-    if (/youtube\.com|youtube-nocookie\.com|googlevideo\.com/.test(u)) ytRequests.push(u);
-    if (u.includes('/api/library/letters/inbox')) inboxRequests.push(u);
-  });
+  for (const p of [A, B])
+    p.on('request', (r) => {
+      const u = r.url();
+      if (/youtube|ytimg|googlevideo/.test(u)) ytRequests.push(u);
+      if (p === A && u.includes('/api/library/letters/inbox')) inboxRequests.push(u);
+    });
   // Both sign up through the mock provider (nickname + 만 14세/약관 consent) at once.
   await Promise.all([loginJoin(A, BASE, 'smoke-anna', '스모크안나', Q), loginJoin(B, BASE, 'smoke-ben', '스모크벤', Q)]);
   const accounts = await Promise.all([A, B].map((p) => p.evaluate(async () => (await (await fetch('/api/me')).json()).user)));
@@ -169,7 +147,7 @@ try {
     const d = await debug(p);
     const tools = await p.$$eval('#tools > *', (els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.id));
     check(`${n}: the world renders (${d.renderer.calls} draw calls, ${d.chunks} chunks)`, d.ready && d.renderer.calls > 20 && d.chunks > 0);
-    check(`${n}: HUD has 말씀 · 모임 · 찬양 · ⚙`, tools.join(',') === 'btn-word,btn-groups,btn-worship,btn-settings', tools.join(','));
+    check(`${n}: HUD has exactly 말씀 · 모임 · ⚙`, tools.join(',') === 'btn-word,btn-groups,btn-settings', tools.join(','));
   }
   // 서울 날씨: welcome carries it (test servers never call MET Norway), a test override goes out live, the clock card shows it.
   {
@@ -189,20 +167,15 @@ try {
   await A.evaluate(() => { localStorage.setItem('worlds.graphics.quality', 'sharp'); window.dispatchEvent(new CustomEvent('worlds:graphics')); });
   check('desktop pixel ratio unchanged (1 here)', (await debug(B)).renderer.pixelRatio === 1, String((await debug(B)).renderer.pixelRatio));
 
-  step('worship');
-  await until(A, () => window.__WORLDS_DEBUG__.m3.worship.facade === true, null, 10000);
-  const wa = await worship(A);
-  check('phone: worship facade (title + ▶ 찬양 듣기), no iframe, nothing requested from YouTube', wa.lazy && wa.facade && wa.iframes === 0 && (await A.isVisible('#worship-facade-play')) && ytRequests.length === 0, ytRequests.slice(0, 2).join(' '));
-  const facadeBox = await A.locator('#worship .worship-frame').boundingBox();
-  check('phone: the facade holds the player spot (≥200×200)', facadeBox && facadeBox.width >= 199.5 && facadeBox.height >= 199.5, JSON.stringify(facadeBox));
-  await until(B, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000);
-  const wb = await worship(B);
-  check('desktop: the player is created on entry and plays (no facade)', !wb.lazy && !wb.facade && wb.state === 'playing', `${wb.state} facade=${wb.facade}`);
-  await stubYouTube(ctxA);
-  await A.tap('#worship-facade-play');
-  await until(A, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 15000);
-  check('phone: ▶ 찬양 듣기 creates the one player and it plays', !(await worship(A)).facade && (await worship(A)).iframes <= 1);
-
+  step('no youtube');
+  for (const [n, p] of [['phone', A], ['desktop', B]]) {
+    const dom = await p.evaluate(() => ({
+      worship: !!document.querySelector('#worship, #btn-worship, [id^="worship"]'),
+      frames: [...document.querySelectorAll('iframe')].map((f) => f.src),
+      scripts: [...document.scripts].map((x) => x.src).filter((x) => x && !x.startsWith(location.origin)),
+    }));
+    check(`${n}: no worship player, no iframe, no third-party script`, !dom.worship && dom.frames.length === 0 && dom.scripts.length === 0, JSON.stringify(dom));
+  }
   step('letters badge');
   const unread = await A.evaluate(async () => {
     const r = await fetch('/api/library/letters/unread');
@@ -310,6 +283,7 @@ try {
   }
   check('⚙ menu: 소리 · 알림 · 계정 pages open and go back; 꾸미기 opens', opened.join(',') === 'sound,notify,account,look', opened.join(','));
 
+  check('nothing was ever requested from YouTube (iframe, API script, thumbnails)', ytRequests.length === 0, ytRequests.slice(0, 2).join(' '));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } catch (err) {
   check(`smoke run completed (at ${currentStep()})`, false, String(err?.stack ?? err).split('\n').slice(0, 3).join(' | '));

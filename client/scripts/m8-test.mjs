@@ -6,7 +6,7 @@
 //    notice); duplicates don't count; guests can't report; strikes → upload ban
 //  - admin: 404 for everyone else; an admin (WORLDS_ADMIN_EMAILS) restores and bans
 //  - export includes appearance + drawings; 회원 탈퇴 removes all of it (tables scanned)
-//  - phone 390×844: painter cells ≥ 16 px, sheet clear of the worship player
+//  - phone 390×844: painter cells ≥ 16 px, the 꾸미기 sheet fits the screen
 //  - 10 avatars with different drawings render; textures are disposed on leave
 // Builds its own client into data/test/m8-dist and serves it from the server.
 // Port: TEST_SERVER_PORT (default 5188).
@@ -46,7 +46,7 @@ const BASE = `http://127.0.0.1:${PORT}/`;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const WS = `ws://127.0.0.1:${PORT}/ws`;
 const DAY = '2026-11-08';
-const Q = (extra = '') => `?test=1&shadows=0&time=13:00&date=${DAY}&noworship=1&noguide=1${extra}`;
+const Q = (extra = '') => `?test=1&shadows=0&time=13:00&date=${DAY}&noguide=1${extra}`;
 const DB = freshDb('m8');
 const DIST = resolve(serverDir, 'data/test/m8-dist');
 const Database = createRequire(resolve(serverDir, 'package.json'))('better-sqlite3');
@@ -146,7 +146,6 @@ const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 const m8 = async (page) => (await debug(page)).m8;
 const remoteOf = async (page, id) => (await debug(page)).net.remotes.find((r) => r.id === id);
 const box = (page, sel) => page.locator(sel).first().boundingBox();
-const overlaps = (a, b) => !!a && !!b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /** Click / drag cells on the painter grid like a person would. */
 async function cellPoint(page, x, y) {
@@ -170,31 +169,13 @@ async function dragCells(page, x0, y0, x1, y1) {
 const custom = (page) => page.evaluate(() => window.__WORLDS_TEST__.customize());
 const painted = async (page) => (await custom(page)).pixels;
 
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var state = -1;
-  var fire = function (s) { state = s; if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); };
-  this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); };
-  this.cueVideoById = function () { fire(5); };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () {};
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 
 let browser;
 const pageErrors = [];
 const watch = (page, name) => {
   page.on('pageerror', (e) => pageErrors.push(`${name}: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !/favicon|Failed to load resource|youtube|ERR_|WebGL|GPU stall|swiftshader/i.test(m.text())) pageErrors.push(`${name}: ${m.text()}`);
+    if (m.type() === 'error' && !/favicon|Failed to load resource|ERR_|WebGL|GPU stall|swiftshader/i.test(m.text())) pageErrors.push(`${name}: ${m.text()}`);
   });
 };
 
@@ -561,21 +542,15 @@ try {
   // ---------------------------------------------------------------- phone
   step('phone');
   const mctx = await browser.newContext(mobile);
-  await mctx.route('https://www.youtube.com/iframe_api', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   const M = await mctx.newPage();
   watch(M, 'M');
   await loginJoin(M, BASE, 'm8-mia', '미아', `?test=1&shadows=0&time=13:00&date=${DAY}&noguide=1`);
-  await until(M, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000).catch(() => undefined);
   await M.tap('#btn-settings');
   await M.tap('#settings-nav-look');
   await until(M, () => window.__WORLDS_TEST__.customize().open);
   await sleep(800);
-  const worshipOn = await M.evaluate(() => document.body.classList.contains('worship-on'));
-  const wbox = await box(M, '#worship');
   const sbox = await box(M, '.sheet.look');
-  check('phone: worship player stays visible (≥ 200 px tall) above the sheet', worshipOn && wbox && wbox.height >= 200, JSON.stringify(wbox));
-  check('phone: 꾸미기 sheet does not overlap the worship player', !overlaps(sbox, wbox), `player ${JSON.stringify(wbox)} sheet ${JSON.stringify(sbox)}`);
-  check('phone: at most one YouTube iframe', (await M.locator('iframe').count()) <= 1);
+  check('phone: 꾸미기 sheet fits the screen; no iframe', sbox && sbox.x >= -0.5 && sbox.y >= -0.5 && sbox.x + sbox.width <= 390.5 && sbox.y + sbox.height <= 844.5 && (await M.locator('iframe').count()) === 0, JSON.stringify(sbox));
   await M.screenshot({ path: resolve(shotDir, 'm8-customize-phone.png') });
   for (let i = 0; i < 3 && (await custom(M)).tab !== 'draw'; i++) {
     await M.tap('#look-tab-draw');
@@ -617,7 +592,7 @@ try {
   const pink = [...mp].filter((ch) => ch === 'a').length;
   check('phone: tapping paints (mirrored) and fills', mp[4 * N + 5] === '2' && mp[4 * N + 10] === '2' && pink >= 20 && pink < 60, `${pink} filled`);
   const sbox2 = await box(M, '.sheet.look');
-  check('phone: painter sheet still clear of the worship player', !overlaps(sbox2, await box(M, '#worship')));
+  check('phone: painter sheet still fits the screen', sbox2 && sbox2.y + sbox2.height <= 844.5 && sbox2.y >= -0.5, JSON.stringify(sbox2));
   await M.evaluate(() => document.querySelector('.painter-palette').scrollIntoView({ block: 'end' }));
   await sleep(300);
   await M.screenshot({ path: resolve(shotDir, 'm8-painter-phone.png') });

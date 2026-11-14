@@ -1,4 +1,4 @@
-// M10 test: the simplified HUD. [말씀] [모임] [찬양] [⚙] fit every screen;
+// M10 test: the simplified HUD. [말씀] [모임] [⚙] (owner decision; 찬양 removed 2026-11-14) fit every screen;
 // 말씀 opens 📖 나의 말씀 책 on [오늘] (verse, ✓ status, 묵상하기, 등불로 나누기),
 // [지난 말씀] / [담아 둔 묵상] still work, the daily letter still arrives once,
 // and ⚙ is a two-level menu (꾸미기, 소리, 알림, 계정, 앱 설치, 사용 안내, 약관, 관리).
@@ -34,7 +34,7 @@ import { overlaps } from './lib/tablet.mjs';
 const PORT = Number(process.env.TEST_SERVER_PORT ?? 5191);
 const BASE = `http://127.0.0.1:${PORT}/`;
 const DAY = '2026-11-08';
-const Q = (extra = '') => `?test=1&shadows=0&time=13:00&date=${DAY}&noworship=1&noguide=1${extra}`;
+const Q = (extra = '') => `?test=1&shadows=0&time=13:00&date=${DAY}&noguide=1${extra}`;
 const DB = freshDb('m10');
 const ADMIN_HINT = 'm10-admin';
 const webpush = createRequire(resolve(serverDir, 'package.json'))('web-push');
@@ -128,7 +128,7 @@ try {
     const hb = await hudBoxes(p);
     const ids = hb.tools.map((t) => t.id).join(',');
     const labels = hb.tools.map((t) => t.text).join(' ');
-    check(`${name}: HUD has exactly 말씀 · 모임 · 찬양 · ⚙`, ids === 'btn-word,btn-groups,btn-worship,btn-settings' && labels === '말씀 모임 찬양 ⚙', `${ids} | ${labels}`);
+    check(`${name}: HUD has exactly 3 buttons: 말씀 · 모임 · ⚙`, ids === 'btn-word,btn-groups,btn-settings' && labels === '말씀 모임 ⚙', `${ids} | ${labels}`);
     const inside = hb.tools.every((t) => t.box.x >= 0 && t.box.y >= 0 && t.box.x + t.box.width <= hb.vw + 0.5 && t.box.y + t.box.height <= hb.vh);
     check(`${name}: every button is fully on screen (no page scroll)`, inside && hb.docW <= hb.vw, JSON.stringify(hb.tools.map((t) => [t.id, Math.round(t.box.x), Math.round(t.box.x + t.box.width)])));
     check(`${name}: ≥40px tap targets`, hb.tools.every((t) => t.box.width >= 40 && t.box.height >= 40), hb.tools.map((t) => `${Math.round(t.box.width)}x${Math.round(t.box.height)}`).join(' '));
@@ -322,6 +322,8 @@ try {
     const ok = (await M.isVisible(sel)) && (await M.isVisible('#settings-back')) && (await M.locator('.settings-menu').count()) === 0;
     check(`⚙ → ${id}: its page opens inside the same sheet with ← 뒤로`, ok && (await modal(M)) === '설정');
     if (id === 'sound') {
+      const sliders = await M.$$eval('.settings-sheet input[type=range], .sheet.settings input[type=range]', (els) => els.map((e) => e.id).join(','));
+      check('🔊 소리: 전체 · 환경음 · 효과음 · 음성 only (no 찬양)', sliders === 'vol-master,vol-ambience,vol-ui,vol-voice' && !(await M.textContent('.sheet.settings')).includes('찬양'), sliders);
       await sleep(300);
       await shot(M, 'settings-sound-phone');
     }

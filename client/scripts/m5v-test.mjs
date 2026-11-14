@@ -34,7 +34,7 @@ const BASE = `http://127.0.0.1:${CLIENT_PORT}/`;
 const WS = `ws://127.0.0.1:${CLIENT_PORT}/ws`;
 const KEY_ID = 'test-key-id-123';
 const KEY_TOKEN = 'secret-turn-token-xyz';
-const Q = '?test=1&shadows=0&time=14:00&noguide=1&noworship=1';
+const Q = '?test=1&shadows=0&time=14:00&noguide=1';
 const DB = freshDb('m5v');
 
 // ---------------------------------------------------------------- mock Cloudflare TURN API
@@ -192,7 +192,7 @@ try {
   await until(B, () => window.__WORLDS_DEBUG__.m4.voice.peers.some((p) => p.connection === 'connected'), null, 30000);
   const va = await v(A);
   check('two members connect peer-to-peer (joined muted)', va.peers.length === 1 && va.muted && va.peers[0].muted, JSON.stringify(va.peers));
-  check('voice join ducks worship (x0.2) and ambience', (await debug(A)).m3.worship.duck === 0.2 && (await debug(A)).m3.audio.targets.ambience < 0.06);
+  check('voice join ducks the ambience', (await debug(A)).m3.audio.ducked === true && (await debug(A)).m3.audio.targets.ambience < 0.06);
 
   const before = await inboundBytes(A);
   await B.evaluate(() => window.__WORLDS_TEST__.voiceMute(false));
@@ -375,8 +375,7 @@ try {
     const chip = await box(M, '#voice-chip');
     const others = {
       joystick: await box(M, '#stick-zone'),
-      worship: await box(M, '#worship'),
-      handle: (await M.isVisible('#worship-handle')) ? await box(M, '#worship-handle') : null,
+      emote: (await M.isVisible('#emote-btn')) ? await box(M, '#emote-btn') : null,
       place: await box(M, '.place-card'),
       tools: await box(M, '#tools'),
       chat: (await M.isVisible('#chat')) ? await box(M, '#chat') : null,
@@ -385,7 +384,7 @@ try {
     return { chip, hits };
   };
   const l1 = await layout();
-  check('390x844: voice chip overlaps nothing (joystick, worship player/handle, HUD)', l1.hits.length === 0, JSON.stringify(l1));
+  check('390x844: voice chip overlaps nothing (joystick, 😊, HUD)', l1.hits.length === 0, JSON.stringify(l1));
   await M.screenshot({ path: resolve(shotDir, 'm5v-mobile-chip.png') });
   await teleport(M, { x: 51, z: -6 });
   await until(M, () => window.__WORLDS_DEBUG__.net.chatVisible);
@@ -402,7 +401,8 @@ try {
   await M.tap('#voice-open');
   await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '음성 기도방');
   await sleep(500);
-  check('voice sheet on mobile does not overlap the worship player', !overlaps(await box(M, '.sheet.voice-sheet'), await box(M, '#worship')));
+  const vsheet = await box(M, '.sheet.voice-sheet');
+  check('voice sheet on mobile fits the screen', vsheet && vsheet.y >= -0.5 && vsheet.y + vsheet.height <= 844.5, JSON.stringify(vsheet));
   await M.screenshot({ path: resolve(shotDir, 'm5v-mobile-sheet.png') });
   await M.tap('.voice-sheet .book-top .ghost');
   await until(M, () => window.__WORLDS_DEBUG__.m3.modal === null);
@@ -410,16 +410,15 @@ try {
   await until(M, () => window.__WORLDS_DEBUG__.m3.modal === '모임');
   await M.waitForSelector('#gchat-input');
   await sleep(600);
-  const chatOk = !overlaps(await box(M, '.sheet.group-panel'), await box(M, '#worship'));
-  check('mobile: 💬 from the voice chip opens 모임 대화; sheet clear of the worship player', chatOk);
+  check('mobile: 💬 from the voice chip opens 모임 대화', await M.isVisible('.sheet.group-panel'));
   await M.screenshot({ path: resolve(shotDir, 'm5v-chat-mobile.png') });
   await M.tap('#gchat-input');
   await M.setViewportSize({ width: 390, height: 500 }); // on-screen keyboard
   await sleep(800);
   const inp = await box(M, '#gchat-input');
   check(
-    'mobile with the keyboard up (viewport 390x500): input visible above it, no overlap with the player',
-    inp && inp.y + inp.height <= 500 && inp.y >= 0 && !overlaps(await box(M, '.sheet.group-panel'), await box(M, '#worship')),
+    'mobile with the keyboard up (viewport 390x500): input visible above it',
+    inp && inp.y + inp.height <= 500 && inp.y >= 0,
     JSON.stringify(inp),
   );
   await M.screenshot({ path: resolve(shotDir, 'm5v-chat-mobile-keyboard.png') });
@@ -452,7 +451,7 @@ try {
   const left = await v(A);
   check(
     'leave cleans up: peers closed, audio removed, mic muted (kept for reuse), ducking restored',
-    left.peers.length === 0 && left.audioElements === 0 && left.micEnabled === false && (await debug(A)).m3.worship.duck === 1,
+    left.peers.length === 0 && left.audioElements === 0 && left.micEnabled === false && (await debug(A)).m3.audio.ducked === false,
     JSON.stringify(left),
   );
   await A.evaluate(() => window.__WORLDS_TEST__.voiceReleaseMic());

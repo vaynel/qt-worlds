@@ -3,7 +3,8 @@
 A Korean devotional ("QT", 큐티) multiplayer world in the browser. People walk a low-poly 3D village,
 read today's word (오늘의 말씀), meditate (묵상), share meditations as lanterns (등불), chat at the
 campfire, pray in voice rooms, write and read testimonies and diaries in the library (이야기 도서관),
-exchange letters (✉️ 답장 편지), and listen to worship music (찬양) through the official YouTube player.
+and exchange letters (✉️ 답장 편지). The worship (찬양) YouTube player was removed on 2026-11-14 at the owner's
+request; don't re-add it.
 
 - **Client:** `client/`. A single page built with Vite, TypeScript and three.js. There is no framework;
   the DOM is built with `el()`/`button()`.
@@ -26,7 +27,7 @@ Line counts are approximate, as of 2026-11-13.
 
 | Path | Lines | Purpose |
 |---|---|---|
-| `main.ts` | 190 | Boot: entry screen → connect → `new Game`. Creates the one `WorshipPlayer` and `AudioEngine`, and sets the `tablet`/`phone-land` body classes. |
+| `main.ts` | 190 | Boot: entry screen → connect → `new Game`. Creates the `AudioEngine`, and sets the `tablet`/`phone-land`/`land-typing` body classes. |
 | `game/Game.ts` | 1,520 | **Hub.** Renderer and loop (`tick`), the three spaces (world / 골방 / library) and their transitions, HUD prompts, wiring of every view, test hooks (`installTestHooks`) and `publishDebug`. |
 | `game/Social.ts` | 400 | Multiplayer glue: `NetClient` ↔ remote avatars, seats, campfire chat, voice. |
 | `game/Devotion.ts` | 210 | Today's word, the daily letter, meditation flow, 말씀 책. |
@@ -37,17 +38,16 @@ Line counts are approximate, as of 2026-11-13.
 | `world/*` | ~3,800 | Terrain chunks (`ChunkManager`, `Heightfield`), `DayNight`, `Landmarks`, `Library` interior, `Interior` (골방), `LanternField`, `ShopStall`, `NameTag`, `config.ts` (world layout). 서울 날씨: `Weather` (looks per kind, sky/light blend into `DayNight`, clouds, lightning, snow cover), `Particles` (GPU particle systems, one draw each), `Seasons` (KST season, blossom trees, Christmas lights), `surface.ts` (shared shader uniforms: snow, wet, sway, foliage tints; interior window panes). |
 | `entities/*` | ~1,300 | `Avatar` (meshes and outfit textures), `PlayerController`, `Props`. |
 | `systems/*` | ~370 | `Input` (keyboard, touch joystick), `CameraRig`. |
-| `ui/WorshipPlayer.ts` | 1,030 | The single YouTube player: API loading, playlist, fold states, dock/room layouts, background pause, and the phone facade (lazy creation). |
 | `ui/LibraryView.ts` | 1,490 | Library sheets: bookcases, reader, writer, diary/photos, letters, 받은 편지 inbox, reports. |
+| `ui/PhotoViewer.ts` | 170 | Full-screen photo viewer (오늘 앨범, diary picker 🔍, reader polaroids): swipe / ← →, counter, double-tap zoom, 📥 저장 for own photos; Android back closes it (history entry + `popstate`). |
 | `ui/*View.ts`, `ui/*.ts` | ~5,000 | One file per sheet or widget: `WordBookView`, `MeditationView`, `SettingsView`, `NotifySettings`, `GroupsView`, `ShopView`, `CustomizeView`, `OutfitPainter`, `AdminView`, `ReportView`, `Guide`, `Legal`, `Hud`, `ChatPanel`, `VoicePanel`, `EntryScreen` … |
 | `ui/dom.ts` | 100 | `el()`, `button()` and **`Modal`** (every sheet: one open at a time, Esc, focus return, `worlds-modal` event). |
 | `voice/VoiceClient.ts` | 600 | WebRTC voice rooms (signalling over `/ws`): group prayer rooms, and the 🔥 campfire's public room (room 0, relay-only ICE). |
 | `ui/EmotePicker.ts`, `ui/CampfireVoice.ts` | 100 / 160 | 😊 표현 button and grid (keys 1–8); the campfire voice join button, room-switch prompt and 🚩 음성 신고 sheet. |
-| `audio/AudioEngine.ts` | 400 | Ambience and settings (volumes, mute). |
+| `audio/AudioEngine.ts` | 400 | Ambience and settings (전체 / 환경음 / 효과음 / 음성 volumes, mute); ducks the ambience in voice rooms. |
 | `pwa/pwa.ts`, `client/sw/` | 210 | Service worker registration and update toast; `vite.config.ts` generates `dist/sw.js` with the precache list. |
 | `legal/pages.ts`, `config/legal.ts` | 540 | `/privacy` and `/terms` (rendered at build time). |
-| `config/worship.ts` | 30 | The worship playlist (YouTube ids and titles). |
-| `styles.css` | 6,070 | **All CSS in one file**, appended per milestone (see conventions). |
+| `styles.css` | 5,220 | **All CSS in one file**, appended per milestone (see conventions). |
 | `vite-env.d.ts` | 35 | `WorldsDebug` (the `__WORLDS_DEBUG__` shape). |
 
 ### Server (`server/src`)
@@ -122,7 +122,7 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
 
 - **DOM:** build with `el(tag, class, text)` and `button(label, class, onClick)`. Never use `innerHTML` with data.
 - **Sheets:** every overlay is a `Modal` (`ui/dom.ts`). Only one is open at a time; game input pauses while it's
-  open. The worship player reacts to `worlds-modal`.
+  open. A full-screen layer above a sheet (the photo viewer) sets `Modal.layerOpen` so it owns Esc.
 - **KST time:** Korea is a fixed +9 h (no daylight saving). Use `kstDateOf(ms)`, `kstTimeOf(ms)`, `kstDayNumber(ms)`
   and `seoulDate()` from `shared/protocol.ts`. Don't add a new `+ 9 * 3600_000` copy, and don't use `Intl` in hot
   paths (it cost 77 µs per call).
@@ -136,27 +136,23 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   hide the item until an admin reviews it (`review = 'kept' | 'restored'`).
 - **Consent gating:** signed-in users must agree to the current `TERMS_VERSION` (이용약관, 개인정보처리방침,
   만 14세 이상) before anything is written. `/api/me` reports `needsConsent`.
-- **YouTube rules (RMF and policy; never relax them):**
-  - only the official IFrame embed (youtube-nocookie), unmodified;
-  - **one** player/iframe;
-  - while a video exists and plays it is fully on screen at ≥ 200×200, with nothing drawn over it;
-  - folded (접기) or hidden page → paused, never background playback;
-  - phones show a facade (thumbnail and title from `i.ytimg.com`) and load nothing from YouTube until the user
-    turns to worship (`WORSHIP_LAZY`);
-  - the songs are never downloaded or re-hosted.
+- **No worship player (owner decision, 2026-11-14):** the 찬양 YouTube player, its HUD button, settings slider and
+  every layout that made room for it were removed because the owner found it too distracting. Don't re-add worship
+  music, a YouTube embed or background worship audio. The HUD is exactly **말씀 · 모임 · ⚙**. The CSP allows only
+  our own origin (plus Google sign-in as a form target); nothing is loaded from a third party.
 - **Test switches:** `?test=1` turns on client test hooks (`window.__WORLDS_TEST__`) **and** the `__WORLDS_DEBUG__`
   mirror. Real players never pay for either. Server: `WORLDS_TEST_MODE`, `WORLDS_AUTH_MOCK`, `WORLDS_ALLOW_TEST_DATES`
   and `WORLDS_PUSH_MOCK`. The server refuses to start with any of them under `NODE_ENV=production`.
 - **Migrations:** append a new string to `MIGRATIONS` in `server/src/db.ts`. Never edit an applied one. Use
   `IF NOT EXISTS` for indexes.
 - **CSS, the appending problem:** `styles.css` grew one block per milestone, so later blocks win by source order
-  and specificity (for example, `#worship { width }` is set in 29 places). When you must touch layout:
-  - first find **every** rule for that element (`grep -n '#worship' styles.css`);
+  and specificity. When you must touch layout:
+  - first find **every** rule for that element (`grep -n '#chat' styles.css`);
   - change the existing rule rather than appending an override;
   - if you add a block, add **one** clearly labelled block, scoped to a new class (as the facade block at the end
     does);
   - don't add new body classes;
-  - rerun the layout suites (b1, m42, m53, p13).
+  - rerun the layout suites (nw, m53, p13, ev).
 
   The split into per-feature files with `data-*` state is planned (audit §3, Phase 2).
 - **Render cost:** the world renders every frame, except behind 꾸미기 (every 4th frame) and behind a sheet that
@@ -173,7 +169,7 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
 | **Seat type** | `shared/protocol.ts` (`SeatKind`, `SEAT_COUNTS`, the seat spots, `seatSpot`) → `Room.ts` (seat array, `seats(kind)`, join/leave, snapshot) → client `Social.ts` / `world/*` (mesh plus the sit prompt in `Game.updateHud`) → a test like `m54-test.mjs`. Benches touched 10 files (commit b4f1a6a): follow it. |
 | **Report target** | migration (`<thing>_reports`, `hidden_at`, `review`) → service `report()` with `*_HIDE_REPORTS` → route in `api.ts` with `storyReportLimit`-style limiter → admin list/review (`AdminView.ts`, admin routes) → `ReportView`/a 🚩 button → the account export and delete paths in `account.ts`. Pattern: `letters.ts`. |
 | **Push kind** | migration column(s) in `push_prefs` → `PushPayload.kind` and the prefs column lists in `push.ts` (about 4 places) and `account.ts` (export) → the trigger (service or scheduler) → `NotifySettings.ts` toggle → `client/sw/sw.js` if it needs a special click URL → m6/lb push checks. |
-| **Sheet (view)** | `ui/<Name>View.ts` owning a `Modal('<name>-overlay', '<한국어 이름>')` → construct and wire it in `Game.ts` (and the HUD/⚙ entry) → CSS in one labelled block → expose `isOpen`/`describe()` in `publishDebug` if tests need it → run b1/m42/p13 (the worship player must stay clear of it on phones). |
+| **Sheet (view)** | `ui/<Name>View.ts` owning a `Modal('<name>-overlay', '<한국어 이름>')` → construct and wire it in `Game.ts` (and the HUD/⚙ entry) → CSS in one labelled block → expose `isOpen`/`describe()` in `publishDebug` if tests need it → run nw/p13. |
 | **WS message** | `shared/protocol.ts`: add it to `ClientMessage` or `ServerMessage` and validate it in `parseClientMessage` → `Room.handle()` `case` → `NetClient` dispatch → `Social`/`Game` handler. Bump `v` only for breaking changes. |
 | **API route** | `api.ts`: `r('METHOD', '/api/...', handler, open?)` with `this.signedIn(user)`, a `RateLimiter` for writes and `readJson` → the service → `d.room.*Changed()` if others must see it. Put typed response shapes in `shared/protocol.ts` when the client reads them. |
 | **DB migration** | Append to `MIGRATIONS` (`db.ts`). Never edit old entries. Test on a copy of a real-shaped DB: `openDb()` migrates on start, and the container does it on deploy. |
@@ -195,8 +191,8 @@ The smoke test (`client/scripts/smoke-test.mjs`) starts one server with `SERVE_C
 throwaway DB on port 5188, then runs a phone and a desktop browser. It checks:
 
 - `/health`, `/api/me`, the CSP header, brotli/gzip encodings;
-- sign-up with consent, the world rendering, and the HUD's four buttons;
-- the phone pixel ratio, the phone worship facade with no YouTube requests, and the desktop player;
+- sign-up with consent, the world rendering, and the HUD's three buttons;
+- the phone pixel ratio, and that nothing (iframe, script, request) ever comes from YouTube;
 - `/letters/unread` (and that sign-in never fetches the inbox);
 - 말씀 → 묵상 → 등불 (seen live by the other player);
 - render-on-demand under a phone sheet;
@@ -210,24 +206,23 @@ Which suite covers what:
 |---|---|
 | m2 | multiplayer, snapshots, mats, campfire chat, reconnect, day change |
 | m3 | 골방, 오늘의 말씀, meditation, word book |
-| m31 / m41 / m42 | worship player (dock, room, playlist, fold states) |
+| m41 | first-time guide, name tags |
 | m4 | accounts, groups, lanterns, production mode |
-| m5v / m52 / m53 / m54 | voice rooms; tablet chat layout; fold layouts; benches |
+| m5v / m52 / m53 / m54 | voice rooms; tablet chat layout and 골방 room UI; chat fold layouts; benches |
 | m51 | anonymous lanterns |
 | m6 | Web Push, PWA, offline |
-| m7 | legal pages, consent, backup, hidden-page pause |
+| m7 | legal pages, consent, backup, no YouTube (CSP, requests) |
 | m8 | 꾸미기, outfit reports, admin |
 | m9 | 나눔 소품 가게 |
 | m10 | HUD and sheets |
-| b1 / p13 | phone and tablet worship layouts with sheets; phone landscape |
-| la / lb | library (books, desks, photos, 발자취); letters, inbox, backups |
+| nw / p13 | no-overlap layout at every size (phone portrait/landscape, tablet, desktop), sheets, 골방; phone landscape in depth |
+| la / lb | library (books, desks, photos, 발자취, the photo viewer); letters, inbox, backups |
 | wx | 서울 날씨 (every kind: particles, fog, clouds, HUD, interiors), quality scaling, render on demand, seasons and Christmas, reduced motion, phone HUD |
 | ev | 😊 표현 (emotes) and 🔥 campfire public voice (relay-only ICE through a local mini TURN, reports, admin, layout) |
 | smoke | the fast cross-section above |
 
 Harness notes: `freshDb(name)` gives each run its own DB under `server/data/test/`. Tests run SwiftShader WebGL, so
-frame rates are meaningless; assert state, not fps. Touch tests stub `https://www.youtube.com/iframe_api` (see
-`YT_STUB` in b1/p13/smoke). Screenshots go to `docs/screenshots/`.
+frame rates are meaningless; assert state, not fps. Screenshots go to `docs/screenshots/`.
 
 ---
 

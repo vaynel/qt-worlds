@@ -341,9 +341,8 @@ try {
   await until(B, () => window.__WORLDS_DEBUG__.net.remotes.length === 1 && window.__WORLDS_DEBUG__.net.remotes[0].visible, null, 30000);
   check('B and C reconnect and see each other again', true, (await debug(B)).net.remotes.map((r) => r.name).join(','));
 
-  // Expected noise: failed socket handshakes during the outage, and YouTube's
-  // own iframe permission-policy warnings.
-  const unexpected = pageErrors.filter((e) => !/WebSocket connection to .* failed|Permissions policy violation/.test(e));
+  // Expected noise: failed socket handshakes during the outage.
+  const unexpected = pageErrors.filter((e) => !/WebSocket connection to .* failed/.test(e));
   check('no unexpected page errors', unexpected.length === 0, unexpected.slice(0, 3).join(' | ') || `${pageErrors.length} expected ws errors during outage`);
 } catch (err) {
   check('test run completed', false, String(err).split('\n')[0]);

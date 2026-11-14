@@ -40,7 +40,7 @@ export function kstStamp(now = Date.now()): { date: string; time: string } {
  * 📸 In-world photo. `render` draws one frame into the WebGL canvas and we copy
  * it in the same task (the drawing buffer is still intact then), so there is no
  * preserveDrawingBuffer cost on every other frame. Only the 3D canvas is
- * copied: the HUD, sheets and the YouTube player are DOM and never end up in
+ * copied: the HUD and sheets are DOM and never end up in
  * the photo. Downscaled to SHOT_MAX_DIM, stamped, encoded as WebP (JPEG where
  * WebP encoding is missing) and squeezed under SHOT_TARGET_BYTES.
  */

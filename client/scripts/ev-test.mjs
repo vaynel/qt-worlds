@@ -10,7 +10,7 @@
 // walking out leaves; one voice room at a time (group ↔ campfire, with a prompt);
 // capacity 8; 3 reports → muted 24 h (fake clock), repeat → 7 days, admin lift;
 // non-admin 404. Layout: no overlaps at phone portrait 360/390/412, phone landscape,
-// tablet and desktop with every worship state, chat open/folded, the voice chip.
+// tablet and desktop with chat open/folded and the voice chip (no worship player since 2026-11-14).
 //
 // Ports: 5194 server (serves the built client), 5197 mock Cloudflare API, UDP 5198 TURN.
 //   cd client && npm run build && (cd ../server && npm run build) && node scripts/ev-test.mjs
@@ -53,8 +53,8 @@ const WS = `ws://127.0.0.1:${PORT}/ws`;
 const KEY_ID = 'ev-key-id';
 const KEY_TOKEN = 'ev-secret-turn-token';
 const ADMIN_HINT = 'ev-admin';
-const Q = '?test=1&shadows=0&time=14:00&noguide=1&noworship=1';
-const QN = '?test=1&shadows=0&time=21:40&noguide=1&noworship=1';
+const Q = '?test=1&shadows=0&time=14:00&noguide=1';
+const QN = '?test=1&shadows=0&time=21:40&noguide=1';
 const DB = freshDb('ev');
 const P = await import(pathToFileURL(resolve(serverDir, 'dist/shared/protocol.js')).href);
 const ONLY = process.env.EV_ONLY ? process.env.EV_ONLY.split(',') : null;
@@ -153,25 +153,6 @@ const fmt = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.wi
 const v = async (page) => (await debug(page)).m4.voice;
 const inboundBytes = async (page) => (await page.evaluate(() => window.__WORLDS_TEST__.voiceStats())).reduce((n, s) => n + s.bytesReceived, 0);
 
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var st = -1;
-  var fire = function (s) { st = s; if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); };
-  this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); };
-  this.cueVideoById = function () { fire(5); };
-  this.getPlayerState = function () { return st; };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () {};
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 
 let browser;
 let turn;
@@ -591,7 +572,7 @@ try {
     check('relay-only ICE: every campfire peer connection has iceTransportPolicy "relay" (pc.getConfiguration())', cfgA.length === 1 && cfgB.length === 1 && [...cfgA, ...cfgB].every((c) => c.iceTransportPolicy === 'relay'), JSON.stringify([cfgA, cfgB]));
     const stA = await A.evaluate(() => window.__WORLDS_TEST__.voiceStats());
     check('only relay candidates are gathered and the selected pair is relay (no IP of the other side)', stA[0].localCandidates.length > 0 && stA[0].localCandidates.every((t) => t === 'relay') && stA[0].selectedLocal === 'relay' && turn.stats.relayedPackets > 0, JSON.stringify({ ...stA[0], turn: turn.stats }));
-    check('joining ducks the worship player to 20%', (await debug(A)).m3.worship.duck === 0.2);
+    check('joining ducks the ambience (voice ducking)', (await debug(A)).m3.audio.ducked === true, JSON.stringify((await debug(A)).m3.audio.targets));
     const before = await inboundBytes(A);
     await B.evaluate(() => window.__WORLDS_TEST__.voiceMute(false));
     await until(B, () => window.__WORLDS_DEBUG__.m4.voice.muted === false, null, 10000).catch(() => undefined);
@@ -774,34 +755,25 @@ try {
           tools: q('#tools'),
           place: q('.place-card'),
           clock: q('.clock-card'),
-          card: q('#worship'),
-          frame: q('#worship .worship-frame'),
-          tab: q('#worship-tab'),
-          handle: q('#worship-handle'),
           letter: q('#letter-btn'),
           cvBtn: q('#campfire-voice-btn'),
           headBtns: [...document.querySelectorAll('#chat .chat-head > *')].map((e) => vis(e)).filter(Boolean),
         };
       });
-    const FLOAT = ['emote', 'camera', 'action', 'chat', 'pill', 'voice', 'dock', 'joystick', 'tools', 'place', 'clock', 'card', 'tab', 'handle', 'letter'];
+    const FLOAT = ['emote', 'camera', 'action', 'chat', 'pill', 'voice', 'dock', 'joystick', 'tools', 'place', 'clock', 'letter'];
     const inside = (r, vw, vh) => !!r && r.x >= -0.5 && r.y >= -0.5 && r.x + r.width <= vw + 0.5 && r.y + r.height <= vh + 0.5;
     for (const [dev, w, h, touch] of DEVICES) {
       const ctx = await browser.newContext(touch ? { viewport: { width: w, height: h }, screen: { width: w, height: h }, deviceScaleFactor: 1, isMobile: true, hasTouch: true } : desktop);
-      await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
       const p = await ctx.newPage();
       p.on('pageerror', (e) => check(`${dev}: no page error`, false, String(e).split('\n')[0]));
       await loginJoin(p, BASE, `ev-lay-${dev}`, `배치${dev}`.slice(0, 12), '?test=1&shadows=0&time=14:00&noguide=1');
-      if (await p.isVisible('#worship-facade-play')) await p.tap('#worship-facade-play');
-      await until(p, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 30000).catch(() => undefined);
       await teleport(p, FIRE);
       await until(p, () => window.__WORLDS_DEBUG__.net.chatVisible, null, 15000).catch(() => undefined);
       if (await p.isVisible('#campfire-voice-btn')) await p.click('#campfire-voice-btn');
       await until(p, () => window.__WORLDS_DEBUG__.m4.voice?.state === 'in', null, 15000).catch(() => undefined);
       await sleep(800);
-      const states = touch ? ['mini', 'open', 'folded'] : ['open', 'folded'];
-      for (const st of states) {
+      {
         for (const chatState of ['open', 'folded']) {
-          await p.evaluate((f) => window.__WORLDS_TEST__.worshipFold(f), st);
           await p.evaluate((c) => {
             const chat = document.getElementById('chat');
             if ((c === 'folded') !== chat.classList.contains('folded')) document.getElementById(c === 'folded' ? 'chat-fold' : 'chat-pill').click();
@@ -811,17 +783,18 @@ try {
           // The new UI against everything else (other pairs belong to b1/m53/p13).
           const hits = [];
           for (const k of FLOAT) if (k !== 'emote' && overlaps(r.emote, r[k])) hits.push(`emote×${k}`);
-          if (overlaps(r.voice, r.frame)) hits.push('voice chip×video');
-          const label = `${dev} worship ${st} · chat ${chatState}`;
-          check(`${label}: 😊 shown, on screen, overlapping nothing (camera, action, chat, voice chip, joystick, HUD, player); the voice chip never over the video`, !!r.emote && inside(r.emote, r.vw, r.vh) && hits.length === 0, hits.join(' ') || `emote ${fmt(r.emote)} camera ${fmt(r.camera)} action ${fmt(r.action)} card ${fmt(r.card)}`);
+          // Every floating pair, now that nothing else shares the screen.
+          for (let i = 1; i < FLOAT.length; i++) for (let j = i + 1; j < FLOAT.length; j++) if (overlaps(r[FLOAT[i]], r[FLOAT[j]])) hits.push(`${FLOAT[i]}×${FLOAT[j]}`);
+          const label = `${dev} · chat ${chatState}`;
+          check(`${label}: 😊 shown, on screen; nothing overlaps (😊, camera, action, chat, voice chip, joystick, HUD)`, !!r.emote && inside(r.emote, r.vw, r.vh) && hits.length === 0, hits.join(' ') || `emote ${fmt(r.emote)} camera ${fmt(r.camera)} action ${fmt(r.action)} voice ${fmt(r.voice)}`);
           if (chatState === 'open' && r.chat) {
             const headHits = [];
             for (let i = 0; i < r.headBtns.length; i++) for (let j = i + 1; j < r.headBtns.length; j++) if (overlaps(r.headBtns[i], r.headBtns[j])) headHits.push(`${i}×${j}`);
             check(`${label}: 🎙️ campfire voice button fits in the chat header`, !!r.cvBtn && headHits.length === 0 && r.cvBtn.x >= r.chat.x - 0.5 && r.cvBtn.x + r.cvBtn.width <= r.chat.x + r.chat.width + 0.5, headHits.join(' ') || `cv ${fmt(r.cvBtn)} chat ${fmt(r.chat)}`);
           }
-          if (dev === 'p390' || dev === 'l915' || dev === 'desk' || dev === 'tab820') await p.screenshot({ path: resolve(shotDir, `ev-layout-${dev}-${st}-chat-${chatState}.png`) });
+          if (dev === 'p390' || dev === 'l915' || dev === 'desk' || dev === 'tab820') await p.screenshot({ path: resolve(shotDir, `ev-layout-${dev}-chat-${chatState}.png`) });
         }
-        // the grid open: on screen, clear of the video and the HUD tools
+        // the grid open: on screen, clear of the HUD tools
         await p.evaluate(() => document.getElementById('emote-btn').click());
         // (slow software rendering: let the pop-in animation finish)
         await until(p, () => {
@@ -831,10 +804,9 @@ try {
         const g = await probe(p);
         const bad = [];
         if (!g.grid || !inside(g.grid, g.vw, g.vh)) bad.push(`grid ${fmt(g.grid)}`);
-        if (overlaps(g.grid, g.frame)) bad.push(`grid over the video ${fmt(g.grid)} / ${fmt(g.frame)}`);
         if (overlaps(g.grid, g.tools)) bad.push('grid over the HUD');
-        check(`${dev} worship ${st}: the emote grid opens on screen, clear of the player and the HUD`, bad.length === 0, bad.join('; ') || fmt(g.grid));
-        if (dev === 'l740' || dev === 'p360') await p.screenshot({ path: resolve(shotDir, `ev-layout-${dev}-${st}-grid.png`) });
+        check(`${dev}: the emote grid opens on screen, clear of the HUD`, bad.length === 0, bad.join('; ') || fmt(g.grid));
+        if (dev === 'l740' || dev === 'p360') await p.screenshot({ path: resolve(shotDir, `ev-layout-${dev}-grid.png`) });
         await p.evaluate(() => document.getElementById('emote-btn').click());
       }
       await ctx.close();

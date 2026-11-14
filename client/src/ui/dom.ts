@@ -32,6 +32,8 @@ export function koreanDate(date: string): string {
  */
 export class Modal {
   static current: Modal | null = null;
+  /** A full-screen layer over the sheet (the photo viewer) owns Esc while it is up. */
+  static layerOpen = false;
   readonly root: HTMLDivElement;
   readonly sheet: HTMLDivElement;
   private lastFocus: Element | null = null;
@@ -56,7 +58,7 @@ export class Modal {
   }
 
   private readonly onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && Modal.current === this) {
+    if (e.key === 'Escape' && Modal.current === this && !Modal.layerOpen) {
       e.preventDefault();
       this.close();
     }

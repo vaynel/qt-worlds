@@ -11,18 +11,14 @@ tiers and the deploy flow. Measured performance baselines are in `docs/perf/2026
   goes on 127.0.0.1:5195 under another name and tag, and you remove it afterwards.
 - **No secrets.** Never read `deploy/.env.live`, `deploy/.env.tunnel`, token or key files, or `~/.config/qt-worlds`.
   The repo is public. Templates are `deploy/.env.live.example` and `server/.env.example`.
-- **YouTube rules** (ARCHITECTURE.md §3):
-  - only the official embed;
-  - one player;
-  - visible at ≥ 200×200 with nothing over it while it exists and plays;
-  - paused when folded or when the page is hidden;
-  - phones load nothing from YouTube before the user's first tap (facade);
-  - never download or re-host the songs.
+- **No worship music / YouTube.** The 찬양 player was removed on 2026-11-14 at the owner's request ("찬양은 빼자,
+  너무 거슬린다"). Don't re-add it, any YouTube embed, or background worship audio. The CSP allows no third-party
+  script, frame or image.
 - **No monetization** (ads, payments, paid items) and **no AI/LLM APIs** in the product.
 - **Owner-decided designs stay as they are** unless the owner asks. For example:
   - a meditation started outside the 골방 is recorded as "골방에서 묵상";
-  - the HUD is exactly 말씀 · 모임 · 찬양 · ⚙;
-  - the phone worship player starts 작게 (video only).
+  - the HUD is exactly 말씀 · 모임 · ⚙ (three buttons);
+  - the 골방 is the private meditation room with the cross, the candle and its ambience (no video screen).
 - **Privacy:** anonymous items never reveal their author to others, and no account id leaves the server. Consent
   (`TERMS_VERSION`) gates writes.
 - **Commits:** agents don't commit, push or deploy. The main session does. No `sudo` and no global installs.
@@ -47,6 +43,6 @@ npm run test:all                      # everything, in order (hours)
 
 ## Commit conventions (main session)
 
-Conventional commits, for example `feat(library): …`, `fix(worship): …`, `perf: …`, `docs: …`, `test: …`. Use one
+Conventional commits, for example `feat(library): …`, `fix(hud): …`, `perf: …`, `docs: …`, `test: …`. Use one
 logical change per commit, with the subject in English (Korean UI terms are fine). Each commit message ends with the
 attribution lines the session provides.

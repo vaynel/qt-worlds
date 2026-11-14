@@ -2,11 +2,9 @@ import './styles.css';
 import { Game } from './game/Game';
 import { JoinRefused, NetClient, resolveServerUrl, type Welcome } from './net/NetClient';
 import { AudioEngine } from './audio/AudioEngine';
-import { WORSHIP_VIDEOS } from './config/worship';
 import { getAuthConfig, getMe } from './net/api';
 import { GuestWordBookStore, LocalWordBookStore, ServerWordBookStore, type WordBookStore } from './storage/WordBook';
 import { EntryScreen } from './ui/EntryScreen';
-import { preloadYouTubeApi, WORSHIP_LAZY, WorshipPlayer } from './ui/WorshipPlayer';
 import { initPwa } from './pwa/pwa';
 import { consent, ConsentSheet } from './ui/Legal';
 import { Modal } from './ui/dom';
@@ -21,28 +19,6 @@ const entry = new EntryScreen();
 // Created now so the first tap (e.g. the 입장하기 button) can unlock audio.
 const audio = new AudioEngine();
 
-// One worship player for the whole session. The API loads while the nickname
-// screen is up so the player can start right after the 입장 tap.
-// ?test=1&noworship=1 simulates an empty video list.
-const qs = new URLSearchParams(location.search);
-const testing = qs.get('test') === '1';
-// Test-only: ?noworship=1 empties the list; ?worshipbad=1 puts an unplayable video first.
-const worshipVideos =
-  testing && qs.get('noworship') === '1'
-    ? []
-    : testing && qs.get('worshipbad') === '1'
-      ? [{ id: 'xxxxxxxxxxx', title: '없는 영상 (테스트)' }, ...WORSHIP_VIDEOS]
-      : WORSHIP_VIDEOS;
-const worship = new WorshipPlayer(worshipVideos);
-const applyWorshipVolume = () => worship.setVolume(audio.settings.worship, audio.settings.worshipMuted, audio.settings.muted);
-applyWorshipVolume();
-audio.onSettingsChange(applyWorshipVolume);
-// The player's own slider and mute button write the same settings as ⚙ 설정.
-worship.onVolumeInput((v) => audio.update({ worship: v }));
-worship.onMuteToggle((m) => audio.update({ worshipMuted: m }));
-// Phones load nothing from YouTube until the user turns to worship (WORSHIP_LAZY).
-if (worshipVideos.length && !WORSHIP_LAZY) void preloadYouTubeApi().catch(() => undefined);
-
 // Track the visible viewport so sheets sit above the on-screen keyboard.
 // Tablets: touch devices whose *screen* (not the current viewport, which the
 // keyboard shrinks) is at least 600 px on its short side.
@@ -52,7 +28,7 @@ document.body.classList.toggle('tablet', isTablet);
 
 /**
  * P1-3: phones held sideways get their own layout (body.phone-land): sheets on
- * the left at full height, the worship player in a column on the right. The
+ * the left at full height, the world visible on the right. The
  * orientation comes from the screen, not the viewport, so the on-screen
  * keyboard (which makes a portrait viewport wide and short) never flips it.
  */
@@ -61,9 +37,6 @@ function isLandscape(): boolean {
   if (type) return type.startsWith('landscape');
   return window.innerWidth > window.innerHeight;
 }
-/** Below this visible height (keyboard up in landscape) a 200 px video can't be fully shown. */
-const SQUEEZE_PX = 216;
-
 function syncViewport() {
   const vv = window.visualViewport;
   const root = document.documentElement.style;
@@ -76,10 +49,7 @@ function syncViewport() {
   root.setProperty('--kb', `${Math.round(kb)}px`);
   const phoneLand = touchCapable && !isTablet && isLandscape();
   document.body.classList.toggle('phone-land', phoneLand);
-  // Keyboard up on a sideways phone: the video would be cut off, so it pauses
-  // (and comes back when the keyboard goes away). Never shown half-hidden.
-  worship.setSqueezed(phoneLand && vvh < SQUEEZE_PX);
-  // ...and the sheets drop their extras so the field being typed in gets the room.
+  // Keyboard up on a sideways phone: the sheets drop their extras so the field being typed in gets the room.
   document.body.classList.toggle('land-typing', phoneLand && vvh < 260);
 }
 /** Keep the field being typed into visible when the keyboard resizes the view. */
@@ -122,10 +92,6 @@ async function enter(): Promise<void> {
   entry.setup(me, authConfig, loginError, deleted ? '탈퇴가 끝났어요. 계정과 기록을 모두 지웠어요. 그동안 함께해 주셔서 고마워요.' : null);
   for (;;) {
     const choice = await entry.ask();
-    // Start worship inside the 입장 tap (same task, before any network wait) so
-    // the browser still counts it as user-initiated. Skipped if the user closed
-    // the player before; the HUD 찬양 button brings it back.
-    if (worshipVideos.length && !worship.userClosed && !worship.isOpen) worship.open();
     let net: NetClient | null = null;
     let welcome: Welcome | null = null;
     if (choice.mode !== 'solo') {
@@ -162,7 +128,6 @@ async function enter(): Promise<void> {
       net,
       welcome,
       audio,
-      worship,
       store,
       account: choice.mode === 'account' ? { id: choice.userId, nickname: choice.nickname } : null,
       guideDue,

@@ -9,12 +9,11 @@ import type { InstallGuide } from './InstallGuide';
 import { NotifySettings } from './NotifySettings';
 import { consent, ConsentSheet, DeleteAccountSheet, downloadMyData, legalLinks } from './Legal';
 
-type SliderKey = 'master' | 'ambience' | 'worship' | 'ui' | 'voice';
+type SliderKey = 'master' | 'ambience' | 'ui' | 'voice';
 
 const SLIDERS: { key: SliderKey; label: string; hint: string }[] = [
   { key: 'master', label: '전체', hint: '모든 소리의 크기' },
   { key: 'ambience', label: '환경음', hint: '바람, 모닥불, 골방의 고요한 소리' },
-  { key: 'worship', label: '찬양', hint: '찬양 영상의 소리' },
   { key: 'ui', label: '효과음', hint: '편지 종소리, 책장 넘기는 소리' },
   { key: 'voice', label: '음성', hint: '음성 기도방에서 들리는 목소리' },
 ];
@@ -71,10 +70,10 @@ export class SettingsView {
     onInstallChange(() => {
       if (this.modal.isOpen && (this.page === 'menu' || this.page === 'install')) this.render();
     });
-    // Keep the sliders in sync when something else (the player) changes a level.
+    // Keep the sliders in sync when something else (another tab) changes a level.
     audio.onSettingsChange((s) => {
       if (!this.modal.isOpen || this.page !== 'sound') return;
-      for (const key of ['master', 'ambience', 'worship', 'ui', 'voice'] as const) {
+      for (const key of ['master', 'ambience', 'ui', 'voice'] as const) {
         const input = this.modal.sheet.querySelector<HTMLInputElement>(`#vol-${key}`);
         if (input && document.activeElement !== input) input.value = String(s[key]);
         const out = input?.parentElement?.querySelector('.settings-value');

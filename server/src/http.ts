@@ -433,17 +433,16 @@ export class StaticClient {
 }
 
 /**
- * Headers for HTML documents. The CSP allows: our own origin (+ ws/wss to it),
- * the YouTube IFrame API script and the youtube-nocookie player frame,
- * YouTube thumbnails, and Google sign-in as a form/navigation target.
+ * Headers for HTML documents. The CSP allows our own origin (+ ws/wss to it)
+ * and Google sign-in as a form/navigation target. No third-party scripts,
+ * frames or images.
  */
 export function securityHeaders(info: RequestInfo): Record<string, string> {
   const host = (info.host || 'localhost').replace(/[^a-z0-9.:\-]/g, '');
   const csp = [
     "default-src 'self'",
-    "script-src 'self' https://www.youtube.com https://s.ytimg.com",
-    'frame-src https://www.youtube-nocookie.com https://www.youtube.com',
-    "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com",
+    "script-src 'self'",
+    "img-src 'self' data: blob:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     `connect-src 'self' ws://${host} wss://${host}`,

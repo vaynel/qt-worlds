@@ -195,7 +195,7 @@ iPhone/iPad: push works only from the home-screen app (iOS 16.4+); the app expla
   Users who ignore the toast get the new version the next time all tabs are closed.
 - Pages are network-first, so a deploy is visible right away even before the toast; the cache is only
   used when the server can't be reached (cached shell, or the "연결이 끊겼어요" page).
-- `/api/*`, `/ws`, `/health`, `/sw.js`, YouTube, Google and anything cross-origin never go through the cache.
+- `/api/*`, `/ws`, `/health`, `/sw.js`, Google and anything cross-origin never go through the cache.
 - The dev server (`npm run dev`, 5180) never registers a worker. `?nosw=1` skips registration in a build.
 
 ### Kill switch (if a broken worker ever ships)

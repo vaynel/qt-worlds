@@ -64,7 +64,7 @@ export class EmotePicker {
 
   /**
    * Next to the button: above it, else to its left, else below — whichever
-   * stays on screen and clear of the worship video (nothing may cover it).
+   * stays on screen and clear of the HUD tools.
    */
   private place() {
     const b = this.btn.getBoundingClientRect();
@@ -75,10 +75,7 @@ export class EmotePicker {
     const m = 8;
     const clampX = (x: number) => Math.max(m, Math.min(vw - g.width - m, x));
     const clampY = (y: number) => Math.max(m, Math.min(vh - g.height - m, y));
-    // The video itself must stay uncovered (YouTube rule); the rest of the player card may be.
-    const frame = document.querySelector('#worship .worship-frame');
-    const vr = frame && frame.getBoundingClientRect().width > 0 && getComputedStyle(frame).visibility !== 'hidden' ? frame.getBoundingClientRect() : null;
-    const avoid = [vr, document.getElementById('tools')?.getBoundingClientRect() ?? null].filter((r): r is DOMRect => !!r && r.width > 0);
+    const avoid = [document.getElementById('tools')?.getBoundingClientRect() ?? null].filter((r): r is DOMRect => !!r && r.width > 0);
     const hits = (x: number, y: number) => avoid.some((r) => x < r.right && r.left < x + g.width && y < r.bottom && r.top < y + g.height);
     const candidates = [
       { x: clampX(b.right - g.width), y: b.top - g.height - m },
@@ -86,8 +83,6 @@ export class EmotePicker {
       { x: clampX(b.left), y: b.top - g.height - m },
       { x: clampX(b.right - g.width), y: b.bottom + m },
     ];
-    // Phone landscape: the video column sits right above the button; go left of it.
-    if (vr) candidates.push({ x: vr.left - g.width - m, y: clampY(b.bottom - g.height) }, { x: vr.left - g.width - m, y: b.top - g.height - m });
     const fits = (c: { x: number; y: number }) => c.x >= m - 0.5 && c.y >= m - 0.5 && c.x + g.width <= vw - m + 0.5 && c.y + g.height <= vh - m + 0.5;
     const pick = candidates.find((c) => fits(c) && !hits(c.x, c.y)) ?? candidates.find(fits) ?? { x: clampX(b.right - g.width), y: clampY(b.top - g.height - m) };
     this.grid.style.left = `${Math.round(pick.x)}px`;

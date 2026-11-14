@@ -25,6 +25,7 @@ import {
 } from '../../../shared/protocol';
 import { api, ApiError } from '../net/api';
 import { button, el, koreanDate, Modal } from './dom';
+import { openPhotoViewer, photoFileName, type ViewerPhoto } from './PhotoViewer';
 
 export interface ShotInfo {
   id: number;
@@ -119,6 +120,13 @@ const PHOTO_LINE = /^오늘의 풍경을 사진 \d+장에 담았어요 📸$/;
 
 const listTitle = (l: LibraryList) => `${BOOKCASES[l].emoji} ${BOOKCASES[l].name}`;
 const emptyDraft = (): TestimonyDraft => ({ title: '', parts: ['', '', ''], ref: '', step: 0 });
+/** One of my own photos in the viewer: date and place, and 📥 저장. */
+const shotPhoto = (s: ShotInfo): ViewerPhoto => ({
+  src: s.url,
+  caption: `📸 ${shortDate(s.createdAt)} · ${s.place || 'QT 월드'}`,
+  download: photoFileName(s.date, s.id),
+});
+
 const shortDate = (iso: string) => {
   const d = new Date(Date.parse(iso) + 9 * 3600_000);
   return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
@@ -459,6 +467,12 @@ export class LibraryView {
       paper.append(ol);
       if (s.photoIds.length) {
         const photos = el('div', 'lib-photos');
+        // Everyone who can read the diary sees the photos large; only its author gets 📥 저장.
+        const viewer: ViewerPhoto[] = s.photoIds.map((pid) => ({
+          src: `/api/shots/${pid}`,
+          caption: `📸 ${koreanDate(s.date)}`,
+          download: s.mine ? photoFileName(s.date, pid) : undefined,
+        }));
         s.photoIds.forEach((pid, i) => {
           const fig = el('figure', 'lib-polaroid');
           fig.style.setProperty('--tilt', `${[-2.2, 1.6, -1.1, 2.4][i % 4]}deg`);
@@ -466,7 +480,7 @@ export class LibraryView {
           img.src = `/api/shots/${pid}`;
           img.alt = 'QT 월드에서 찍은 사진';
           img.loading = 'lazy';
-          const open = button('', 'lib-photo-btn', () => this.lightbox(img.src));
+          const open = button('', 'lib-photo-btn', () => openPhotoViewer(viewer, i));
           open.setAttribute('aria-label', '사진 크게 보기');
           open.append(img);
           fig.append(open, el('figcaption', '', `📸 ${koreanDate(s.date)}`));
@@ -545,30 +559,6 @@ export class LibraryView {
       });
     }
     wrap.append(toggle, menu);
-  }
-
-  private lightbox(src: string) {
-    const box = el('div', 'lib-lightbox');
-    box.id = 'lib-lightbox';
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-label', '사진 크게 보기');
-    const img = el('img');
-    img.src = src;
-    img.alt = 'QT 월드에서 찍은 사진';
-    const close = () => {
-      box.remove();
-      window.removeEventListener('keydown', onKey, true);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        close();
-      }
-    };
-    box.addEventListener('click', close);
-    window.addEventListener('keydown', onKey, true);
-    box.append(img, el('span', 'lib-lightbox-hint', '눌러서 닫기'));
-    document.body.append(box);
   }
 
   // ------------------------------------------------------------------ ✉️ 답장 편지
@@ -1021,12 +1011,16 @@ export class LibraryView {
     const grid = el('div', 'lib-album');
     grid.id = 'lib-album';
     if (!r.shots.length) grid.append(el('p', 'book-none', '아직 찍은 사진이 없어요. 화면 오른쪽 아래 📷 버튼(PC는 P 키)으로 찍어 보세요.'));
-    for (const s of r.shots) {
+    const viewer = r.shots.map(shotPhoto);
+    r.shots.forEach((s, i) => {
       const fig = el('figure', 'lib-album-item');
       const img = el('img');
       img.src = s.url;
       img.alt = `${s.place} 사진`;
       img.loading = 'lazy';
+      const open = button('', 'lib-album-open', () => openPhotoViewer(viewer, i));
+      open.setAttribute('aria-label', '사진 크게 보기');
+      open.append(img);
       const cap = el('figcaption', '', `${shortDate(s.createdAt)} · ${s.place || 'QT 월드'}${s.inDiary ? ' · 일기에 넣음' : ''}`);
       const del = button('지우기', 'ghost', async () => {
         if (!window.confirm('이 사진을 지울까요?')) return;
@@ -1037,9 +1031,9 @@ export class LibraryView {
           this.say(message(err, '지우지 못했어요.'));
         }
       });
-      fig.append(img, cap, del);
+      fig.append(open, cap, del);
       grid.append(fig);
-    }
+    });
     body.append(grid);
   }
 
@@ -1409,8 +1403,10 @@ export class LibraryView {
       setLabel();
       paper.append(label);
       const grid = el('div', 'lib-pick');
-      for (const p of draft.photos) {
+      const viewer = draft.photos.map(shotPhoto);
+      draft.photos.forEach((p, i) => {
         const b = button('', this.diaryPhotos.has(p.id) ? 'lib-pick-item on' : 'lib-pick-item', () => {
+          if (b.dataset.held) return void delete b.dataset.held;
           if (this.diaryPhotos.has(p.id)) this.diaryPhotos.delete(p.id);
           else if (this.diaryPhotos.size < DIARY_PHOTOS_MAX) this.diaryPhotos.add(p.id);
           else return this.say(`사진은 ${DIARY_PHOTOS_MAX}장까지 넣을 수 있어요.`);
@@ -1432,8 +1428,29 @@ export class LibraryView {
         const tick = el('span', 'lib-pick-check');
         tick.setAttribute('aria-hidden', 'true');
         b.append(img, tick);
-        grid.append(b);
-      }
+        // 🔍 previews large without touching the pick (a sibling, not inside the pick button).
+        const zoom = button('🔍', 'lib-pick-zoom', () => openPhotoViewer(viewer, i));
+        zoom.id = `lib-pick-zoom-${p.id}`;
+        zoom.setAttribute('aria-label', '사진 크게 보기');
+        const cell = el('div', 'lib-pick-cell');
+        cell.append(b, zoom);
+        grid.append(cell);
+        // Long-press on the photo previews it too; the click that follows doesn't toggle.
+        let timer = 0;
+        const cancel = () => window.clearTimeout(timer);
+        b.addEventListener('pointerdown', () => {
+          cancel();
+          delete b.dataset.held;
+          timer = window.setTimeout(() => {
+            b.dataset.held = '1';
+            openPhotoViewer(viewer, i);
+          }, 550);
+        });
+        b.addEventListener('pointerup', cancel);
+        b.addEventListener('pointerleave', cancel);
+        b.addEventListener('pointercancel', cancel);
+        b.addEventListener('contextmenu', (e) => e.preventDefault());
+      });
       paper.append(grid, el('p', 'lib-soft', '고른 사진만 일기와 함께 보여요. 고르지 않은 사진은 나만 볼 수 있어요.'));
     }
     body.append(paper);

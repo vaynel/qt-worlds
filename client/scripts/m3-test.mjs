@@ -1,4 +1,4 @@
-// M3 end-to-end test: today's word, letter, word book, meditation, 골방, worship placeholder.
+// M3 end-to-end test: today's word, letter, word book, meditation, 골방 (cross, candle, no video since 2026-11-14).
 // Starts its own server (5183, test dates allowed) + a second server without the
 // test flag (5184), and a client preview (5182). Shuts everything down at the end.
 //   cd client && npm run build && (cd ../server && npm run build) && node scripts/m3-test.mjs
@@ -26,9 +26,7 @@ const DB = freshDb('m3');
 const DB2 = freshDb('m3-prod');
 const DAY = '2026-11-08';
 const OTHER_DAY = '2026-12-25';
-// noworship=1: the worship player has its own test (m31); without three
-// software-decoded videos the CPU-rendered headless run stays fast enough.
-const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noworship=1&noguide=1${extra}`;
+const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noguide=1${extra}`;
 
 const GARDEN = { x: -52, z: -16 };
 const mat = (i) => {
@@ -232,7 +230,7 @@ try {
   await B.keyboard.press('Escape');
 
   step('closet');
-  // ---- 골방: enter, others hidden, worship placeholder, meditation
+  // ---- 골방: enter, others hidden, room UI (no video), meditation
   const door = await A.evaluate(() => window.__WORLDS_TEST__.closetDoor());
   await teleport(A, door);
   await teleport(B, { x: door.x + 3, z: door.z + 3 });
@@ -250,9 +248,30 @@ try {
   await sleep(1200);
   const aIn = (await debug(A)).m3;
   check('inside the 골방 no other players are drawn', aIn.renderedRemotes === 0);
-  check('the worship player moves onto the 골방 layout', aIn.worship.mode === 'room' && aIn.worship.iframes <= 1, JSON.stringify(aIn.worship));
-  const frame = await A.locator('.worship-frame').boundingBox();
-  check('worship screen is at least 200x200', frame.width >= 200 && frame.height >= 200, `${Math.round(frame.width)}x${Math.round(frame.height)}`);
+  const closetUi = async (page) =>
+    page.evaluate(() => {
+      const r = (s) => {
+        const e = document.querySelector(s);
+        if (!e || e.closest('[hidden]')) return null;
+        const b = e.getBoundingClientRect();
+        return b.width > 0 ? { x: b.x, y: b.y, w: b.width, h: b.height } : null;
+      };
+      const ov = (a, b) => !!a && !!b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+      const inV = (a) => !!a && a.x >= -0.5 && a.y >= -0.5 && a.x + a.w <= innerWidth + 0.5 && a.y + a.h <= innerHeight + 0.5;
+      const head = r('.closet-head');
+      const med = r('#closet-meditate');
+      const exit = r('#closet-exit');
+      const hud = [r('#tools'), r('.place-card'), r('.clock-card')];
+      return {
+        ok: [head, med, exit].every(inV) && !ov(head, med) && !ov(head, exit) && !ov(med, exit) && ![head, med, exit].some((a) => hud.some((h) => ov(a, h))),
+        noVideo: !document.querySelector('iframe, #worship, .worship-frame'),
+        head,
+        med,
+        exit,
+      };
+    });
+  const cuA = await closetUi(A);
+  check('desktop 골방: room header, 묵상하기, 밖으로 나가기 on screen, clear of each other and the HUD; no video or player', cuA.ok && cuA.noVideo, JSON.stringify(cuA));
   await A.screenshot({ path: resolve(shotDir, 'm3-closet-desktop.png') });
 
   await A.click('#closet-meditate');
@@ -309,8 +328,8 @@ try {
   await until(M, () => window.__WORLDS_DEBUG__.m3.closet === true);
   await sleep(1500);
   await M.screenshot({ path: resolve(shotDir, 'm3-closet-mobile.png') });
-  const mFrame = await M.locator('.worship-frame').boundingBox();
-  check('mobile 골방 worship screen >= 200x200', mFrame.width >= 200 && mFrame.height >= 200, `${Math.round(mFrame.width)}x${Math.round(mFrame.height)}`);
+  const cuM = await closetUi(M);
+  check('mobile 골방: room header and both buttons on screen, clear of each other and the HUD; no video', cuM.ok && cuM.noVideo, JSON.stringify(cuM));
 
   step('same-day edit');
   // ---- M5.3: one QT per day: 묵상하기 in the 골방 opens today's mat meditation for editing

@@ -9,7 +9,7 @@
  *     else /index.html) -> inline offline page
  *   - /assets/* (content-hashed): cache first
  *   - other precached same-origin files (icons, manifest): cache first
- *   - everything else (/api/*, /ws, /health, /sw.js, YouTube, Google, any
+ *   - everything else (/api/*, /ws, /health, /sw.js, Google, any
  *     cross-origin URL, non-GET): not touched, straight to the network
  *   - a new version waits until the page asks (SKIP_WAITING), old caches are
  *     deleted on activate
@@ -116,7 +116,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return; // YouTube, Google, CDNs: never
+  if (url.origin !== self.location.origin) return; // Google, CDNs: never
   if (NEVER.test(url.pathname)) return;
   if (request.mode === 'navigate') {
     event.respondWith(navigate(request));

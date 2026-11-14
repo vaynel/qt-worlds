@@ -8,8 +8,7 @@ const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) =>
 
 /**
  * 골방: a small private room rendered as its own scene, so nobody else is in
- * it. The player sits on a cushion facing a wooden cross on the wall (the worship
- * panel is the DOM overlay); a candle and the window follow the time of day.
+ * it. The player sits on a cushion facing a wooden cross on the wall; a candle and the window follow the time of day.
  */
 export class Interior {
   readonly scene = new THREE.Scene();
@@ -23,8 +22,7 @@ export class Interior {
   private yaw = 0;
   private pitch = 0.32;
   private readonly geometries: THREE.BufferGeometry[] = [];
-  /** Portrait phones: aim higher and a little to the right so the cross sits
-   *  above the avatar's head and left of the docked worship player. */
+  /** Portrait phones: aim higher so the cross sits above the avatar's head. */
   private portrait = false;
 
   constructor() {
@@ -56,7 +54,6 @@ export class Interior {
     add(new THREE.BoxGeometry(0.05, 0.95, 0.05), lam(PALETTE.woodDark), 2.92, 1.75, -0.6);
 
     // Wooden cross on the front wall, with a soft warm halo behind it.
-    // (The worship video itself lives in the DOM panel, not on the wall.)
     const halo = add(
       new THREE.CircleGeometry(0.95, 32),
       new THREE.MeshBasicMaterial({ color: 0xffe2a8, transparent: true, opacity: 0.32, depthWrite: false }),
@@ -127,7 +124,7 @@ export class Interior {
     this.avatar.animate(dt, 0, elapsed);
 
     const dist = 2.4;
-    const target = this.portrait ? new THREE.Vector3(0.42, 1.85, -1.4) : new THREE.Vector3(0, 1.1, -1.4);
+    const target = this.portrait ? new THREE.Vector3(0, 1.85, -1.4) : new THREE.Vector3(0, 1.1, -1.4);
     this.camera.position.set(
       Math.sin(this.yaw) * Math.cos(this.pitch) * dist,
       1.0 + Math.sin(this.pitch) * dist,

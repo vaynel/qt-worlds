@@ -8,7 +8,8 @@
 //  - 회원 탈퇴: everything gone (checked in the throwaway DB), live take-down for others,
 //    group ownership handed over / empty group deleted, nickname reusable, old cookie dead
 //  - backup pruning keeps BACKUP_KEEP
-//  - YouTube worship player pauses while the page is hidden and resumes after
+//  - no YouTube anywhere: the privacy policy and terms no longer mention it, the CSP
+//    allows no third-party script/frame/image (worship was removed 2026-11-14)
 // Builds its own client (vite build into data/test/m7-dist) and serves it from the
 // server (production-like headers). Port: TEST_SERVER_PORT (default 5186).
 //   cd server && npm run build && cd ../client && node scripts/m7-test.mjs
@@ -46,7 +47,7 @@ const BASE = `http://127.0.0.1:${PORT}/`;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const WS = `ws://127.0.0.1:${PORT}/ws`;
 const DAY = '2026-11-08';
-const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noworship=1&noguide=1${extra}`;
+const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noguide=1${extra}`;
 const DB = freshDb('m7');
 const DIST = resolve(serverDir, 'data/test/m7-dist');
 const BACKUP_DIR = resolve(serverDir, 'data/test/m7-backup');
@@ -134,29 +135,6 @@ async function meditate(a, text) {
   return r;
 }
 
-/** Stub of the YouTube IFrame API: records calls, reports states like the real player. */
-const YT_STUB = `
-window.__ytCalls = [];
-window.YT = { Player: function (el, opts) {
-  var self = this;
-  var state = -1;
-  var fire = function (s) { state = s; if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { window.__ytCalls.push('play'); fire(1); };
-  this.pauseVideo = function () { window.__ytCalls.push('pause'); fire(2); };
-  this.loadVideoById = function () { window.__ytCalls.push('load'); fire(1); };
-  this.cueVideoById = function () { window.__ytCalls.push('cue'); fire(5); };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () { window.__ytCalls.push('destroy'); };
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  window.__ytPlayer = this;
-  window.__ytState = function () { return state; };
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 
 const setVisibility = (page, state) =>
   page.evaluate((s) => {
@@ -201,8 +179,8 @@ try {
   // ---------------------------------------------------------------- static pages
   step('pages');
   for (const [path, must] of [
-    ['/privacy', ['개인정보처리방침', '처리하는 개인정보 항목', '보유 기간과 파기', '제3자 제공', '처리 위탁과 국외 이전', '이용자의 권리와 행사 방법', '만 14세 미만 아동', '쿠키와 기기 저장소', '안전성 확보 조치', '개인정보 보호책임자', 'Cloudflare', 'youtube.com/t/terms', 'policies.google.com/privacy', '14일', '모닥불 이야기', '녹음하거나 저장하지 않아요']],
-    ['/terms', ['이용약관', '비영리', '만 14세 이상', '금지 행위', '사칭', '모임장', '찬양 영상', 'YouTube', '개역한글판', '서비스의 변경과 중단', '책임의 한계', '익명 등불']],
+    ['/privacy', ['개인정보처리방침', '처리하는 개인정보 항목', '보유 기간과 파기', '제3자 제공', '처리 위탁과 국외 이전', '이용자의 권리와 행사 방법', '만 14세 미만 아동', '쿠키와 기기 저장소', '안전성 확보 조치', '개인정보 보호책임자', 'Cloudflare', 'policies.google.com/privacy', 'Google 로그인', '14일', '모닥불 이야기', '녹음하거나 저장하지 않아요']],
+    ['/terms', ['이용약관', '비영리', '만 14세 이상', '금지 행위', '사칭', '모임장', '나눔 소품 가게', '개역한글판', '서비스의 변경과 중단', '책임의 한계', '익명 등불']],
   ]) {
     const res = await fetch(ORIGIN + path);
     const html = await res.text();
@@ -210,6 +188,7 @@ try {
     check(`${path}: 200 HTML with the key sections`, res.status === 200 && /text\/html/.test(res.headers.get('content-type')) && missing.length === 0, missing.join(', '));
     check(`${path}: its own page, not the SPA fallback`, !html.includes('id="world-canvas"') && html.includes(`id="legal-${path.slice(1)}"`));
     check(`${path}: security headers (CSP, no-cache)`, /default-src 'self'/.test(res.headers.get('content-security-policy') ?? '') && res.headers.get('cache-control') === 'no-cache');
+    check(`${path}: no YouTube or 찬양 player wording left`, !/youtube|찬양/i.test(html), (html.match(/.{30}(youtube|찬양).{30}/i) ?? [''])[0]);
     check(`${path}: link back to the world, no scripts`, html.includes('href="/" id="legal-back"') && !/<script/i.test(html));
   }
   check('/privacy.html also serves the page', (await fetch(`${ORIGIN}/privacy.html`)).status === 200);
@@ -586,62 +565,27 @@ try {
   check('backup: default keeps 14', r2.status === 0 && dbs2.length === 14, `${dbs2.length}`);
   rmSync(BACKUP_DIR, { recursive: true, force: true });
 
-  // ---------------------------------------------------------------- YouTube: no background play
-  step('youtube');
-  const yctx = await browser.newContext(desktop);
-  await yctx.route('https://www.youtube.com/iframe_api', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
-  const Y = await yctx.newPage();
-  await Y.goto(`${BASE}?test=1&shadows=0&time=14:00&date=${DAY}&noguide=1`);
-  await Y.waitForSelector('#entry-signed-out:not([hidden])');
-  await Y.fill('#nickname', '찬양듣기');
-  await Y.click('#entry-submit');
-  await until(Y, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
-  const w = async () => (await debug(Y)).m3.worship;
-  await until(Y, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000);
-  const w0 = await w();
-  check('worship player (stubbed YouTube API) is playing and on screen', w0.state === 'playing' && w0.effective !== 'folded', `${w0.state}/${w0.effective}`);
-  // __WORLDS_DEBUG__ is republished every few frames: wait for it rather than sleeping.
-  const waitW = (fn, ms = 15000) =>
-    until(Y, fn, null, ms)
-      .then(() => true)
-      .catch(() => false);
-  await setVisibility(Y, 'hidden');
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state !== 'playing');
-  const w1 = await w();
-  check('page hidden → player paused (no background playback)', w1.state === 'paused' && w1.pausedForBackground && (await Y.evaluate(() => window.__ytCalls.slice(-1)[0])) === 'pause', JSON.stringify({ s: w1.state, p: w1.pausedForBackground }));
-  await setVisibility(Y, 'visible');
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state === 'playing');
-  const w2 = await w();
-  check('visible again → resumes, because it was playing before', w2.state === 'playing' && !w2.pausedForBackground && !w2.playedWhileHidden, w2.state);
-  // Paused by the user, then hidden and back: stays paused.
-  await Y.evaluate(() => window.__ytPlayer.pauseVideo());
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state === 'paused');
-  const callsBefore = await Y.evaluate(() => window.__ytCalls.length);
-  await setVisibility(Y, 'hidden');
-  await setVisibility(Y, 'visible');
-  await sleep(1500);
-  check('if it was paused before hiding, it stays paused on return', (await w()).state === 'paused' && (await Y.evaluate((n) => window.__ytCalls.slice(n).includes('play'), callsBefore)) === false);
-  // pagehide also pauses.
-  await Y.evaluate(() => window.__ytPlayer.playVideo());
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state === 'playing');
-  await Y.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state === 'paused');
-  check('pagehide pauses too', (await w()).state === 'paused');
-  // A late autoplay while hidden is stopped at once.
-  await setVisibility(Y, 'hidden');
-  await Y.evaluate(() => window.__ytPlayer.playVideo());
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.playedWhileHidden === true);
-  const w3 = await w();
-  check('defensive: playback that starts while hidden is paused immediately', w3.state === 'paused' && w3.playedWhileHidden && (await Y.evaluate(() => window.__ytCalls.slice(-1)[0])) === 'pause');
-  await setVisibility(Y, 'visible');
-  await waitW(() => window.__WORLDS_DEBUG__.m3.worship.state === 'playing');
-  check('…and resumes when visible', (await w()).state === 'playing');
-  // window blur alone (second desktop window) does not stop the music.
-  await Y.evaluate(() => window.dispatchEvent(new Event('blur')));
-  await sleep(1500);
-  check('window blur alone does not pause (desktop multi-window)', (await w()).state === 'playing');
-  check('still exactly one player, never played while folded', (await w()).playedWhileFolded === false);
-  await yctx.close();
+  // ---------------------------------------------------------------- no YouTube
+  step('no youtube');
+  {
+    const res = await fetch(BASE);
+    const csp = res.headers.get('content-security-policy') ?? '';
+    check('CSP: no YouTube / ytimg, no frame-src, scripts and images from self only', !/youtube|ytimg|frame-src/i.test(csp) && /script-src 'self';/.test(csp) && /img-src 'self' data: blob:;/.test(csp), csp);
+    const yctx = await browser.newContext(desktop);
+    const Y = await yctx.newPage();
+    const yt = [];
+    Y.on('request', (r) => /youtube|ytimg|googlevideo/.test(r.url()) && yt.push(r.url()));
+    await Y.goto(`${BASE}?test=1&shadows=0&time=14:00&date=${DAY}&noguide=1`);
+    await Y.waitForSelector('#entry-signed-out:not([hidden])');
+    await Y.fill('#nickname', '유튜브없음');
+    await Y.click('#entry-submit');
+    await until(Y, () => window.__WORLDS_DEBUG__?.ready && window.__WORLDS_DEBUG__.net?.status === 'online', null, 60000);
+    await setVisibility(Y, 'hidden');
+    await setVisibility(Y, 'visible');
+    await sleep(1000);
+    check('in the world (and after hide/show): no iframe, nothing requested from YouTube', (await Y.locator('iframe').count()) === 0 && yt.length === 0, yt.slice(0, 2).join(' '));
+    await yctx.close();
+  }
 
   // ---------------------------------------------------------------- offline (service worker)
   step('offline');

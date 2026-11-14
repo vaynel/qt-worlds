@@ -32,7 +32,7 @@ const CLIENT_PORT = 5182;
 const SERVER_PORT = 5183;
 const BASE = `http://127.0.0.1:${CLIENT_PORT}/`;
 const WS = `ws://127.0.0.1:${CLIENT_PORT}/ws`;
-const Q = '?test=1&shadows=0&time=14:00&noguide=1&noworship=1';
+const Q = '?test=1&shadows=0&time=14:00&noguide=1';
 const DAY = '2026-11-08';
 const AUTHOR = '숨은작가';
 const DB = freshDb('m51');

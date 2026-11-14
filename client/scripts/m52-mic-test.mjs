@@ -22,7 +22,7 @@ import {
 } from './lib/harness.mjs';
 
 const BASE = 'http://127.0.0.1:5182/';
-const Q = '?test=1&shadows=0&time=14:00&noguide=1&noworship=1';
+const Q = '?test=1&shadows=0&time=14:00&noguide=1';
 const DB = freshDb('m52-mic');
 
 /** Count getUserMedia calls and fake navigator.permissions for 'microphone'. */

@@ -212,13 +212,16 @@ body.touch #stick-zone {
   box-shadow: 0 3px 10px rgba(74, 52, 38, 0.25);
 }
 
+/* Bottom row, between the joystick and the right edge, under the 😊 / 📷 buttons. */
 body.touch .hint {
   bottom: calc(var(--safe-bottom) + 4px);
   left: auto;
   right: var(--safe-right);
   transform: none;
-  max-width: 56vw;
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 140px);
+  padding: 6px 12px;
   border-radius: 14px;
+  line-height: 1.35;
   text-align: right;
 }
 
@@ -402,7 +405,8 @@ input[type='text'] {
 #action-btn {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--safe-bottom) + 132px);
+  /* above the two-line place prompt (bottom + 64 px) */
+  bottom: calc(var(--safe-bottom) + 156px);
   transform: translateX(-50%);
   padding: 12px 22px;
   font-size: 1rem;
@@ -579,7 +583,7 @@ body.chatting #prompt {
     font-size: 0.92rem;
   }
   .hint {
-    font-size: 0.78rem;
+    font-size: 0.74rem;
   }
 }
 
@@ -630,7 +634,7 @@ body.chatting #prompt {
 }
 
 #meditate-btn {
-  bottom: calc(var(--safe-bottom) + 188px);
+  bottom: calc(var(--safe-bottom) + 212px);
 }
 
 #letter-btn {
@@ -714,109 +718,6 @@ body.closet #meditate-btn {
   padding: 12px 20px;
   box-shadow: 0 6px 18px rgba(74, 52, 38, 0.25);
 }
-
-.worship {
-  position: absolute;
-  z-index: 40; /* nothing may be drawn over the YouTube player */
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.worship[hidden] {
-  display: none;
-}
-
-.worship-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 0 4px;
-}
-
-.worship-head span {
-  font-size: 0.74rem;
-  color: var(--ink-soft);
-}
-
-.worship-frame {
-  position: relative;
-  width: 100%;
-  min-width: 200px;
-  aspect-ratio: 16 / 9;
-  min-height: 200px;
-  border-radius: 10px;
-  overflow: hidden;
-  background: #241b15;
-}
-
-.worship-frame iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-.worship-placeholder,
-.worship-loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 16px;
-  text-align: center;
-  color: #f3e6cf;
-  font-size: 0.86rem;
-  background: radial-gradient(circle at 50% 40%, #4a3628, #241b15 70%);
-}
-
-.worship-placeholder p {
-  margin: 0;
-}
-
-.worship-placeholder-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #ffe2a8;
-}
-
-.worship-link {
-  margin-top: 6px;
-  color: #ffd38a;
-}
-
-.worship-caption {
-  margin: 0;
-  padding: 0 4px;
-  font-size: 0.82rem;
-  color: var(--ink-soft);
-}
-
-.worship-caption:empty {
-  display: none;
-}
-
-.worship-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.worship-controls:empty {
-  display: none;
-}
-
-.worship-count {
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-}
-
 
 body.touch .closet-head {
   top: auto;
@@ -1357,151 +1258,6 @@ body.touch .closet-head {
   bottom: calc(var(--safe-bottom) + 78px);
 }
 
-/* =================== M3.1: persistent worship player + settings =================== */
-
-.worship-head {
-  gap: 6px;
-  align-items: center;
-  min-height: 30px;
-}
-
-.worship-label {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-
-.worship-label strong {
-  flex: none;
-}
-
-.worship-title {
-  font-size: 0.74rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.worship-listen {
-  flex: none;
-  padding: 5px 10px;
-  font-size: 0.8rem;
-  border-radius: 999px;
-}
-
-.worship-listen[hidden] {
-  display: none;
-}
-
-.worship-close {
-  flex: none;
-  padding: 4px 8px;
-  font-size: 0.8rem;
-}
-
-/* Docked mini player: 356x200 on desktop (bottom-right). */
-#worship.dock {
-  right: var(--safe-right);
-  bottom: var(--safe-bottom);
-  width: 372px;
-}
-
-#worship.dock .worship-frame,
-#worship.room .worship-frame {
-  min-width: 200px;
-  min-height: 200px;
-}
-
-#worship.dock .worship-frame {
-  width: 356px;
-  height: 200px;
-  aspect-ratio: auto;
-}
-
-/* 골방: the same element moves onto the room layout (no reload). */
-#worship.room {
-  right: var(--safe-right);
-  top: calc(var(--safe-top) + 132px);
-  width: min(420px, calc(100vw - 28px));
-}
-
-/* Phones: a 200x200 square on the right, above the action buttons and clear
-   of the joystick zone (bottom-left) and the chat panel (top). */
-body.touch #worship.dock {
-  right: var(--safe-right);
-  bottom: calc(var(--safe-bottom) + 262px);
-  width: 216px;
-}
-
-body.touch #worship.dock .worship-frame {
-  width: 200px;
-  height: 200px;
-}
-
-body.touch #worship.room {
-  left: var(--safe-left);
-  right: var(--safe-right);
-  width: auto;
-  top: calc(var(--safe-top) + 150px);
-}
-
-/* On the nickname screen (phones) keep it above the entry card. */
-body.touch:not(.in-world) #worship.dock {
-  bottom: auto;
-  top: calc(var(--safe-top) + 8px);
-  left: 50%;
-  right: auto;
-  transform: translateX(-50%);
-}
-
-/* Desktop sheets leave room for the docked player on the right. */
-@media (min-width: 1000px) {
-  body.worship-on:not(.touch) .overlay {
-    padding-right: 400px;
-  }
-}
-
-/* Narrow screens with a sheet open: player docks at the top and the sheet
-   takes the rest of the visible viewport, so neither covers the other.
-   (In the 골방 the player uses #worship.room-sheet instead, see B1 at the end.) */
-@media (max-width: 999px) {
-  body.overlay-open #worship.dock {
-    top: calc(var(--vvtop, 0px) + 8px);
-    bottom: auto;
-    left: 50%;
-    right: auto;
-    width: min(372px, calc(100vw - 16px));
-    transform: translateX(-50%);
-  }
-  body.overlay-open #worship.dock .worship-frame {
-    width: 100%;
-    height: 200px;
-    aspect-ratio: auto;
-  }
-  body.overlay-open.worship-on .overlay {
-    top: calc(var(--vvtop, 0px) + 272px);
-    height: calc(var(--vvh, 100dvh) - 272px);
-    align-items: stretch;
-  }
-  body.overlay-open.worship-on .sheet {
-    max-height: 100%;
-  }
-  body.overlay-open.worship-on .sheet.meditation,
-  body.overlay-open.worship-on .sheet.book,
-  body.overlay-open.worship-on .sheet.settings {
-    height: 100%;
-    border-radius: 18px 18px 0 0;
-  }
-  /* With the keyboard up there is little height: keep the field and buttons. */
-  body.overlay-open.worship-on .med-verse:not(.big) {
-    max-height: 4.6em;
-    overflow: hidden;
-  }
-}
-
 /* ---------- settings ---------- */
 
 .sheet.settings {
@@ -1568,11 +1324,6 @@ body.touch:not(.in-world) #worship.dock {
   width: 22px;
   height: 22px;
   accent-color: var(--accent);
-}
-
-/* Opaque card so HUD text never shows through around the player. */
-#worship {
-  background: #fffaf0;
 }
 
 /* =================== M4: accounts, book actions, groups, lanterns =================== */
@@ -2065,254 +1816,6 @@ button.danger:not(.ghost) {
   margin-top: 4px;
 }
 
-/* =================== M4.1: worship playlist player =================== */
-
-.worship-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.worship-label {
-  flex: 1;
-  min-width: 0;
-}
-
-.icon-btn {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  padding: 5px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 999px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ink);
-}
-
-.icon-btn svg {
-  width: 20px;
-  height: 20px;
-}
-
-.icon-btn:hover {
-  background: #f3e6cc;
-}
-
-.icon-btn[aria-pressed='true'],
-.icon-btn[aria-expanded='true'] {
-  color: var(--accent);
-  background: #fbeedb;
-}
-
-.icon-btn[hidden],
-.worship-nav[hidden] {
-  display: none;
-}
-
-.worship-nav {
-  display: flex;
-  gap: 2px;
-}
-
-.worship-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.worship-side {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.worship-volume {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-  font-size: 0.78rem;
-  color: var(--ink-soft);
-}
-
-.worship-volume input {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-  height: 24px;
-}
-
-.worship-volume-value {
-  width: 3em;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.worship-drawer {
-  display: none;
-  flex-direction: column;
-  gap: 6px;
-}
-
-#worship.list-open .worship-drawer,
-#worship.size-large .worship-drawer {
-  display: flex;
-}
-
-.worship-volume-drawer {
-  display: none;
-}
-
-.worship-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 168px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.worship-track {
-  width: 100%;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 7px 10px;
-  text-align: left;
-  border-radius: 10px;
-  border-color: transparent;
-  background: transparent;
-  font-weight: 500;
-  font-size: 0.84rem;
-  line-height: 1.35;
-}
-
-.worship-track:hover {
-  background: #f6ead3;
-}
-
-.worship-track.on {
-  background: #ffe7b8;
-  font-weight: 700;
-}
-
-.worship-track-num {
-  flex: none;
-  width: 1.2em;
-  color: var(--ink-soft);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Phones, small: a 200x200 square; controls live in the header row and the
-   volume slider moves into the drawer, so the card stays clear of the
-   campfire chat (top) and the joystick zone (bottom-left). */
-body.touch #worship.size-small .worship-label {
-  display: none;
-}
-
-body.touch #worship.size-small .worship-head {
-  justify-content: flex-end;
-}
-
-body.touch #worship.size-small .icon-btn {
-  width: 30px;
-  height: 30px;
-}
-
-body.touch #worship.size-small .worship-volume-main {
-  display: none;
-}
-
-body.touch #worship.size-small .worship-volume-drawer {
-  display: flex;
-}
-
-/* While the "찬양 듣기" prompt shows, prev/next make room for it; the song
-   list stays one tap away. */
-body.touch #worship.size-small.prompting .worship-nav {
-  display: none;
-}
-
-body.touch #worship.size-small .worship-listen {
-  padding: 4px 8px;
-  font-size: 0.74rem;
-}
-
-/* 크게: a centred panel, video with the track list beside it. */
-#worship.dock.size-large,
-#worship.room.size-large {
-  left: 50%;
-  right: auto;
-  bottom: auto;
-  top: calc(var(--safe-top) + 96px);
-  transform: translateX(-50%);
-  width: min(78vw, 1100px);
-}
-
-#worship.size-large .worship-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 10px;
-  align-items: start;
-}
-
-body #worship.size-large .worship-frame,
-body.touch #worship.size-large .worship-frame {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
-  min-height: 200px;
-}
-
-#worship.size-large .worship-volume-main {
-  grid-column: 2;
-}
-
-#worship.size-large .worship-list {
-  max-height: min(46vh, 420px);
-}
-
-body.touch #worship.dock.size-large,
-body.touch #worship.room.size-large {
-  top: calc(var(--safe-top) + 8px);
-  left: 8px;
-  right: 8px;
-  width: auto;
-  transform: none;
-}
-
-body.touch #worship.size-large .worship-body {
-  grid-template-columns: 1fr;
-}
-
-body.touch #worship.size-large .worship-volume-main {
-  grid-column: 1;
-}
-
-body.touch #worship.size-large .worship-list {
-  max-height: 30vh;
-}
-
-@media (max-width: 700px) {
-  #worship.dock.size-large,
-  #worship.room.size-large {
-    top: calc(var(--safe-top) + 8px);
-    left: 8px;
-    right: 8px;
-    width: auto;
-    transform: none;
-  }
-  #worship.size-large .worship-body {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* =================== M4.1: first-time guide =================== */
 
 .sheet.guide {
@@ -2429,221 +1932,6 @@ body.touch #worship.size-large .worship-list {
   }
 }
 
-@media (max-width: 999px) {
-  body.overlay-open.worship-on .sheet.guide {
-    height: 100%;
-    border-radius: 18px 18px 0 0;
-  }
-}
-
-/* The HUD 찬양 button shows its on/off state by colour (the label stays 찬양). */
-.tool[aria-pressed='true'] {
-  background: #ffe7b8;
-  border-color: rgba(200, 100, 74, 0.5);
-}
-
-/* =================== M4.2: 펼침 / 작게 / 접기 =================== */
-
-@keyframes worship-slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(40px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* 작게: just the video (no header, no list) and a pull-handle on its left. */
-#worship.mini {
-  padding: 0;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  animation: worship-slide-in 0.28s ease-out;
-}
-
-#worship.mini .worship-head,
-#worship.mini .worship-side {
-  display: none;
-}
-
-#worship.mini .worship-frame {
-  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
-}
-
-.worship-handle {
-  display: none;
-  position: absolute;
-  left: -28px;
-  top: 0;
-  width: 24px;
-  height: 64px;
-  padding: 0;
-  border-radius: 12px 0 0 12px;
-  border: 1px solid var(--paper-line);
-  border-right: none;
-  background: #fffaf0;
-  color: var(--ink);
-  font-size: 0.9rem;
-  box-shadow: -3px 4px 12px rgba(74, 52, 38, 0.18);
-  touch-action: none;
-}
-
-#worship.mini .worship-handle {
-  display: grid;
-  place-items: center;
-}
-
-/* Desktop 작게: 356x200 bottom-right. */
-#worship.dock.mini {
-  right: var(--safe-right);
-  bottom: var(--safe-bottom);
-  top: auto;
-  left: auto;
-  width: 356px;
-  transform: none;
-}
-
-/* Phone 작게: 200x200 at the top-right, under the HUD tool row. */
-body.touch #worship.dock.mini {
-  top: calc(var(--safe-top) + 124px);
-  bottom: auto;
-  right: var(--safe-right);
-  left: auto;
-  width: 200px;
-}
-
-body.touch #worship.dock.mini .worship-frame {
-  width: 200px;
-  height: 200px;
-}
-
-/* ...so the campfire chat reflows below it, and stays above the joystick. */
-body.touch.worship-mini #chat {
-  top: calc(var(--safe-top) + 334px);
-}
-
-body.touch.worship-mini #chat-log {
-  max-height: clamp(20px, calc(100vh - 470px - min(42vh, 260px)), 96px);
-}
-
-body.touch.worship-mini #letter-btn {
-  left: var(--safe-left);
-  transform: none;
-}
-
-/* 접기: the iframe stays (paused) but is not shown; a small tab remains. */
-#worship.folded {
-  padding: 0;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  border: 0;
-  box-shadow: none;
-}
-
-.worship-tab {
-  position: absolute;
-  z-index: 40;
-  right: 0;
-  top: calc(var(--safe-top) + 124px);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: min(60vw, 280px);
-  padding: 9px 14px 9px 12px;
-  border-radius: 999px 0 0 999px;
-  border: 1px solid var(--paper-line);
-  border-right: none;
-  background: #fffaf0;
-  box-shadow: -3px 4px 14px rgba(74, 52, 38, 0.2);
-  font-size: 0.86rem;
-  font-weight: 600;
-  animation: worship-slide-in 0.28s ease-out;
-}
-
-.worship-tab[hidden] {
-  display: none;
-}
-
-.worship-tab-label {
-  flex: none;
-}
-
-.worship-tab-title {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--ink-soft);
-  font-weight: 500;
-}
-
-body:not(.touch) .worship-tab {
-  top: auto;
-  bottom: calc(var(--safe-bottom) + 60px);
-}
-
-/* 🎧 YouTube에서 듣기 */
-.worship-yt {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 2px 6px;
-  font-size: 0.82rem;
-}
-
-.worship-yt-link {
-  color: var(--accent);
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.worship-yt-alt {
-  color: var(--ink-soft);
-  font-size: 0.74rem;
-}
-
-.worship-yt a[hidden] {
-  display: none;
-}
-
-/* Phone 펼침 (drawer view): a wider card so header controls fit. */
-body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
-  width: min(320px, calc(100vw - 28px));
-}
-
-body.touch #worship.dock.size-small:not(.mini):not(.folded) .worship-frame {
-  width: 100%;
-}
-
-body.touch #worship.dock.size-small:not(.mini) .worship-label {
-  display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #worship.mini,
-  .worship-tab {
-    animation: none;
-  }
-}
-
-/* Phone 펼침: hang from just under the HUD tool row (so the HUD stays
-   tappable) and keep the list short enough to fit the screen. */
-body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
-  top: calc(var(--safe-top) + 124px);
-  bottom: auto;
-}
-
-body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) .worship-list {
-  max-height: clamp(84px, calc(var(--vvh, 100vh) - 470px), 200px);
-}
-
 /* =================== M5: voice prayer rooms =================== */
 
 .voice-chip {
@@ -2715,14 +2003,14 @@ body.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) .
   box-shadow: 0 0 0 4px rgba(76, 170, 96, 0.25);
 }
 
-/* Phones: top-left under the place card (left of the worship handle). */
+/* Phones: top-left under the place card. */
 body.touch .voice-chip {
   max-width: 132px;
   top: calc(var(--safe-top) + 100px);
 }
 
 /* ...but when the campfire chat sits at the top, go just above the joystick. */
-body.touch.chat-open:not(.worship-mini) .voice-chip {
+body.touch.chat-open .voice-chip {
   top: auto;
   bottom: calc(min(42vh, 260px) + 10px);
 }
@@ -2957,13 +2245,6 @@ body.touch.chat-open:not(.worship-mini) .voice-chip {
   }
 }
 
-@media (max-width: 999px) {
-  body.overlay-open.worship-on .sheet.group-panel {
-    height: 100%;
-    border-radius: 18px 18px 0 0;
-  }
-}
-
 /* Short screens (keyboard up): the message list gives way first. */
 .gchat-list {
   min-height: 40px;
@@ -3018,8 +2299,7 @@ body.touch.tablet .chat-head span {
 }
 
 /* Compact panel bottom-left, above the joystick. */
-body.touch.tablet #chat,
-body.touch.tablet.worship-mini #chat {
+body.touch.tablet #chat {
   top: auto;
   right: auto;
   left: var(--safe-left);
@@ -3028,14 +2308,12 @@ body.touch.tablet.worship-mini #chat {
 }
 
 @media (orientation: landscape) {
-  body.touch.tablet #chat,
-  body.touch.tablet.worship-mini #chat {
+  body.touch.tablet #chat {
     width: min(460px, 40vw);
   }
 }
 
-body.touch.tablet #chat-log,
-body.touch.tablet.worship-mini #chat-log {
+body.touch.tablet #chat-log {
   max-height: min(150px, 22vh);
 }
 
@@ -3044,13 +2322,11 @@ body.touch.tablet #chat.collapsed #chat-log {
 }
 
 /* Typing: sit right above the keyboard; the log gives way first. */
-body.touch.tablet.chatting #chat,
-body.touch.tablet.chatting.worship-mini #chat {
+body.touch.tablet.chatting #chat {
   bottom: calc(var(--kb, 0px) + 8px);
 }
 
-body.touch.tablet.chatting #chat-log,
-body.touch.tablet.chatting.worship-mini #chat-log {
+body.touch.tablet.chatting #chat-log {
   max-height: clamp(36px, calc(var(--vvh, 100vh) - 330px), 150px);
 }
 
@@ -3066,109 +2342,7 @@ body.touch.tablet.chat-open #prompt {
   display: none;
 }
 
-/* =================== M5.2: 골방 player sizes + fold states in the room =================== */
-
-.worship-roomsize {
-  display: none;
-  gap: 4px;
-  padding: 0 4px;
-}
-
-#worship.room .worship-roomsize {
-  display: flex;
-}
-
-.worship-roomsize .seg {
-  flex: 1;
-  padding: 5px 8px;
-  font-size: 0.8rem;
-  border-radius: 999px;
-}
-
-.worship-roomsize .seg[aria-pressed='true'] {
-  background: var(--accent);
-  color: #fff8ea;
-  border-color: transparent;
-}
-
-/* Sizes are relative to the viewport (not a fixed 402x226), and the height
-   is capped so the room buttons, header and HUD stay clear. */
-#worship.room.room-s,
-body.touch.tablet #worship.room.room-s {
-  width: min(372px, calc(100vw - 28px));
-}
-
-#worship.room.room-m,
-body.touch.tablet #worship.room.room-m {
-  width: clamp(min(372px, calc(100vw - 28px)), min(33vw, calc((100vh - 400px) * 16 / 9 + 16px)), calc(100vw - 28px));
-}
-
-#worship.room.room-l,
-body.touch.tablet #worship.room.room-l {
-  width: clamp(min(372px, calc(100vw - 28px)), min(58vw, calc((100vh - 400px) * 16 / 9 + 16px)), calc(100vw - 28px));
-}
-
-/* Tablets: right-anchored under the HUD (phones keep the full-width wall). */
-body.touch.tablet #worship.room.room-s,
-body.touch.tablet #worship.room.room-m,
-body.touch.tablet #worship.room.room-l {
-  left: auto;
-  right: var(--safe-right);
-  top: calc(var(--safe-top) + 132px);
-}
-
-/* 작게 in the room: the policy-minimum video with the pull-handle. */
-#worship.room.mini,
-body.touch #worship.room.mini {
-  left: auto;
-  right: var(--safe-right);
-  top: calc(var(--safe-top) + 132px);
-  bottom: auto;
-  width: 356px;
-}
-
-#worship.room.mini .worship-frame,
-body.touch #worship.room.mini .worship-frame {
-  width: 356px;
-  height: 200px;
-  aspect-ratio: auto;
-}
-
-body.touch:not(.tablet) #worship.room.mini {
-  width: 200px;
-  top: calc(var(--safe-top) + 150px);
-}
-
-body.touch:not(.tablet) #worship.room.mini .worship-frame {
-  width: 200px;
-  height: 200px;
-}
-
-/* Phones keep the full-width wall player; the steps change its footprint:
-   작게 = the 200x200 square on the right, 보통 = full width x 200,
-   크게 = full width and taller (still clear of the room header at the bottom). */
-body.touch:not(.tablet) #worship.room.room-s:not(.mini) {
-  left: auto;
-  width: 216px;
-}
-
-body.touch:not(.tablet) #worship.room.room-s:not(.mini) .worship-frame {
-  width: 200px;
-  height: 200px;
-  aspect-ratio: auto;
-}
-
-body.touch:not(.tablet) #worship.room.room-s:not(.mini) .worship-head {
-  flex-wrap: wrap;
-  row-gap: 0;
-}
-
-body.touch:not(.tablet) #worship.room.room-l:not(.mini) .worship-frame {
-  height: clamp(200px, calc(100vh - 560px), 300px);
-  aspect-ratio: auto;
-}
-
-/* Tablet 골방 header sits bottom-left (like phones) so it never meets the player. */
+/* Tablet 골방 header sits bottom-left, like phones. */
 body.touch.tablet .closet-head {
   right: auto;
   max-width: min(420px, 45vw);
@@ -3181,23 +2355,9 @@ body.touch.tablet .closet-head {
   line-height: 1.7;
 }
 
-/* Short phones typing under the 200x200 player: the log gives way so the
-   input stays above the keyboard (the player itself can't shrink below 200). */
+/* Phones typing: the chat title gives way so the input stays above the keyboard. */
 body.touch.chatting:not(.tablet) .chat-head span {
   display: none;
-}
-
-body.touch.chatting.worship-mini:not(.tablet) #chat-log {
-  max-height: clamp(18px, calc(var(--vvh, 100vh) - var(--safe-top) - 334px - 96px), 96px);
-}
-
-/* Very short (keyboard up on a small phone): just the input; the speech
-   bubbles over the avatars still show the conversation. */
-@media (max-height: 480px) {
-  body.touch.chatting.worship-mini:not(.tablet) .chat-head,
-  body.touch.chatting.worship-mini:not(.tablet) #chat-log {
-    display: none;
-  }
 }
 
 /* =================== M6: PWA (update toast, install, notifications) =================== */
@@ -3307,7 +2467,6 @@ body.touch.chatting.worship-mini:not(.tablet) #chat-log {
 .notify-time:disabled {
   opacity: 0.5;
 }
-
 
 /* =================== 모닥불 채팅 작게/크게 on every device =================== */
 /* Phones used to have no way to shrink the chat. 작게 keeps the header, the
@@ -3423,23 +2582,10 @@ body.touch.tablet .chat-head-btn {
   flex: none;
 }
 
-/* Phones: a little more room under the HUD tool row. */
-body.touch:not(.tablet):not(.worship-mini):not(.worship-folded) #chat {
-  top: calc(var(--safe-top) + 100px);
+/* Phones: below the HUD tool row (it wraps under the clock on portrait phones). */
+body.touch:not(.tablet) #chat {
+  top: calc(var(--safe-top) + 112px);
 }
-
-/* Phones with the worship player folded to its tab (top right): go below the
-   tab instead of under it. */
-body.touch:not(.tablet).worship-folded #chat {
-  top: calc(var(--safe-top) + 174px);
-}
-
-/* Phones with the worship drawer (펼침) open: it fills the upper screen, so
-   the campfire chat steps aside until the player is made small or folded. */
-body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
-  display: none;
-}
-
 
 /* 묵상하기: today's meditation already exists (written in any place). */
 .med-done {
@@ -3696,21 +2842,7 @@ body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
   gap: 6px;
 }
 
-/* Worship player docked at the top on narrow screens: the sheet takes the rest. */
-@media (max-width: 999px) {
-  body.overlay-open.worship-on .sheet.look,
-  body.overlay-open.worship-on .sheet.admin-sheet {
-    height: 100%;
-    border-radius: 18px 18px 0 0;
-  }
-  body.overlay-open.worship-on .look-preview {
-    height: 150px;
-  }
-  /* Painting with the player docked: a smaller preview leaves room for the grid. */
-  body.overlay-open.worship-on .sheet.look.drawing .look-preview {
-    height: 104px;
-  }
-}
+/* 꾸미기 on narrow screens: a shorter preview. */
 @media (max-width: 480px) {
   .look-preview {
     height: 180px;
@@ -3890,12 +3022,6 @@ body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
 .sheet.shop-sheet {
   width: min(560px, 100%);
   background: #fbf3e2;
-}
-@media (max-width: 999px) {
-  body.overlay-open.worship-on .sheet.shop-sheet {
-    height: 100%;
-    border-radius: 18px 18px 0 0;
-  }
 }
 .shop-top {
   position: sticky;
@@ -4079,7 +3205,7 @@ body.touch:not(.tablet).worship-on:not(.worship-mini) #chat {
 .voice-chip:not([hidden]) ~ .prop-dock {
   top: calc(var(--safe-top) + 146px);
 }
-body.touch.chat-open:not(.worship-mini) .voice-chip:not([hidden]) ~ .prop-dock {
+body.touch.chat-open .voice-chip:not([hidden]) ~ .prop-dock {
   top: calc(var(--safe-top) + 100px);
 }
 body:not(.in-world) .prop-dock,
@@ -4142,7 +3268,7 @@ body.closet .prop-dock {
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }
-/* Phones: as narrow as the voice chip, clear of the worship player's handle. */
+/* Phones: as narrow as the voice chip. */
 body.touch .prop-dock {
   max-width: 132px;
 }
@@ -4242,9 +3368,9 @@ body.touch .shop-chip-sub {
   margin-right: 4px;
 }
 
-/* =================== M10: 4-button HUD, 말씀 책 [오늘], ⚙ menu =================== */
+/* =================== M10: 3-button HUD, 말씀 책 [오늘], ⚙ menu =================== */
 
-/* [말씀] [모임] [찬양] [⚙]: the same labels everywhere, ≥40px tap targets. */
+/* [말씀] [모임] [⚙]: the same labels everywhere, ≥40px tap targets. */
 #hud-top .place-card {
   flex: 0 1 auto;
   min-width: 0;
@@ -4500,75 +3626,10 @@ body.touch .shop-chip-sub {
   color: var(--ink-soft);
 }
 
-/* =================== B1: 골방 + a sheet open =================== */
-
-/* WorshipPlayer sets #worship.room-sheet (and body.worship-room-sheet) while a
-   sheet is open in the 골방 and takes the room-s/m/l and mini classes off, so
-   this is the only placement then: the video alone (no header, size steps or
-   handle), right-aligned under the HUD tool row, never over the sheet. The
-   room size comes back when the sheet closes. The selectors are kept at
-   (1,2,1) or more so they win over `body.touch #worship.room` by order. */
-body #worship.room.room-sheet {
-  --room-sheet-top: calc(var(--safe-top) + 132px);
-  --room-sheet-w: 356px;
-  top: calc(var(--vvtop, 0px) + var(--room-sheet-top));
-  bottom: auto;
-  left: auto;
-  right: var(--safe-right);
-  width: var(--room-sheet-w);
-  padding: 0;
-  transform: none;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-body.touch:not(.tablet) #worship.room.room-sheet {
-  --room-sheet-top: calc(var(--safe-top) + 124px);
-  --room-sheet-w: 200px;
-}
-
-body #worship.room.room-sheet .worship-head,
-body #worship.room.room-sheet .worship-side,
-body #worship.room.room-sheet .worship-handle {
-  display: none;
-}
-
-body #worship.room.room-sheet .worship-frame {
-  width: var(--room-sheet-w);
-  height: 200px;
-  aspect-ratio: auto;
-  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
-}
-
-/* Wide screens: the sheet stays left of the player. */
-@media (min-width: 1000px) {
-  body.overlay-open.worship-room-sheet .overlay {
-    padding-right: 400px;
-  }
-}
-
-/* Narrower screens: the sheet starts below the player (the HUD stays visible
-   above it) and takes the rest of the visible viewport. */
-@media (max-width: 999px) {
-  body.overlay-open.worship-room-sheet .overlay {
-    --room-sheet-bottom: calc(var(--safe-top) + 132px + 210px);
-    top: calc(var(--vvtop, 0px) + var(--room-sheet-bottom));
-    height: calc(var(--vvh, 100dvh) - var(--room-sheet-bottom));
-    align-items: stretch;
-  }
-  body.touch:not(.tablet).overlay-open.worship-room-sheet .overlay {
-    --room-sheet-bottom: calc(var(--safe-top) + 124px + 210px);
-  }
-  body.overlay-open.worship-room-sheet .sheet {
-    max-height: 100%;
-  }
-}
-
 /* =================== L-A: 이야기 도서관, 📸 photos =================== */
 
-/* Camera button: bottom-right, below the action button (phones/tablets) and
-   left of the docked worship player (desktop). Never over the joystick (bottom-left). */
+/* Camera button: bottom-right, below the action button on phones/tablets.
+   Never over the joystick (bottom-left). */
 #camera-btn {
   position: absolute;
   z-index: 18;
@@ -4598,23 +3659,10 @@ body.overlay-open #camera-btn,
 body.chatting #camera-btn {
   display: none;
 }
-/* Desktop with the docked player (bottom-right): left of it, above the
-   bottom-centre hint and place prompt. */
-body:not(.touch).worship-on:not(.worship-large) #camera-btn {
-  right: calc(var(--safe-right) + 384px);
-  bottom: calc(var(--safe-bottom) + 160px);
-}
 body.touch #camera-btn {
   bottom: calc(var(--safe-bottom) + 66px);
   width: 44px;
   height: 44px;
-}
-/* Short phones with the worship drawer open (펼침): it reaches lower, so the
-   camera drops to the bottom edge, under the drawer and beside the joystick. */
-@media (max-height: 780px) {
-  body.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
-    bottom: calc(var(--safe-bottom) - 6px);
-  }
 }
 #shot-flash {
   position: absolute;
@@ -5371,38 +4419,149 @@ body.in-library .library-exit {
     font-size: 0.7rem;
   }
 }
-/* Phones: the reader takes the whole visible height (below the docked player when it's on). */
+/* Phones: the reader takes the whole visible height. */
 @media (max-width: 600px) {
-  .sheet.library.lib-page-story,
-  body.overlay-open.worship-on .sheet.library.lib-page-story {
+  .sheet.library.lib-page-story {
     height: 100%;
     max-height: 100%;
     border-radius: 0;
   }
 }
-/* Full-screen photo. */
-.lib-lightbox {
+/* Full-screen photo viewer (ui/PhotoViewer.ts): 오늘 앨범, diary picker, reader. */
+.photo-viewer {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 70;
+  background: rgba(14, 10, 8, 0.97);
+  color: #f6ecdc;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pv-stage {
+  position: absolute;
+  inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 16px;
-  background: rgba(20, 14, 10, 0.88);
+  overflow: hidden;
+  padding: calc(var(--safe-top) + 56px) var(--safe-right) calc(var(--safe-bottom) + 48px) var(--safe-left);
+}
+.pv-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s ease;
+  cursor: zoom-in;
+}
+.photo-viewer.zoomed .pv-img {
+  transform: scale(2);
   cursor: zoom-out;
 }
-.lib-lightbox img {
-  max-width: 100%;
-  max-height: calc(var(--vvh, 100dvh) - 80px);
-  object-fit: contain;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+.pv-top {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) 8px calc(var(--safe-left) + 12px);
 }
-.lib-lightbox-hint {
-  color: #f2e6d0;
+.pv-spacer {
+  flex: 1;
+}
+.pv-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+.pv-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 240, 220, 0.3);
+  background: rgba(255, 250, 240, 0.12);
+  color: inherit;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.pv-close {
+  width: 40px;
+  justify-content: center;
+  padding: 0;
+  font-size: 1.1rem;
+}
+.pv-btn[hidden],
+.pv-nav[hidden],
+.pv-count[hidden] {
+  display: none;
+}
+.pv-nav {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 64px;
+  margin-top: -32px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 250, 240, 0.12);
+  color: inherit;
+  font-size: 2rem;
+  line-height: 1;
+}
+.pv-prev {
+  left: calc(var(--safe-left) + 8px);
+}
+.pv-next {
+  right: calc(var(--safe-right) + 8px);
+}
+/* Phones swipe; the arrows would only cover the photo. */
+body.touch:not(.tablet) .pv-nav {
+  display: none;
+}
+.pv-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 10px calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 12px) calc(var(--safe-left) + 16px);
+  text-align: center;
+  font-size: 0.9rem;
+}
+.photo-viewer.zoomed .pv-caption,
+.photo-viewer.zoomed .pv-nav {
+  visibility: hidden;
+}
+.lib-album-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.lib-pick-cell {
+  position: relative;
+}
+.lib-pick-cell .lib-pick-item {
+  width: 100%;
+}
+.lib-pick-zoom {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
   font-size: 0.85rem;
+  line-height: 1;
+  background: rgba(255, 250, 240, 0.92);
 }
 
 /* ✉️ letters: envelopes under the book. */
@@ -5684,73 +4843,18 @@ body.in-library .library-exit {
 
 /* =================== P1-3: phones held sideways (body.phone-land) =================== */
 /* main.ts sets body.phone-land on touch phones (not tablets) whose screen is
-   landscape. The screen is only ~360-412 px tall, so the portrait rules (player
-   docked above the sheet, chat under the HUD) leave no room. Instead:
+   landscape. The screen is only ~360-412 px tall, so the portrait rules (chat
+   under the HUD) leave no room. Instead:
    - the HUD is one row (place card · clock · tools);
-   - the worship player lives in a column on the right, under the tool row;
-   - an open sheet takes the left part at full height and the HUD tool row stays
-     visible and tappable on the right, with the video (video only) under it;
+   - an open sheet is centred at full height;
    - action + camera buttons sit at the bottom right, the campfire chat at the
-     bottom between the joystick and them;
-   - with the keyboard up there is no room for a 200 px video: WorshipPlayer is
-     told it is squeezed and pauses (resuming afterwards). */
-body.phone-land {
-  --land-top: calc(var(--safe-top) + 68px);
-  /* Right column with a sheet open: the tool row is 228 px wide. */
-  --land-tools-w: 228px;
-  --land-video-w: 228px;
-}
-@media (min-width: 900px) {
-  body.phone-land {
-    --land-video-w: 356px;
-  }
-}
+     bottom between the joystick and them. */
 
 /* HUD: clock and tools side by side, so the right column starts higher. */
 body.phone-land .hud-right {
   flex-direction: row;
   align-items: center;
   gap: 6px;
-}
-
-/* ---- the player in the world (no sheet) ---- */
-body.phone-land.in-world #worship.dock.mini {
-  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
-  bottom: auto;
-  right: var(--safe-right);
-  left: auto;
-  transform: none;
-}
-/* 펼침: video and the drawer (volume, song list) side by side, under the tool row. */
-body.phone-land.in-world.touch:not(.overlay-open) #worship.dock.size-small:not(.mini):not(.folded) {
-  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 262px));
-  bottom: auto;
-  right: var(--safe-right);
-  left: auto;
-  transform: none;
-  width: 412px;
-}
-body.phone-land.in-world:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-body {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-}
-body.phone-land.in-world.touch:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-frame {
-  flex: none;
-  width: 200px;
-  height: 200px;
-  aspect-ratio: auto;
-}
-body.phone-land.in-world:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-side {
-  flex: 1;
-  max-height: 200px;
-  overflow: hidden;
-}
-body.phone-land.in-world.touch:not(.overlay-open) #worship.dock:not(.mini):not(.folded) .worship-list {
-  max-height: 130px;
-}
-body.phone-land .worship-tab {
-  top: var(--land-top);
 }
 
 /* ---- action, camera, chat, chips ---- */
@@ -5761,18 +4865,9 @@ body.phone-land #action-btn {
   bottom: var(--safe-bottom);
   transform: none;
 }
-body.phone-land.touch #camera-btn,
-body.phone-land.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
+body.phone-land.touch #camera-btn {
   right: var(--safe-right);
   bottom: calc(var(--safe-bottom) + 3px);
-}
-/* 펼침 reaches down to the bottom: the two buttons stack left of it. */
-body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #action-btn {
-  right: calc(var(--safe-right) + 422px);
-}
-body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #camera-btn {
-  right: calc(var(--safe-right) + 422px);
-  bottom: calc(var(--safe-bottom) + 58px);
 }
 /* Campfire chat: bottom, right of the joystick and left of the action row. */
 :root body.phone-land.touch:not(.tablet) #chat {
@@ -5806,9 +4901,8 @@ body.phone-land.touch .voice-chip:not([hidden]) ~ .prop-dock,
 body.phone-land.touch.chat-open .voice-chip:not([hidden]) ~ .prop-dock {
   top: calc(var(--safe-top) + 138px);
 }
-/* One-off buttons and hints, clear of the right column. */
-body.phone-land #letter-btn,
-body.phone-land.touch.worship-mini #letter-btn {
+/* One-off buttons and hints, under the HUD row. */
+body.phone-land #letter-btn {
   top: calc(var(--safe-top) + 92px);
   left: 50%;
   transform: translateX(-50%);
@@ -5819,6 +4913,11 @@ body.phone-land.touch #meditate-btn {
   transform: translateX(-50%);
   bottom: calc(var(--safe-bottom) + 58px);
 }
+/* The place prompt sits low, between the joystick and the action row (the hint has the top). */
+body.phone-land.touch #prompt {
+  bottom: calc(var(--safe-bottom) + 60px);
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 300px);
+}
 body.phone-land.touch .hint {
   bottom: auto;
   top: calc(var(--safe-top) + 92px);
@@ -5827,134 +4926,29 @@ body.phone-land.touch .hint {
   max-width: calc(100vw - var(--safe-left) - 140px - 240px);
   text-align: left;
 }
-body.phone-land.touch.worship-on:not(.worship-mini) .hint {
-  display: none;
-}
 
-/* Very short views (browser bars in landscape): the video column reaches the
-   bottom, so action + camera stack left of it and the chat narrows. */
-@media (max-height: 349px) {
-  body.phone-land.in-world.touch.worship-on #action-btn {
-    right: calc(var(--safe-right) + 212px);
-  }
-  body.phone-land.in-world.touch.worship-on #camera-btn,
-  body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #camera-btn {
-    right: calc(var(--safe-right) + 212px);
-    bottom: calc(var(--safe-bottom) + 58px);
-  }
-  :root body.phone-land.touch.worship-on:not(.tablet) #chat {
-    width: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 140px - 372px));
-  }
-}
-
-/* ---- a sheet open: sheet on the left, tool row + video on the right ---- */
+/* ---- a sheet open: centred, full height ---- */
 body.phone-land.overlay-open .overlay {
-  left: 0;
-  right: calc(var(--safe-right) + var(--land-tools-w) + 8px);
-  top: var(--vvtop, 0px);
-  height: var(--vvh, 100dvh);
-  padding: max(6px, env(safe-area-inset-top)) 0 max(6px, env(safe-area-inset-bottom)) var(--safe-left);
+  padding: max(6px, env(safe-area-inset-top)) var(--safe-right) max(6px, env(safe-area-inset-bottom)) var(--safe-left);
   align-items: stretch;
-  justify-content: center;
-}
-body.phone-land.overlay-open.worship-on .overlay {
-  top: var(--vvtop, 0px);
-  height: var(--vvh, 100dvh);
-  right: calc(var(--safe-right) + var(--land-video-w) + 8px);
 }
 body.phone-land.overlay-open .overlay > .sheet:not(.login-prompt):not(.word-stage):not(.lantern-card) {
-  width: 100%;
+  width: min(720px, 100%);
   max-width: none;
   height: 100%;
-  max-height: 100%;
   border-radius: 16px;
 }
 body.phone-land.overlay-open .overlay > .sheet {
   max-height: 100%;
 }
-/* World buttons on the right stay out of the way while a sheet is open. */
-body.phone-land.overlay-open #action-btn,
-body.phone-land.overlay-open #meditate-btn,
-body.phone-land.overlay-open #letter-btn {
-  visibility: hidden;
-}
-/* The clock gives way so the tool row alone fits the column. */
-body.phone-land.overlay-open .clock-card {
-  visibility: hidden;
-}
-/* The world player: video only (its controls come back when the sheet closes). */
-body.phone-land.overlay-open #worship.dock:not(.folded) {
-  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
-  bottom: auto;
-  left: auto;
-  right: var(--safe-right);
-  transform: none;
-  width: var(--land-video-w);
-  padding: 0;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-body.phone-land.overlay-open #worship.dock .worship-head,
-body.phone-land.overlay-open #worship.dock .worship-side,
-body.phone-land.overlay-open #worship.dock .worship-handle {
-  display: none;
-}
-body.phone-land.overlay-open #worship.dock .worship-frame {
-  width: var(--land-video-w);
-  height: 200px;
-  aspect-ratio: auto;
-  box-shadow: 0 6px 22px rgba(74, 52, 38, 0.3);
-}
-/* 골방 + a sheet (B1 room-sheet): the same column. */
-body.touch.phone-land:not(.tablet) #worship.room.room-sheet {
-  --room-sheet-top: min(var(--land-top), var(--vvh, 100vh) - 208px);
-  --room-sheet-w: var(--land-video-w);
-}
 
-/* ---- 골방 without a sheet: player right, room header and buttons bottom-left ---- */
-body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) {
-  left: auto;
-  right: var(--safe-right);
-  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 262px));
-  width: auto;
-}
-body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-body {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-}
-body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-frame {
-  flex: none;
-  width: 356px;
-  height: 200px;
-  aspect-ratio: auto;
-}
-body.phone-land.touch:not(.tablet) #worship.room.room-s:not(.mini):not(.room-sheet) .worship-frame {
-  width: 200px;
-}
-body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-side {
-  width: 76px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-body.phone-land.touch:not(.tablet) #worship.room:not(.mini):not(.room-sheet) .worship-roomsize {
-  flex-direction: column;
-  padding: 0;
-}
-body.phone-land.touch:not(.tablet) #worship.room.mini {
-  top: calc(var(--vvtop, 0px) + min(var(--land-top), var(--vvh, 100vh) - 208px));
-}
+/* ---- 골방: room header and buttons bottom-left ---- */
 body.phone-land.touch .closet-head {
   top: auto;
-  bottom: calc(var(--safe-bottom) + 56px);
+  bottom: calc(var(--safe-bottom) + 60px);
   left: var(--safe-left);
   right: auto;
-  max-width: min(300px, 30vw);
-}
-body.phone-land .closet-actions {
-  left: var(--safe-left);
-  transform: none;
+  max-width: min(320px, 45vw);
 }
 
 /* Keyboard up on a sideways phone (~150-200 px left): the field being typed in
@@ -6009,8 +5003,7 @@ body.phone-land .sheet.look > .look-stage {
   margin: 0 0 10px 12px;
   min-height: 0;
 }
-body.phone-land.overlay-open .sheet.look .look-preview,
-body.phone-land.overlay-open.worship-on .sheet.look.drawing .look-preview {
+body.phone-land.overlay-open .sheet.look .look-preview {
   height: 100%;
   min-height: 0;
 }
@@ -6025,50 +5018,6 @@ body.phone-land .sheet.look > .look-foot {
 body.phone-land .sheet.look .look-swatches {
   grid-template-columns: repeat(auto-fill, 40px);
 }
-
-/* ===================================================================== */
-/* Perf P1: phone worship facade (no YouTube loaded until the first tap). */
-/* Lives inside .worship-frame, so every dock/room/sheet/landscape layout */
-/* sizes it exactly like the real player.                                 */
-/* ===================================================================== */
-.worship-facade {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px;
-  text-align: center;
-  background: radial-gradient(circle at 50% 40%, #4a3628, #241b15 70%);
-}
-.worship-facade-thumb {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.55;
-}
-.worship-facade-title {
-  position: relative;
-  margin: 0;
-  max-width: 100%;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #ffe2a8;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-.worship-facade-play {
-  position: relative;
-  min-height: 44px;
-}
-
 
 /* =================== ⚙ → 🎨 화면 품질 =================== */
 .settings-quality {
@@ -6103,7 +5052,7 @@ body.phone-land .sheet.look .look-swatches {
 /* The 😊 button sits beside the 📸 camera button and follows it through every
    layout (the camera rules are in the L-A block and the phone-landscape block,
    where the action button moved one slot left to make room): left of it. The
-   grid itself is placed by EmotePicker next to the button, clear of the player. */
+   grid itself is placed by EmotePicker next to the button, clear of the HUD tools. */
 #emote-btn {
   position: absolute;
   z-index: 18;
@@ -6136,38 +5085,16 @@ body.closet .emote-grid,
 body.overlay-open .emote-grid {
   display: none;
 }
-body:not(.touch).worship-on:not(.worship-large) #emote-btn {
-  right: calc(var(--safe-right) + 384px + 54px);
-  bottom: calc(var(--safe-bottom) + 160px);
-}
 body.touch #emote-btn {
   right: calc(var(--safe-right) + 52px);
   bottom: calc(var(--safe-bottom) + 66px);
   width: 44px;
   height: 44px;
 }
-@media (max-height: 780px) {
-  body.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
-    bottom: calc(var(--safe-bottom) - 6px);
-  }
-}
-/* Phone landscape: the bottom row, between the camera and the action button
-   (the video column fills the right side above them). */
-body.phone-land.touch #emote-btn,
-body.phone-land.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
+/* Phone landscape: the bottom row, between the camera and the action button. */
+body.phone-land.touch #emote-btn {
   right: calc(var(--safe-right) + 52px);
   bottom: calc(var(--safe-bottom) + 3px);
-}
-body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.overlay-open) #emote-btn {
-  right: calc(var(--safe-right) + 422px + 52px);
-  bottom: calc(var(--safe-bottom) + 58px);
-}
-@media (max-height: 349px) {
-  body.phone-land.in-world.touch.worship-on #emote-btn,
-  body.phone-land.in-world.touch.worship-on:not(.worship-mini):not(.worship-folded):not(.worship-large) #emote-btn {
-    right: calc(var(--safe-right) + 212px + 52px);
-    bottom: calc(var(--safe-bottom) + 58px);
-  }
 }
 
 .emote-grid {

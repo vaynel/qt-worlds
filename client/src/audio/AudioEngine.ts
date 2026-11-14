@@ -13,7 +13,7 @@ const SETTINGS_KEY = 'worlds.audioSettings.v1';
 const MASTER_MAX = 0.9;
 const AMBIENCE_MAX = 0.5;
 const UI_MAX = 0.6;
-/** Ambience is multiplied by this while worship plays. */
+/** Ambience is multiplied by this while the player is in a voice room. */
 const DUCK_FACTOR = 0.3;
 
 /** User-facing levels, 0..100, persisted in localStorage. */
@@ -21,13 +21,9 @@ export interface AudioSettings {
   master: number;
   /** 환경음 */
   ambience: number;
-  /** 찬양 (YouTube setVolume) */
-  worship: number;
   /** 효과음 */
   ui: number;
   muted: boolean;
-  /** Mute only the worship video (player's own mute button). */
-  worshipMuted: boolean;
   /** 음성: voices in a voice prayer room. */
   voice: number;
 }
@@ -36,7 +32,7 @@ export interface AudioSettings {
  * Defaults: ambience at 35 % of AMBIENCE_MAX = 0.175, about a third of the
  * M3 level (0.55), which users found too loud.
  */
-export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { master: 80, ambience: 35, worship: 70, ui: 60, muted: false, worshipMuted: false, voice: 90 };
+export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { master: 80, ambience: 35, ui: 60, muted: false, voice: 90 };
 
 const clamp100 = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : fallback;
@@ -49,10 +45,8 @@ function loadSettings(): AudioSettings {
       return {
         master: clamp100(raw.master, d.master),
         ambience: clamp100(raw.ambience, d.ambience),
-        worship: clamp100(raw.worship, d.worship),
         ui: clamp100(raw.ui, d.ui),
         muted: raw.muted === true,
-        worshipMuted: raw.worshipMuted === true,
         voice: clamp100(raw.voice, d.voice),
       };
     }
@@ -119,7 +113,6 @@ export class AudioEngine {
   private mix: AmbienceMix = { wind: 1, fire: 0, room: 0, rain: 0, muffle: 0 };
   /** Thunder rumbles played (tests). */
   rumbles = 0;
-  private ducked = false;
   private voiceDucked = false;
   settings: AudioSettings = loadSettings();
   private readonly listeners = new Set<(s: AudioSettings) => void>();
@@ -144,7 +137,7 @@ export class AudioEngine {
     return this.settings.muted;
   }
 
-  /** Called whenever a setting changes (also used for the YouTube volume). */
+  /** Called whenever a setting changes . */
   onSettingsChange(fn: (s: AudioSettings) => void) {
     this.listeners.add(fn);
   }
@@ -154,7 +147,7 @@ export class AudioEngine {
     const s = this.settings;
     return {
       master: s.muted ? 0 : (MASTER_MAX * s.master) / 100,
-      ambience: ((AMBIENCE_MAX * s.ambience) / 100) * (this.ducked ? DUCK_FACTOR : 1) * (this.voiceDucked ? DUCK_FACTOR : 1),
+      ambience: ((AMBIENCE_MAX * s.ambience) / 100) * (this.voiceDucked ? DUCK_FACTOR : 1),
       ui: (UI_MAX * s.ui) / 100,
     };
   }
@@ -173,10 +166,8 @@ export class AudioEngine {
     this.settings = {
       master: patch.master !== undefined ? clamp100(patch.master, s.master) : s.master,
       ambience: patch.ambience !== undefined ? clamp100(patch.ambience, s.ambience) : s.ambience,
-      worship: patch.worship !== undefined ? clamp100(patch.worship, s.worship) : s.worship,
       ui: patch.ui !== undefined ? clamp100(patch.ui, s.ui) : s.ui,
       muted: patch.muted !== undefined ? patch.muted === true : s.muted,
-      worshipMuted: patch.worshipMuted !== undefined ? patch.worshipMuted === true : s.worshipMuted,
       voice: patch.voice !== undefined ? clamp100(patch.voice, s.voice) : s.voice,
     };
     try {
@@ -374,22 +365,11 @@ export class AudioEngine {
     }
   }
 
-  /** Lower ambience while worship video plays. */
-  duck(on: boolean) {
-    if (on === this.ducked) return;
-    this.ducked = on;
-    this.applyBuses(0.4);
-  }
-
   /** In a voice room: keep ambience quiet so voices are clear. */
   duckForVoice(on: boolean) {
     if (on === this.voiceDucked) return;
     this.voiceDucked = on;
     this.applyBuses(0.4);
-  }
-
-  get isDucked(): boolean {
-    return this.ducked;
   }
 
   setMuted(muted: boolean) {
@@ -442,7 +422,7 @@ export class AudioEngine {
     return {
       running: this.running,
       muted: this.muted,
-      ducked: this.ducked,
+      ducked: this.voiceDucked,
       mix: { ...this.mix },
       rumbles: this.rumbles,
       settings: { ...this.settings },

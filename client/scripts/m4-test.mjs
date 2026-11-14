@@ -40,7 +40,7 @@ const BASE = `http://127.0.0.1:${CLIENT_PORT}/`;
 const DIRECT = `http://127.0.0.1:${SERVER_PORT}`;
 const WS = `ws://127.0.0.1:${CLIENT_PORT}/ws`;
 const DAY = '2026-11-08';
-const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noworship=1&noguide=1${extra}`;
+const Q = (extra = '') => `?test=1&shadows=0&time=14:00&date=${DAY}&noguide=1${extra}`;
 const DB = freshDb('m4');
 const DB_PROD = freshDb('m4-prod');
 
@@ -310,7 +310,7 @@ try {
   await A.click('form button');
   await A.waitForURL(/test=1/);
   await A.waitForSelector('#entry-nick:not([hidden])');
-  check('login returns to the same page (query kept, login flag cleaned up)', !A.url().includes('login=') && A.url().includes('noworship=1'), A.url());
+  check('login returns to the same page (query kept, login flag cleaned up)', !A.url().includes('login=') && A.url().includes('noguide=1'), A.url());
   await A.fill('#account-nickname', 'grace');
   await A.check('#nick-agree'); // M7: 만 14세 이상 + 약관 동의 checkbox
   await A.click('#nick-submit');
@@ -534,8 +534,8 @@ try {
   );
   const csp = html.headers.get('content-security-policy') ?? '';
   check(
-    'production: HTML security headers (CSP with YouTube nocookie + frame-ancestors none, referrer policy, nosniff)',
-    csp.includes("frame-ancestors 'none'") && csp.includes('https://www.youtube-nocookie.com') && csp.includes('https://www.youtube.com') &&
+    'production: HTML security headers (CSP self-only, no YouTube, frame-ancestors none, referrer policy, nosniff)',
+    csp.includes("frame-ancestors 'none'") && !/youtube|ytimg/i.test(csp) &&
       html.headers.get('referrer-policy') === 'strict-origin-when-cross-origin' && html.headers.get('x-content-type-options') === 'nosniff',
     csp.slice(0, 120),
   );
@@ -550,7 +550,7 @@ try {
   prodWs.ws.close();
   const prodBrowser = await browser.newContext(desktop);
   const PB = await prodBrowser.newPage();
-  await PB.goto(`${P}/?test=1&shadows=0&noworship=1`); // test=1: only for __WORLDS_DEBUG__ (the server ignores it in production)
+  await PB.goto(`${P}/?test=1&shadows=0`); // test=1: only for __WORLDS_DEBUG__ (the server ignores it in production)
   await PB.waitForSelector('#btn-google');
   check('production: the page loads; Google button shows "준비 중" without credentials', (await PB.textContent('#btn-google')).includes('준비 중'));
   await PB.fill('#nickname', '배포손님');

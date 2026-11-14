@@ -26,7 +26,6 @@ import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
 import { Modal } from '../ui/dom';
 import { SettingsView, type SettingsPage } from '../ui/SettingsView';
-import type { WorshipPlayer } from '../ui/WorshipPlayer';
 import { Hud } from '../ui/Hud';
 import { LANDMARKS, SPAWN } from '../world/config';
 import { parseTimeOverride } from '../world/DayNight';
@@ -55,8 +54,6 @@ export interface GameSession {
   net: NetClient | null;
   welcome: Welcome | null;
   audio: AudioEngine;
-  /** The single persistent worship player (created before entry). */
-  worship: WorshipPlayer;
   /** Where 나의 말씀 책 lives: server (account), guest (nothing saved) or local (offline). */
   store: WordBookStore;
   account: AccountInfo | null;
@@ -75,7 +72,7 @@ const DOOR_REACH = 2.6;
 /**
  * Render on demand: a sheet covering this share of the screen slows the world to
  * COVERED_FPS. Phone sheets span the full width (portrait) or the left two
- * thirds (landscape) and what's left is mostly the HUD and the worship player,
+ * thirds (landscape) and what's left is mostly the HUD,
  * so half the screen counts there; tablets and desktop need near-full cover.
  */
 const COVER_FRACTION = 0.8;
@@ -140,7 +137,6 @@ export class Game {
   private shooting = false;
   private lastShot: Record<string, unknown> | null = null;
   private readonly cameraBtn = document.getElementById('camera-btn') as HTMLButtonElement | null;
-  private readonly worship: WorshipPlayer;
   private readonly settings: SettingsView;
   private readonly closetUi = document.getElementById('closet-ui')!;
   private inCloset = false;
@@ -263,10 +259,7 @@ export class Game {
       const voice = new VoiceClient(session.net, {
         onChange: () => this.onVoiceChange(),
         toast: (text) => this.hud.toast(text, this.elapsed, 5),
-        onActive: (on) => {
-          session.worship.setDuck(on ? 0.2 : 1);
-          session.audio.duckForVoice(on);
-        },
+        onActive: (on) => session.audio.duckForVoice(on),
         masterVolume: () => session.audio.settings.voice,
         micPrePrompt: () => this.micHelp.prePrompt(),
         micHelp: () => this.micHelp.help(),
@@ -356,11 +349,6 @@ export class Game {
     });
     if (session.welcome?.word) void this.devotion.setWord(session.welcome.word);
 
-    this.worship = session.worship;
-    this.worship.onPlayingChange((playing) => this.audio.duck(playing));
-    this.worship.onNotice((text) => this.hud.toast(text, this.elapsed, 4));
-    this.worship.onVisibilityChange((open) => this.hud.setWorshipOpen(open));
-    this.hud.setWorshipOpen(this.worship.isOpen);
     this.guide = new Guide(() => this.input.isTouch);
     this.guideDue = session.guideDue;
     this.settings = new SettingsView(
@@ -408,11 +396,6 @@ export class Game {
     this.hud.bind('meditate', () => this.devotion.meditate());
     this.hud.bind('letter', () => void this.devotion.openLetter());
     this.hud.bind('word', () => void this.devotion.openWord());
-    this.hud.bind('worship', () => {
-      // Folded (paused tab) → bring it back; open → close; closed → open.
-      if (this.worship.isOpen && !this.inCloset && this.worship.foldState !== 'folded') this.worship.close();
-      else this.worship.open(this.inCloset, true);
-    });
     this.hud.bind('settings', () => this.settings.open());
     // "함께 N명": who is here (and 🚩 for drawn outfits).
     this.hud.onPeople(() => {
@@ -938,7 +921,7 @@ export class Game {
     });
   }
 
-  /** Render the 3D view (no HUD, no sheets, no YouTube), stamp it and keep it in 오늘 앨범. */
+  /** Render the 3D view (no HUD, no sheets), stamp it and keep it in 오늘 앨범. */
   async capture(): Promise<Record<string, unknown> | null> {
     if (this.shooting || this.inCloset || this.transitioning) return null;
     if (!this.account) {
@@ -997,7 +980,6 @@ export class Game {
       this.inCloset = true;
       document.body.classList.add('closet');
       this.closetUi.hidden = false;
-      this.worship.setRoom(true);
       this.resize();
     });
   }
@@ -1008,7 +990,6 @@ export class Game {
       this.inCloset = false;
       document.body.classList.remove('closet');
       this.closetUi.hidden = true;
-      this.worship.setRoom(false);
       // Step out of the door, facing away from the house.
       const door = this.world.landmarks.closetDoor;
       const house = this.world.locate(door.x, door.z);
@@ -1080,8 +1061,6 @@ export class Game {
       shopRent: (item: import('../../../shared/protocol').PropId, requestId?: string) => this.shop.rent(item, requestId),
       shopRefresh: () => this.shop.refresh(),
       stall: () => ({ ...SHOP_STALL }),
-      /** Worship player fold state in the world dock (layout tests). */
-      worshipFold: (fold: 'open' | 'mini' | 'folded') => this.worship.setFold(fold),
       /** Point the orbit camera (for screenshots). */
       view: (yaw: number, pitch?: number, zoom?: number) => {
         this.rig.yaw = yaw;
@@ -1402,8 +1381,7 @@ export class Game {
    * world behind it is drawn every 4th frame; a sheet covering most of the
    * screen (every phone sheet; near-full ones elsewhere) drops it to COVERED_FPS
    * behind the dimmed backdrop (input is paused while a sheet is open anyway).
-   * The worship player is DOM and keeps playing either way; closing the sheet
-   * restores the full rate at once.
+   * Closing the sheet restores the full rate at once.
    */
   private shouldDraw(customizeApplies: boolean): boolean {
     if (customizeApplies && this.customize.isOpen) return this.frame % 4 === 0;
@@ -1539,7 +1517,6 @@ export class Game {
         closet: this.inCloset,
         // Remote avatars actually drawn this frame (0 inside the 골방: separate scene).
         renderedRemotes: this.inCloset ? 0 : this.social.remotes.describe().filter((r) => r.visible).length,
-        worship: this.worship.describe(),
         audio: this.audio.describe(),
       },
       m10: {

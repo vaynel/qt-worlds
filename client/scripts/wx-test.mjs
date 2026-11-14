@@ -30,16 +30,9 @@ const PLAZA_VIEW = { x: 0, z: 9 };
 const CAMPFIRE_VIEW = { x: 44, z: -5 };
 const GARDEN_VIEW = { x: -45, z: -10 };
 
-// No YouTube in tests: the desktop player gets a stub.
-const YT_STUB = `window.YT = { Player: function (el, o) { var f = function (s) { o.events && o.events.onStateChange && o.events.onStateChange({ data: s }); };
-  this.playVideo = function () { f(1); }; this.pauseVideo = function () { f(2); }; this.loadVideoById = function () { f(1); }; this.cueVideoById = function () { f(5); };
-  this.seekTo = function () {}; this.setVolume = function () {}; this.mute = function () {}; this.unMute = function () {}; this.destroy = function () {};
-  this.getPlayerState = function () { return 2; }; this.getVideoData = function () { return { video_id: o.videoId }; };
-  setTimeout(function () { o.events && o.events.onReady && o.events.onReady(); }, 50); } };
-setTimeout(function () { window.onYouTubeIframeAPIReady && window.onYouTubeIframeAPIReady(); }, 0);`;
 
 /** Console noise that has nothing to do with this feature (headless Chromium, SwiftShader). */
-const BENIGN = /web-share|No available adapters|GPU stall|WebGL|youtube/i;
+const BENIGN = /web-share|No available adapters|GPU stall|WebGL/i;
 const errors = [];
 const watch = (page, tag) => {
   page.on('pageerror', (e) => errors.push(`${tag}: ${e.message}`));
@@ -118,11 +111,9 @@ try {
   // ------------------------------------------------------------------ desktop: every kind
   step('desktop kinds');
   const dctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
-  await dctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   const D = await dctx.newPage();
   watch(D, 'desktop');
   await join(D, BASE, '날씨', '?test=1&shadows=0&time=14:00&noguide=1');
-  await D.evaluate(() => window.__WORLDS_TEST__.worshipFold('folded'));
   let d = await wx(D);
   check('HUD before any reading: 서울 낮 with no temperature', d.hud === '서울 낮' && d.stale, d.hud);
   await D.click('.clock-card');
@@ -231,10 +222,7 @@ try {
   await D.mouse.down();
   await D.mouse.move(980, 380, { steps: 10 });
   await D.mouse.up();
-  // The worship panel sits over the window in this view; hide it for the picture only (a stub player, paused).
-  await D.evaluate(() => (document.getElementById('worship').style.visibility = 'hidden'));
   await shot(D, 'closet-rain');
-  await D.evaluate(() => (document.getElementById('worship').style.visibility = ''));
   await D.click('#closet-exit');
   await waitOk(D, () => window.__WORLDS_DEBUG__.m3.closet === false, null, 10000);
   await setWeather({ kind: 'snow' });
@@ -260,12 +248,10 @@ try {
   // ------------------------------------------------------------------ dusk at the campfire (reduced motion)
   step('dusk, reduced motion');
   const rctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
-  await rctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   const R = await rctx.newPage();
   watch(R, 'dusk');
   await setWeather({ kind: 'thunder', tempC: 9, wind: 6 });
   await join(R, BASE, '해질녘', '?test=1&shadows=0&time=17:25&noguide=1');
-  await R.evaluate(() => window.__WORLDS_TEST__.worshipFold('folded'));
   check('a late joiner gets the current weather in welcome', (await wx(R)).kind === 'thunder');
   await teleport(R, CAMPFIRE_VIEW);
   await settle(R);

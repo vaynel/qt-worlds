@@ -54,7 +54,6 @@ export class Hud {
   private readonly meditateBtn = $<HTMLButtonElement>('meditate-btn');
   private readonly letterBtn = $<HTMLButtonElement>('letter-btn');
   private readonly wordBtn = $<HTMLButtonElement>('btn-word');
-  private readonly worshipBtn = $<HTMLButtonElement>('btn-worship');
   private readonly settingsBtn = $<HTMLButtonElement>('btn-settings');
   private readonly groupsBtn = $<HTMLButtonElement>('btn-groups');
   private netText = '';
@@ -132,12 +131,11 @@ export class Hud {
   }
 
   /** Wire a HUD button; taps never leak into camera drags. */
-  bind(which: 'meditate' | 'letter' | 'word' | 'worship' | 'settings' | 'groups', fn: () => void) {
+  bind(which: 'meditate' | 'letter' | 'word' | 'settings' | 'groups', fn: () => void) {
     const btn = {
       meditate: this.meditateBtn,
       letter: this.letterBtn,
       word: this.wordBtn,
-      worship: this.worshipBtn,
       settings: this.settingsBtn,
       groups: this.groupsBtn,
     }[which];
@@ -202,12 +200,6 @@ export class Hud {
     }
     badge.textContent = n > 99 ? '99+' : String(n);
     this.groupsBtn.setAttribute('aria-label', `모임 · 읽지 않은 메시지 ${n}개`);
-  }
-
-  /** 찬양 button shows whether the player is open (by colour; the label stays 찬양). */
-  setWorshipOpen(open: boolean) {
-    this.worshipBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
-    this.worshipBtn.setAttribute('aria-label', open ? '찬양 닫기' : '찬양 열기');
   }
 
   toast(text: string, now: number, seconds = 3.5) {

@@ -1,10 +1,10 @@
 // L-A test: 이야기 도서관 (shared interior, desks, the two bookcases), 발자취, 📸 photos,
 // 🙏 testimonies, 📔 the template diary, 공감/책갈피/readers, reports + admin,
-// the personal-info warning, export/deletion (incl. photo files), and the
-// worship player inside the library with sheets open.
+// the personal-info warning, export/deletion (incl. photo files), the 📷 button
+// layout, and the full-screen photo viewer (오늘 앨범, diary picker 🔍).
 // One server serves the built client (SERVE_CLIENT). Port: TEST_SERVER_PORT (5194).
 //   cd client && npm run build && (cd ../server && npm run build) && node scripts/la-test.mjs
-// LA_ONLY=api,day,library,layout,yt,account runs a subset (some phases need earlier ones).
+// LA_ONLY=api,day,library,layout,album,account runs a subset (some phases need earlier ones).
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
@@ -46,24 +46,6 @@ const run = (phase) => ONLY.length === 0 || ONLY.includes(phase);
 const TODAY = P.kstDateOf(Date.now());
 const NICK = { a: '가람', b: '나래', c: '다솜', d: '라온', r1: '마루', r2: '바다', admin: '관리자' };
 
-const YT_STUB = `
-window.YT = { Player: function (el, opts) {
-  var fire = function (s) { if (opts.events && opts.events.onStateChange) opts.events.onStateChange({ data: s }); };
-  this.playVideo = function () { fire(1); };
-  this.pauseVideo = function () { fire(2); };
-  this.loadVideoById = function () { fire(1); };
-  this.cueVideoById = function () { fire(5); };
-  this.seekTo = function () {};
-  this.setVolume = function () {};
-  this.mute = function () {};
-  this.unMute = function () {};
-  this.destroy = function () {};
-  this.getVideoData = function () { return { video_id: opts.videoId }; };
-  var f = document.createElement('iframe'); f.src = 'https://www.youtube-nocookie.com/embed/' + opts.videoId; f.style.width = '100%'; f.style.height = '100%'; f.style.border = '0'; el.replaceWith(f);
-  setTimeout(function () { if (opts.events && opts.events.onReady) opts.events.onReady(); }, 50);
-} };
-setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 0);
-`;
 
 class Agent {
   constructor() {
@@ -132,7 +114,6 @@ async function account(hint, nickname) {
 async function contextFor(browser, agent, opts = {}) {
   const ctx = await browser.newContext({ deviceScaleFactor: 1, ...opts });
   await ctx.addCookies([...agent.jar].map(([name, value]) => ({ name, value, url: ORIGIN })));
-  await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: YT_STUB }));
   return ctx;
 }
 async function enterWorld(page, query) {
@@ -157,38 +138,6 @@ const count = (sql, ...args) => {
   }
 };
 
-/** Probe for the worship player vs sheets/HUD (from b1-test). */
-function probe(page) {
-  return page.evaluate(() => {
-    const vis = (el) => {
-      if (!el) return null;
-      const s = getComputedStyle(el);
-      if (el.hidden || s.display === 'none' || s.visibility === 'hidden') return null;
-      for (let e = el; e; e = e.parentElement) if (Number(getComputedStyle(e).opacity) === 0) return null;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
-    };
-    const q = (s) => vis(document.querySelector(s));
-    const title = document.querySelector('.overlay .book-title');
-    const t = vis(title);
-    let titleOnTop = false;
-    if (t) {
-      const hit = document.elementFromPoint(t.x + Math.min(t.width / 2, 40), t.y + t.height / 2);
-      titleOnTop = !!hit && (title === hit || title.contains(hit));
-    }
-    // Nothing drawn over the video: the topmost element at its centre and corners belongs to the player.
-    const f = q('#worship .worship-frame');
-    const w = document.getElementById('worship');
-    const covered = [];
-    if (f) {
-      for (const [x, y] of [[0.5, 0.5], [0.08, 0.08], [0.92, 0.08], [0.08, 0.92], [0.92, 0.92]]) {
-        const hit = document.elementFromPoint(f.x + f.width * x, f.y + f.height * y);
-        if (!hit || !w.contains(hit)) covered.push(`${x},${y}:${hit ? hit.id || hit.className : 'none'}`);
-      }
-    }
-    return { vw: innerWidth, vh: innerHeight, card: q('#worship'), frame: f, sheet: q('.overlay .sheet'), title: t, titleOnTop, covered };
-  });
-}
 const inside = (r, vw, vh) => !!r && r.x >= -0.5 && r.y >= -0.5 && r.x + r.width <= vw + 0.5 && r.y + r.height <= vh + 0.5;
 const fmt = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` : 'none');
 
@@ -397,11 +346,10 @@ try {
   step('photos');
   let shotBytes = null;
   {
-    const iframes = (await debug(pa)).m3.worship.iframes;
     const shot = await pa.evaluate(() => window.__WORLDS_TEST__.capture());
     check('capture → valid WebP ≤ 1280 px, < 150 KB, uploaded', shot && shot.uploaded && shot.type === 'image/webp' && shot.bytes < 150 * 1024 && Math.max(shot.width, shot.height) <= 1280, JSON.stringify(shot));
     check('stamp: date, time, place, nickname, "QT 월드"', shot && shot.stamp.includes(P.kstDateOf(Date.now()).slice(0, 4)) && /오[전후] \d+:\d\d/.test(shot.stamp) && shot.stamp.includes('중앙 광장') && shot.stamp.includes(NICK.a) && shot.stamp.includes('QT 월드'), shot?.stamp);
-    check('photo is copied from the 3D canvas only (the YouTube iframe and HUD are DOM, never in it)', shot?.source === 'webgl-canvas', `iframes on page: ${iframes}`);
+    check('photo is copied from the 3D canvas only (the HUD is DOM, never in it)', shot?.source === 'webgl-canvas');
     const res = await A.raw('GET', `/api/shots/${shot.id}`);
     shotBytes = Buffer.from(await res.arrayBuffer());
     check('owner fetches the photo', res.status === 200 && shotBytes.toString('ascii', 0, 4) === 'RIFF' && shotBytes.toString('ascii', 8, 12) === 'WEBP');
@@ -855,7 +803,7 @@ try {
     const ctxAdm = await contextFor(browser, ADM, { viewport: { width: 1280, height: 720 } });
     const padm = await ctxAdm.newPage();
     padm.on('dialog', (d) => void d.accept());
-    await enterWorld(padm, Q('14:00') + '&noworship=1');
+    await enterWorld(padm, Q('14:00') + '');
     await until(padm, () => window.__WORLDS_DEBUG__.m8.admin === true, null, 15000);
     await padm.evaluate(() => window.__WORLDS_TEST__.openSettings('admin'));
     await padm.click('#settings-admin-library');
@@ -868,59 +816,6 @@ try {
     await padm.click('#admin-library-list .admin-story .admin-delete').catch(() => undefined);
     await ctxAdm.close();
     check('admin 삭제 via the UI removes the book', count('SELECT COUNT(*) n FROM stories WHERE id IN (?, ?)', T.anon, cStory.data.id) <= 1);
-  }
-
-  // ================================================================ YouTube compliance in the library with sheets
-  if ((run('yt') || run('library')) && pb) {
-    step('worship in the library');
-    for (const [name, p, touch] of [
-      ['phone', pb, true],
-      ['desktop', pa, false],
-    ]) {
-      if (!(await la(p)).inLibrary) {
-        const door = await p.evaluate(() => window.__WORLDS_TEST__.libraryDoor());
-        await teleport(p, door);
-        await p.evaluate(() => window.__WORLDS_TEST__.enterLibrary());
-        await until(p, () => window.__WORLDS_DEBUG__.la.inLibrary === true, null, 10000);
-      }
-      const ws = (await debug(p)).m3.worship;
-      if (ws.mode === 'hidden') await (touch ? p.tap('#btn-worship') : p.click('#btn-worship'));
-      await p.evaluate(() => window.__WORLDS_TEST__.worshipFold('open'));
-      await until(p, () => window.__WORLDS_DEBUG__.m3.worship.state === 'playing', null, 20000).catch(() => undefined);
-      const sheets = [
-        ['shelf', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('shelf', 'testimony'))],
-        ['story', () => p.evaluate((id) => window.__WORLDS_TEST__.libraryOpen('story', id), T.pub)],
-        ['mine', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('mine', 'album'))],
-        ['write', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('write'))],
-        ['diary', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('diary'))],
-        ['desk', () => p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('desk'))],
-      ];
-      let playing = true;
-      for (const [sheet, open] of sheets) {
-        await open();
-        await modalIs(p, '이야기 도서관');
-        await p.waitForSelector('.overlay.shown .lib-body > *', { timeout: 10000 }).catch(() => undefined);
-        await sleep(900);
-        const r = await probe(p);
-        const problems = [];
-        if (!inside(r.frame, r.vw, r.vh)) problems.push(`frame off-screen ${fmt(r.frame)}`);
-        if (!r.frame || r.frame.width < 199.5 || r.frame.height < 199.5) problems.push(`frame < 200 ${fmt(r.frame)}`);
-        if (overlaps(r.card, r.sheet)) problems.push(`card overlaps the sheet ${fmt(r.sheet)}`);
-        if (r.covered.length) problems.push(`something over the video ${r.covered.join(' ')}`);
-        if (!r.titleOnTop) problems.push('sheet title covered');
-        check(`${name} library + ${sheet} sheet: video on screen ≥200×200, nothing over it, clear of the sheet`, problems.length === 0, problems.join('; ') || `frame ${fmt(r.frame)} sheet ${fmt(r.sheet)}`);
-        if ((await debug(p)).m3.worship.state !== 'playing') playing = false;
-        await p.keyboard.press('Escape');
-        await modalIs(p, null);
-      }
-      const w = (await debug(p)).m3.worship;
-      check(`${name}: kept playing, one iframe`, playing && w.iframes <= 1, `${w.state} iframes=${w.iframes}`);
-      await p.evaluate(() => window.__WORLDS_TEST__.worshipFold('folded'));
-      await until(p, () => window.__WORLDS_DEBUG__.m3.worship.state !== 'playing', null, 8000).catch(() => undefined);
-      const wf = (await debug(p)).m3.worship;
-      check(`${name}: folded in the library → paused`, wf.state !== 'playing' && !wf.playedWhileFolded, wf.state);
-      await p.evaluate(() => window.__WORLDS_TEST__.worshipFold('open'));
-    }
   }
 
   // ================================================================ camera button layout
@@ -947,15 +842,7 @@ try {
       const s0 = logs.seats[0];
       await teleport(p, { x: s0.x + (s0.x - logs.campfire.x) * 0.25, z: s0.z + (s0.z - logs.campfire.z) * 0.25 });
       await sleep(600);
-      if ((await debug(p)).m3.worship.mode === 'hidden') await (touch ? p.tap('#btn-worship') : p.click('#btn-worship'));
-      for (const fold of ['open', 'mini', 'folded', 'hidden']) {
-        if (fold === 'hidden') {
-          if ((await debug(p)).m3.worship.mode !== 'hidden') await p.evaluate(() => window.__WORLDS_TEST__.worshipFold('open'));
-          await (touch ? p.tap('#btn-worship') : p.click('#btn-worship'));
-        } else {
-          if ((await debug(p)).m3.worship.mode === 'hidden') await (touch ? p.tap('#btn-worship') : p.click('#btn-worship'));
-          await p.evaluate((f) => window.__WORLDS_TEST__.worshipFold(f), fold);
-        }
+      {
         for (const chatFold of [false, true]) {
           const folded = await p.evaluate(() => document.getElementById('chat')?.classList.contains('folded'));
           if (folded !== chatFold && (await p.isVisible(chatFold ? '#chat-fold' : '#chat-pill'))) await p.click(chatFold ? '#chat-fold' : '#chat-pill');
@@ -981,8 +868,7 @@ try {
               camera: vis(document.getElementById('camera-btn')),
               joystick: vis(document.getElementById('stick-base')),
               action: vis(document.getElementById('action-btn')),
-              worship: vis(document.querySelector('#worship:not(.folded)')),
-              tab: vis(document.getElementById('worship-tab')),
+              emote: vis(document.getElementById('emote-btn')),
               chatPill: vis(document.getElementById('chat-pill')),
               chat: vis(document.querySelector('#chat:not(.folded)')),
               voice: vis(voice),
@@ -998,15 +884,170 @@ try {
           const bad = [];
           if (!b.camera) bad.push('camera hidden');
           else if (!inside(b.camera, b.vw, b.vh)) bad.push(`camera off-screen ${fmt(b.camera)}`);
-          for (const k of ['joystick', 'action', 'worship', 'tab', 'chatPill', 'chat', 'voice', 'dock', 'tools', 'place', 'prompt']) if (overlaps(b.camera, b[k])) bad.push(`overlaps ${k} ${fmt(b[k])}`);
-          check(`${name} worship=${fold} chat=${chatFold ? 'folded' : 'open'}: 📷 visible, clear of joystick/action/worship/chat/voice/prop dock`, bad.length === 0, bad.join('; ') || fmt(b.camera));
-          if (name === 'p390' && fold === 'open' && !chatFold) await p.screenshot({ path: shotPath('camera-button-phone') });
-          if (name === 'p390' && fold === 'mini' && chatFold) await p.screenshot({ path: shotPath('camera-button-phone-mini') });
+          for (const k of ['joystick', 'action', 'emote', 'chatPill', 'chat', 'voice', 'dock', 'tools', 'place', 'prompt']) if (overlaps(b.camera, b[k])) bad.push(`overlaps ${k} ${fmt(b[k])}`);
+          check(`${name} chat=${chatFold ? 'folded' : 'open'}: 📷 visible, clear of joystick/action/😊/chat/voice/prop dock/HUD`, bad.length === 0, bad.join('; ') || fmt(b.camera));
+          if (name === 'p390' && !chatFold) await p.screenshot({ path: shotPath('camera-button-phone') });
         }
       }
-      if ((await debug(p)).m3.worship.mode === 'hidden') await (touch ? p.tap('#btn-worship') : p.click('#btn-worship'));
     }
     await tabletCtx.close();
+  }
+
+  // ================================================================ 📸 full-screen photo viewer
+  if (run('album')) {
+    step('album viewer');
+    const V = await account('la-v', '사진보기');
+    const nwShot = (name) => resolve(shotDir, `nw-${name}.png`);
+    const viewer = (p) =>
+      p.evaluate(() => {
+        const v = document.getElementById('photo-viewer');
+        if (!v) return null;
+        const img = v.querySelector('.pv-img');
+        const r = img.getBoundingClientRect();
+        const save = document.getElementById('pv-save');
+        return {
+          count: document.getElementById('pv-count').hidden ? '' : document.getElementById('pv-count').textContent,
+          src: img.getAttribute('src'),
+          caption: document.getElementById('pv-caption').textContent,
+          img: { x: r.x, y: r.y, width: r.width, height: r.height },
+          fit: getComputedStyle(img).objectFit,
+          bg: getComputedStyle(v).backgroundColor,
+          save: save && !save.hidden ? { href: save.getAttribute('href'), download: save.getAttribute('download') } : null,
+          state: history.state && history.state.photoViewer ? 'pushed' : 'none',
+          vw: innerWidth,
+          vh: innerHeight,
+        };
+      });
+    const gone = (p) => until(p, () => !document.getElementById('photo-viewer'), null, 5000).then(() => true).catch(() => false);
+    const swipe = (p, fromX, toX) =>
+      p.evaluate(({ fromX, toX }) => {
+        const st = document.querySelector('#photo-viewer .pv-stage');
+        const y = innerHeight / 2;
+        const ev = (type, x) => st.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true }));
+        ev('pointerdown', fromX);
+        ev('pointerup', toX);
+        st.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: toX, clientY: y }));
+      }, { fromX, toX });
+    const devices = [
+      ['phone', { viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 }, isMobile: true, hasTouch: true }],
+      ['desktop', { viewport: { width: 1280, height: 720 } }],
+    ];
+    let first = true;
+    for (const [name, opts] of devices) {
+      const ctx = await contextFor(browser, V, opts);
+      const p = await ctx.newPage();
+      const errs = [];
+      p.on('pageerror', (e) => errs.push(String(e).split('\n')[0]));
+      await enterWorld(p, Q('14:00'));
+      if (first) {
+        for (let i = 0; i < 3; i++) await p.evaluate(() => window.__WORLDS_TEST__.capture());
+        first = false;
+      }
+      const url0 = p.url();
+      await p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('mine', 'album'));
+      await modalIs(p, '이야기 도서관');
+      await p.waitForSelector('.lib-album-open', { timeout: 10000 });
+      const thumbs = await p.locator('.lib-album-open').count();
+      check(`${name} album: 3 photos, each a tappable thumbnail`, thumbs === 3, String(thumbs));
+      await p.locator('.lib-album-open').nth(1).click();
+      await p.waitForSelector('#photo-viewer', { timeout: 5000 });
+      await p.waitForFunction(() => document.querySelector('#photo-viewer .pv-img').complete, null, { timeout: 10000 }).catch(() => undefined);
+      let v = await viewer(p);
+      const big = v.img.width >= v.vw * 0.9 && v.img.height >= v.vh * 0.6;
+      check(`${name} viewer opens full screen (object-fit: contain, dark backdrop), counter 2 / 3`, v.count === '2 / 3' && v.fit === 'contain' && big && /rgba?\((1\d|\d),/.test(v.bg), JSON.stringify({ c: v.count, img: v.img, bg: v.bg }));
+      check(`${name} viewer: date · place caption`, /📸 .+ · .+/.test(v.caption), v.caption);
+      check(`${name} viewer: 📥 저장 is an <a download> to the photo (own photo)`, !!v.save && /^\/api\/shots\/\d+$/.test(v.save.href) && /^qt-world-\d{4}-\d{2}-\d{2}-\d+$/.test(v.save.download), JSON.stringify(v.save));
+      check(`${name} viewer: a history entry was pushed (back closes it)`, v.state === 'pushed');
+      if (name === 'phone') {
+        await swipe(p, 320, 60);
+        v = await viewer(p);
+        const next = v.count;
+        await swipe(p, 60, 320);
+        v = await viewer(p);
+        check('phone viewer: swipe left → 3 / 3, swipe right → 2 / 3', next === '3 / 3' && v.count === '2 / 3', `${next} then ${v.count}`);
+      } else {
+        await p.keyboard.press('ArrowRight');
+        const next = (await viewer(p)).count;
+        await p.keyboard.press('ArrowRight');
+        const wrap = (await viewer(p)).count;
+        await p.keyboard.press('ArrowLeft');
+        await p.keyboard.press('ArrowLeft');
+        v = await viewer(p);
+        check('desktop viewer: → 3 / 3, → wraps to 1 / 3, ← ← back to 2 / 3', next === '3 / 3' && wrap === '1 / 3' && v.count === '2 / 3', `${next} ${wrap} ${v.count}`);
+      }
+      await sleep(300);
+      await p.screenshot({ path: nwShot(`album-viewer-${name}`) });
+      // ✕
+      await p.click('#pv-close');
+      check(`${name} viewer: ✕ closes it, the album sheet stays, history entry popped`, (await gone(p)) && (await debug(p)).m3.modal === '이야기 도서관' && (await p.evaluate(() => !(history.state && history.state.photoViewer))));
+      // Esc
+      await p.locator('.lib-album-open').first().click();
+      await p.waitForSelector('#photo-viewer');
+      check(`${name} viewer: first photo → 1 / 3`, (await viewer(p)).count === '1 / 3');
+      await p.keyboard.press('Escape');
+      check(`${name} viewer: Esc closes only the viewer (the sheet stays)`, (await gone(p)) && (await debug(p)).m3.modal === '이야기 도서관');
+      // history back (Android back gesture)
+      await p.locator('.lib-album-open').nth(2).click();
+      await p.waitForSelector('#photo-viewer');
+      await p.goBack();
+      const closedByBack = await gone(p);
+      check(`${name} viewer: history back closes the viewer, not the app`, closedByBack && p.url() === url0 && (await debug(p)).ready === true && (await debug(p)).m3.modal === '이야기 도서관', p.url());
+      // backdrop tap (the dark band around the picture)
+      await p.locator('.lib-album-open').first().click();
+      await p.waitForSelector('#photo-viewer');
+      await p.waitForFunction(() => document.querySelector('#photo-viewer .pv-img').complete, null, { timeout: 10000 }).catch(() => undefined);
+      // A point in the dark band that object-fit: contain leaves beside or above the picture.
+      const pt = await p.evaluate(() => {
+        const img = document.querySelector('#photo-viewer .pv-img');
+        const r = img.getBoundingClientRect();
+        const k = Math.min(r.width / img.naturalWidth, r.height / img.naturalHeight);
+        const w = img.naturalWidth * k;
+        const h = img.naturalHeight * k;
+        return r.width - w > r.height - h ? { x: r.x + (r.width - w) / 4, y: r.y + r.height / 2 } : { x: r.x + r.width / 2, y: r.y + (r.height - h) / 4 };
+      });
+      await p.mouse.click(pt.x, pt.y);
+      check(`${name} viewer: a tap on the dark backdrop closes it`, await gone(p), JSON.stringify(pt));
+      if (name === 'phone') {
+        // Other sizes: phone landscape and tablet.
+        for (const [w, h] of [[844, 390], [820, 1180]]) {
+          await p.setViewportSize({ width: w, height: h });
+          await sleep(300);
+          await p.locator('.lib-album-open').first().click();
+          await p.waitForSelector('#photo-viewer');
+          await p.waitForFunction(() => document.querySelector('#photo-viewer .pv-img').complete, null, { timeout: 10000 }).catch(() => undefined);
+          const vs = await viewer(p);
+          const btns = await p.evaluate(() => ['pv-close', 'pv-save', 'pv-count', 'pv-caption'].map((id) => document.getElementById(id).getBoundingClientRect()).every((r) => r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5));
+          check(`viewer at ${w}×${h}: picture fills the screen, controls on screen`, vs.img.width >= w * 0.8 && vs.img.height >= h * 0.6 && btns, JSON.stringify(vs.img));
+          if (w === 844) await p.screenshot({ path: nwShot('album-viewer-phone-landscape') });
+          await p.click('#pv-close');
+          await gone(p);
+        }
+        await p.setViewportSize({ width: 390, height: 844 });
+        await p.keyboard.press('Escape');
+        await modalIs(p, null);
+        // Diary photo picker: 🔍 previews without changing the pick.
+        await p.evaluate(() => window.__WORLDS_TEST__.libraryOpen('diary'));
+        await modalIs(p, '이야기 도서관');
+        await p.waitForSelector('.lib-pick-zoom', { timeout: 10000 });
+        const pressed = () => p.$$eval('.lib-pick-item', (els) => els.map((e) => e.getAttribute('aria-pressed')).join(','));
+        const before = await pressed();
+        await p.locator('.lib-pick-zoom').nth(1).click();
+        await p.waitForSelector('#photo-viewer');
+        const pv = await viewer(p);
+        check('diary picker: 🔍 opens the viewer on that photo (2 / 3) with 📥 저장', pv.count === '2 / 3' && !!pv.save, JSON.stringify({ c: pv.count, s: pv.save }));
+        await p.screenshot({ path: nwShot('album-viewer-diary-pick') });
+        await p.click('#pv-close');
+        await gone(p);
+        check('diary picker: previewing did not toggle the pick', (await pressed()) === before, `${before} → ${await pressed()}`);
+        await p.keyboard.press('Escape');
+        await modalIs(p, null);
+      } else {
+        await p.keyboard.press('Escape');
+        await modalIs(p, null);
+      }
+      check(`${name} album viewer: no page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+      await ctx.close();
+    }
   }
 
   // ================================================================ export + deletion

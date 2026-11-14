@@ -47,7 +47,7 @@ const DEVICES = [
   ['ipad-air-land', 1180, 820, true],
   ['desktop', 1280, 720, false],
 ];
-const AVOID = ['worship', 'handle', 'tab', 'voice', 'joystick', 'tools', 'place', 'clock', 'action'];
+const AVOID = ['voice', 'joystick', 'tools', 'place', 'clock', 'action', 'emote', 'camera'];
 
 async function boxes(p) {
   const b = await layoutBoxes(p);
@@ -139,22 +139,12 @@ try {
     check(`${name}: unread badge counts messages received while folded`, badge === '2' && !!b.badge, `badge "${badge}"`);
     check(`${name}: speech bubble still shows over the speaker while folded`, await p.evaluate((id) => window.__WORLDS_DEBUG__.net.remotes.find((r) => r.id === id)?.bubble === true, fid));
 
-    // No overlaps in every worship player state.
-    for (const fold of ['mini', 'open', 'folded']) {
-      await p.evaluate((f) => window.__WORLDS_TEST__.worshipFold(f), fold);
-      await sleep(500);
+    {
       const bb = await boxes(p);
       const hits = hitsOf(bb, 'pill');
-      if (touch && !/tablet/.test(bb.bodyClass) && fold === 'open') {
-        // Phone worship drawer fills the upper screen: chat (and pill) step aside.
-        check(`${name}: phone worship drawer open → chat steps aside (no overlap)`, !bb.pill && !bb.chat);
-      } else {
-        check(`${name}: pill clear of player/handle/tab/voice/joystick/HUD (worship ${fold})`, hits.length === 0 && inView(bb.pill, bb), hits.join(',') || 'ok');
-      }
-      if (fold === (touch ? 'mini' : 'open')) await p.screenshot({ path: resolve(shotDir, `m53-chat-folded-${name}.png`) });
+      check(`${name}: pill clear of voice/joystick/HUD/buttons, on screen`, hits.length === 0 && inView(bb.pill, bb), hits.join(',') || 'ok');
+      await p.screenshot({ path: resolve(shotDir, `m53-chat-folded-${name}.png`) });
     }
-    await p.evaluate((f) => window.__WORLDS_TEST__.worshipFold(f), touch ? 'mini' : 'open');
-    await sleep(300);
 
     // Unfold: back at 작게, badge cleared.
     await tap('#chat-pill');
