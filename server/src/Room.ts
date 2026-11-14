@@ -31,6 +31,7 @@ import {
   type PropId,
   type PropWear,
   type ServerMessage,
+  type WeatherState,
   type StatePayload,
 } from '../../shared/protocol.js';
 import type { RoomEvents } from './api.js';
@@ -117,6 +118,8 @@ export interface RoomOptions {
   campfireVoice?: CampfireVoiceService | null;
   /** Campfire voice needs TURN (relay-only ICE): false disables it. */
   campfireVoiceEnabled?: boolean;
+  /** 서울 날씨 for welcome (and weatherChanged() for live updates). */
+  weather?: { current(): WeatherState } | null;
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -643,6 +646,7 @@ export class Room implements RoomEvents, ShopEvents {
       account: client.userId !== null && client.accountName ? { id: client.userId, nickname: client.accountName } : null,
       guest: client.userId === null,
       look: client.lookOwn,
+      ...(this.options.weather ? { weather: this.options.weather.current() } : {}),
     });
     this.sendLanterns(client);
     this.sendShop(client);
@@ -943,6 +947,11 @@ export class Room implements RoomEvents, ShopEvents {
       this.libraryTimer = null;
       for (const c of this.clients.values()) if (c.joined && spaceOf(c) === 'library') this.sendLibrary(c);
     }, 120);
+  }
+
+  /** 서울 날씨 changed: everyone gets the new state (the service calls this only on a real change). */
+  weatherChanged(weather: WeatherState) {
+    if (this.playerCount > 0) this.broadcast({ t: 'weather', weather });
   }
 
   close(): void {

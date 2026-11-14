@@ -425,6 +425,23 @@ export interface LanternDetail extends LanternInfo {
   myReactions: ReactionType[];
 }
 
+/**
+ * 서울 날씨 (MET Norway Locationforecast, fetched by the server only; clients never call a weather API).
+ * Wind is m/s, cloud cover 0..100 %. `stale`: no fresh reading (startup default or an old one).
+ */
+export const WEATHER_KINDS = ['clear', 'partly', 'cloudy', 'fog', 'drizzle', 'rain', 'heavyRain', 'thunder', 'snow', 'heavySnow'] as const;
+export type WeatherKind = (typeof WEATHER_KINDS)[number];
+export interface WeatherState {
+  kind: WeatherKind;
+  tempC: number;
+  wind: number;
+  cloud: number;
+  isDay: boolean;
+  updatedAt: number;
+  source: 'met-no';
+  stale?: boolean;
+}
+
 export type ServerMessage =
   | {
       t: 'welcome';
@@ -446,8 +463,12 @@ export type ServerMessage =
       guest?: boolean;
       /** Your own saved appearance (M8), as only you see it. */
       look?: Look | null;
+      /** 서울 날씨 right now (see WeatherState). */
+      weather?: WeatherState;
     }
   | { t: 'word'; word: WordPassage }
+  /** 서울 날씨 changed (sent only on a real change). */
+  | { t: 'weather'; weather: WeatherState }
   | { t: 'lanterns'; lanterns: LanternInfo[] }
   | { t: 'lantern'; lantern: LanternInfo }
   | { t: 'lanternGone'; id: number }

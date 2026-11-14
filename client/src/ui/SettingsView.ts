@@ -244,7 +244,11 @@ export class SettingsView {
       );
     };
     draw();
-    return [wrap, el('p', 'settings-note', '화면이 자주 끊기거나 휴대폰이 뜨거워지면 보통이나 절약으로 낮춰 보세요.')];
+    return [
+      wrap,
+      el('p', 'settings-note', '화면이 자주 끊기거나 휴대폰이 뜨거워지면 보통이나 절약으로 낮춰 보세요. 비나 눈 같은 날씨 효과도 함께 줄어요.'),
+      el('p', 'settings-note wx-credit', '서울 날씨는 실제 날씨를 따라요 · 날씨 정보: MET Norway (CC BY 4.0)'),
+    ];
   }
 
   private soundPage(s: AudioSettings): HTMLElement[] {

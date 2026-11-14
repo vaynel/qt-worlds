@@ -14,6 +14,7 @@ import type { LibraryService } from './library.js';
 import type { LetterResult, LetterService } from './letters.js';
 import { readBody, type ShotService } from './shots.js';
 import type { CampfireVoiceService } from './campfireVoice.js';
+import type { WeatherService } from './weather.js';
 
 /** What the API tells the realtime room about. */
 export interface RoomEvents {
@@ -126,6 +127,8 @@ export interface ApiDeps {
   footprints: FootprintService;
   shots: ShotService;
   campfireVoice: CampfireVoiceService;
+  /** 서울 날씨 (test override only; clients get it over /ws). */
+  weather?: WeatherService;
   /** Test-only endpoints (simulated clock). Never in production. */
   testMode: boolean;
 }
@@ -431,6 +434,18 @@ export class Api {
         // Everyone's clock offset follows the jump (a real clock never jumps).
         d.shop.events?.shopChanged();
         sendJson(res, 200, { now: d.shop.now(), shop: d.shop.status() });
+      });
+      // 서울 날씨 override and its clock (test servers only): {kind, tempC, wind, cloud, isDay, now} or {reset: true}.
+      r('POST', '/api/test/weather', async ({ req, res }) => {
+        const w = d.weather;
+        if (!w) throw new HttpError(404, 'not_found', 'weather off');
+        const body = await readJson(req);
+        if (body.now !== undefined) {
+          const now = body.now;
+          w.now = typeof now === 'number' && Number.isFinite(now) ? () => now : () => Date.now();
+        }
+        w.setOverride(body.reset === true ? null : body);
+        sendJson(res, 200, { weather: w.current(), broadcasts: w.broadcasts });
       });
       r('POST', '/api/test/shop/tick', async ({ res }) => sendJson(res, 200, await d.shop.tick()));
       r('POST', '/api/test/shop/ensure', async ({ res }) => {

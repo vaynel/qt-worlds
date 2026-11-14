@@ -55,6 +55,12 @@ interface Palette {
 }
 
 const c = (hex: number) => new THREE.Color(hex);
+const TMP = new THREE.Color();
+/** dst = src desaturated by `amount` and darkened by `darken` (no allocation). */
+function grey(src: THREE.Color, dst: THREE.Color, amount: number, darken: number) {
+  const l = src.r * 0.3 + src.g * 0.59 + src.b * 0.11;
+  dst.copy(src).lerp(TMP.setRGB(l, l, l * 1.04), amount).multiplyScalar(1 - darken);
+}
 const NIGHT: Palette = {
   skyTop: c(0x0b1430),
   skyHorizon: c(0x2a3560),
@@ -138,6 +144,18 @@ export class DayNight {
     sun: new THREE.Color(),
     sunIntensity: 1,
   };
+  /** Weather look on top of the time-of-day palette (Weather writes it every frame). */
+  readonly weather = { cloud: 0, grey: 0, fogNear: 40, fogFar: 105, flash: 0, crisp: 0, sunOut: 0 };
+  private readonly out = {
+    skyTop: new THREE.Color(),
+    skyHorizon: new THREE.Color(),
+    fog: new THREE.Color(),
+    hemiSky: new THREE.Color(),
+  };
+  private readonly flashColor = new THREE.Color(0xdfe6ff);
+  private baseStars = 0;
+  private baseSunDisc = 0;
+  private baseMoonDisc = 0;
   private readonly sunDir = new THREE.Vector3();
   private readonly lightDir = new THREE.Vector3();
   private lastCompute = -Infinity;
@@ -266,31 +284,59 @@ export class DayNight {
     else if (hours < 10) this.phase = '아침';
     else this.phase = '낮';
 
-    const p = this.palette;
-    this.sky.material.uniforms.topColor.value.copy(p.skyTop);
-    this.sky.material.uniforms.horizonColor.value.copy(p.skyHorizon);
-    (this.scene.fog as THREE.Fog).color.copy(p.fog);
-    this.scene.background = p.fog;
-    this.hemi.color.copy(p.hemiSky);
-    this.hemi.groundColor.copy(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity;
-    this.sun.color.copy(p.sun);
-    this.sun.intensity = p.sunIntensity;
-
     // Light comes from the sun by day and from the moon (opposite side) by night.
     if (s > -0.05) this.lightDir.copy(this.sunDir);
     else this.lightDir.set(-this.sunDir.x, Math.max(0.35, -this.sunDir.y), -this.sunDir.z).normalize();
     if (this.lightDir.y < 0.12) this.lightDir.y = 0.12;
     this.lightDir.normalize();
 
-    this.stars.material.opacity = THREE.MathUtils.clamp((this.night - 0.3) / 0.6, 0, 1);
-    this.sunDisc.material.opacity = THREE.MathUtils.clamp((s + 0.05) / 0.1, 0, 1);
-    this.moonDisc.material.opacity = THREE.MathUtils.clamp(this.night * 1.2 - 0.2, 0, 1);
+    this.baseStars = THREE.MathUtils.clamp((this.night - 0.3) / 0.6, 0, 1);
+    this.baseSunDisc = THREE.MathUtils.clamp((s + 0.05) / 0.1, 0, 1);
+    this.baseMoonDisc = THREE.MathUtils.clamp(this.night * 1.2 - 0.2, 0, 1);
+    this.apply();
+  }
+
+  /**
+   * Palette → sky, fog and lights, with the weather blended in: clouds dim the
+   * sun and flatten the light, grey weather desaturates sky and fog, fog pulls
+   * the fog distance in, lightning flashes the sky. Cheap enough to run every frame.
+   */
+  private apply(): void {
+    const p = this.palette;
+    const w = this.weather;
+    const o = this.out;
+    const dark = w.cloud * 0.28;
+    grey(p.skyTop, o.skyTop, w.grey, dark);
+    grey(p.skyHorizon, o.skyHorizon, w.grey, dark * 0.6);
+    grey(p.fog, o.fog, w.grey, dark * 0.6);
+    grey(p.hemiSky, o.hemiSky, w.grey * 0.7, 0);
+    if (w.flash > 0) {
+      o.skyTop.lerp(this.flashColor, w.flash * 0.7);
+      o.skyHorizon.lerp(this.flashColor, w.flash * 0.5);
+    }
+    this.sky.material.uniforms.topColor.value.copy(o.skyTop);
+    this.sky.material.uniforms.horizonColor.value.copy(o.skyHorizon);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(o.fog);
+    fog.near = w.fogNear;
+    fog.far = w.fogFar;
+    this.scene.background = o.fog;
+    this.hemi.color.copy(o.hemiSky);
+    this.hemi.groundColor.copy(p.hemiGround);
+    this.hemi.intensity = p.hemiIntensity * (1 - 0.18 * w.cloud) + w.flash * 2.2;
+    this.sun.color.copy(p.sun);
+    this.sun.intensity = p.sunIntensity * (1 - 0.78 * w.cloud) * (1 + 0.06 * w.crisp) + w.flash * 1.5;
+    w.sunOut = this.sun.intensity;
+    const veil = 1 - THREE.MathUtils.smoothstep(w.cloud, 0.35, 0.8);
+    this.stars.material.opacity = this.baseStars * (1 - w.cloud);
+    this.sunDisc.material.opacity = this.baseSunDisc * veil;
+    this.moonDisc.material.opacity = this.baseMoonDisc * veil;
   }
 
   /** Keep sky elements centred on the camera and the shadow frustum on the player. */
   update(camera: THREE.Camera, focus: THREE.Vector3): void {
     this.compute();
+    this.apply();
     this.group.position.copy(camera.position);
     this.sunDisc.position.copy(this.sunDir).multiplyScalar(400);
     this.sunDisc.lookAt(camera.position);

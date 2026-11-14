@@ -19,6 +19,7 @@ import type { CircleCollider } from './ChunkManager';
 import { PALETTE } from './config';
 import { createLabelSprite, disposeSprite } from './labels';
 import { mulberry32 } from './random';
+import { WeatherWindowMaterial } from './surface';
 
 const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 
@@ -65,7 +66,7 @@ export class LibraryInterior implements Ground {
   private readonly colliders: CircleCollider[] = [];
   private readonly shelves = new Map<BookcaseId, ShelfRig>();
   private readonly walls: { group: THREE.Group; hidden: (c: THREE.Vector3) => boolean }[] = [];
-  private readonly windowPanes: THREE.MeshBasicMaterial;
+  private readonly windowPanes: WeatherWindowMaterial;
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly lamps: { light: THREE.PointLight; glow: THREE.MeshLambertMaterial; base: number }[] = [];
@@ -87,7 +88,7 @@ export class LibraryInterior implements Ground {
     this.mesh(new THREE.BoxGeometry(4.6, 0.022, 8.4), lam(0xc8945a), 0, 0.012, 0.6);
 
     // Walls (each its own group so it can be cut away).
-    this.windowPanes = new THREE.MeshBasicMaterial({ color: 0xbfe0f0 });
+    this.windowPanes = new WeatherWindowMaterial(0xbfe0f0);
     this.materials.push(this.windowPanes);
     const wallMat = lam(0xf1e6cc);
     const trim = lam(PALETTE.woodDark);
@@ -115,8 +116,9 @@ export class LibraryInterior implements Ground {
     const windowAt = (g: THREE.Group, x: number, z: number, alongZ: boolean) => {
       const w = alongZ ? [0.12, 1.7, 1.3] : [1.3, 1.7, 0.12];
       this.mesh(new THREE.BoxGeometry(w[0] + 0.04, w[1] + 0.2, w[2] + 0.2), trim, x, 2.3, z, 0, g);
-      this.mesh(new THREE.BoxGeometry(alongZ ? 0.14 : w[0], w[1], alongZ ? w[2] : 0.14), this.windowPanes, x, 2.3, z, 0, g);
-      this.mesh(new THREE.BoxGeometry(alongZ ? 0.16 : 0.06, w[1], alongZ ? 0.06 : 0.16), trim, x, 2.3, z, 0, g);
+      // The pane is a little thicker than its frame so it shows on the inside face (it used to sit hidden in the trim).
+      this.mesh(new THREE.BoxGeometry(alongZ ? 0.18 : w[0], w[1], alongZ ? w[2] : 0.18), this.windowPanes, x, 2.3, z, 0, g);
+      this.mesh(new THREE.BoxGeometry(alongZ ? 0.2 : 0.06, w[1], alongZ ? 0.06 : 0.2), trim, x, 2.3, z, 0, g);
     };
     windowAt(east, W - 0.05, -3.2, true);
     windowAt(east, W - 0.05, 0.6, true);
@@ -427,10 +429,10 @@ export class LibraryInterior implements Ground {
   }
 
   /** Hide the walls between the camera and the room; light follows the time of day. */
-  update(camera: THREE.Camera, elapsed: number, night: number) {
+  update(camera: THREE.Camera, elapsed: number, night: number, gloom = 0) {
     for (const w of this.walls) w.group.visible = !w.hidden(camera.position);
     this.windowPanes.color.setHex(night > 0.5 ? 0x1c2747 : night > 0.2 ? 0xf0b878 : 0xbfe0f0);
-    this.sun.intensity = 0.85 * (1 - night) + 0.05;
+    this.sun.intensity = 0.85 * (1 - night) * (1 - 0.6 * gloom) + 0.05;
     this.hemi.intensity = 1.2 - night * 0.5;
     const f = 1 + Math.sin(elapsed * 9.1) * 0.04;
     for (const l of this.lamps) {

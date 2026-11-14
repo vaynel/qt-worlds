@@ -310,6 +310,7 @@ ${table(
   ],
 )}
 <p class="note">찬양 영상은 YouTube API 서비스를 이용해 보여 드려요. 찬양 플레이어를 쓰면 ${ext('https://www.youtube.com/t/terms', 'YouTube 서비스 약관')}에 동의하는 것으로 보며, ${ext('https://policies.google.com/privacy', 'Google 개인정보처리방침')}이 적용돼요. 서비스는 YouTube에서 이용자에 관한 정보를 받아 오지 않아요. Google 계정의 YouTube 관련 권한은 ${ext('https://security.google.com/settings/security/permissions', 'Google 보안 설정')}에서 확인할 수 있어요(서비스는 YouTube 권한을 요청하지 않아요).</p>
+<p class="note">월드의 날씨는 서비스 서버가 ${ext('https://api.met.no/', '노르웨이 기상청(MET Norway)')}에서 서울(고정된 좌표)의 날씨를 15분 이상의 간격으로 받아 와서 보여 드려요. 이때 이용자에 관한 정보는 어떤 것도 보내지 않으며, 이용자의 기기는 날씨 서비스에 직접 접속하지 않아요.</p>
 
 <h2 id="p6">6. 이용자의 권리와 행사 방법</h2>
 <p>이용자는 언제든 자신의 개인정보를 열람·정정·삭제하거나 처리 정지를 요구할 수 있어요. 대부분은 앱에서 바로 할 수 있고, 이메일(${mail})로 요청할 수도 있어요. 이메일 요청은 본인 확인(가입한 Google 계정 이메일로 보내 주시면 돼요) 뒤 10일 안에 처리하고 결과를 알려 드려요. 법정대리인이나 위임받은 분도 위임장을 함께 보내 주시면 요청할 수 있어요.</p>
@@ -511,6 +512,7 @@ export function renderTerms(cfg: LegalConfig): string {
 <li>운영자는 서비스를 안정적으로 제공하려고 노력하지만, 무료로 제공하는 서비스이므로 서비스의 중단, 오류, 데이터 손실에 대해 운영자의 고의나 중대한 과실이 없는 한 책임을 지지 않아요. 소중한 묵상은 가끔 “내 데이터 내려받기”로 보관해 두시길 권해요.</li>
 <li>이용자가 쓴 콘텐츠와 이용자 사이의 다툼은 당사자가 해결해야 하며, 운영자는 필요한 범위에서 돕고 이 약관에 따라 조치해요.</li>
 <li>YouTube, Google, Cloudflare 등 외부 서비스의 장애나 정책 변경으로 생기는 문제는 운영자가 책임질 수 없는 경우가 있어요.</li>
+<li>월드의 날씨는 서울의 실제 날씨를 따라 보여 주는 분위기 효과이며, 정확한 날씨 예보가 아니에요. 날씨 정보: ${ext('https://api.met.no/', 'MET Norway')} (${ext('https://creativecommons.org/licenses/by/4.0/', 'CC BY 4.0')}).</li>
 </ol>
 
 <h2 id="t13">제13조 (회원 탈퇴)</h2>

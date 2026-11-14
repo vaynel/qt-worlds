@@ -83,12 +83,13 @@
           <button type="button" id="library-exit" class="library-exit">↩ 문으로 나가기</button>
         </section>
         <div class="hud-right">
-          <section class="card clock-card" aria-label="한국 시간">
+          <section class="card clock-card" aria-label="서울 시간과 날씨">
             <span id="clock-icon" class="sky-icon sun" aria-hidden="true"></span>
             <span class="clock-text">
-              <span class="eyebrow">서울 <span id="clock-phase">낮</span></span>
+              <span class="eyebrow">서울 <span id="clock-phase">낮</span><span id="clock-wx"></span></span>
               <strong id="clock-time">오후 12:00</strong>
             </span>
+            <span id="clock-tip" class="clock-tip" role="status" hidden></span>
           </section>
           <nav id="tools" aria-label="도구">
             <button type="button" id="btn-word" class="tool">말씀</button>

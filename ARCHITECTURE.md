@@ -34,7 +34,7 @@ Line counts are approximate, as of 2026-11-13.
 | `net/NetClient.ts` | 520 | The WebSocket client: hello/welcome, reconnects, message dispatch. |
 | `net/RemotePlayers.ts` | 360 | Interpolated remote avatars from snapshots. |
 | `net/api.ts` | 60 | `api<T>(method, path, body)`: a fetch wrapper (cookies, JSON, errors). |
-| `world/*` | ~3,000 | Terrain chunks (`ChunkManager`, `Heightfield`), `DayNight`, `Landmarks`, `Library` interior, `Interior` (골방), `LanternField`, `ShopStall`, `NameTag`, `config.ts` (world layout). |
+| `world/*` | ~3,800 | Terrain chunks (`ChunkManager`, `Heightfield`), `DayNight`, `Landmarks`, `Library` interior, `Interior` (골방), `LanternField`, `ShopStall`, `NameTag`, `config.ts` (world layout). 서울 날씨: `Weather` (looks per kind, sky/light blend into `DayNight`, clouds, lightning, snow cover), `Particles` (GPU particle systems, one draw each), `Seasons` (KST season, blossom trees, Christmas lights), `surface.ts` (shared shader uniforms: snow, wet, sway, foliage tints; interior window panes). |
 | `entities/*` | ~1,300 | `Avatar` (meshes and outfit textures), `PlayerController`, `Props`. |
 | `systems/*` | ~370 | `Input` (keyboard, touch joystick), `CameraRig`. |
 | `ui/WorshipPlayer.ts` | 1,030 | The single YouTube player: API loading, playlist, fold states, dock/room layouts, background pause, and the phone facade (lazy creation). |
@@ -61,6 +61,7 @@ Line counts are approximate, as of 2026-11-13.
 | `db.ts` | 450 | `openDb` (pragmas) and the **append-only `MIGRATIONS` array** (`PRAGMA user_version`). |
 | `auth.ts`, `account.ts` | 440 / 350 | Sessions, Google OIDC (plus the mock provider), nicknames, consent; export and 회원 탈퇴. |
 | `services.ts` | 630 | WordBook, Group, Lantern and GroupChat services. |
+| `weather.ts` | 230 | 서울 날씨 from MET Norway Locationforecast 2.0 (https, `api.met.no` allow-list, identifying User-Agent, If-Modified-Since, next fetch at max(15 min, Expires) + jitter, timeout, 512 KB cap), symbol_code → kind, last-good/stale fallback, change-only `room.weatherChanged()`. Off in test mode (`/api/test/weather` override). |
 | `campfireVoice.ts` | 190 | 🔥 campfire voice reports and automatic mutes (3 reporters / 10 min → 24 h, repeat → 7 days), admin list, export, sweep. |
 | `library.ts`, `letters.ts`, `diary.ts`, `shots.ts`, `footprints.ts` | 590 / 540 / 160 / 250 / 150 | 이야기 도서관: books, letters, diary drafts, screenshots, 발자취. |
 | `shop.ts`, `looks.ts` | 455 / 330 | 나눔 소품 가게 (windows, stock, idempotent rentals); 꾸미기 (appearance, drawn outfits, reports). |
@@ -107,7 +108,7 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   signalling are separate messages.
 - **Spaces:** world, 골방 (per-player interior) and library (a shared interior). Players in another space are sent
   as hidden.
-- **Timers (server):** shop clock 1 s, push scheduler 1 min, sweep 1 h (sessions, old chat, photos), footprint
+- **Timers (server):** weather ≥ 15 min (MET Norway, outbound HTTPS to `api.met.no` only), shop clock 1 s, push scheduler 1 min, sweep 1 h (sessions, old chat, photos), footprint
   sample 20 s, day change checked every tick (cheap arithmetic; it sends the new 오늘의 말씀 at 00:00 KST).
 - **Push:** `push.ts` decides due notifications (daily word time, prayer, prop expiry, 공감 batches, letters,
   replies, the diary reminder) per user preferences. `WORLDS_PUSH_MOCK=1` records them instead (tests).
@@ -220,6 +221,7 @@ Which suite covers what:
 | m10 | HUD and sheets |
 | b1 / p13 | phone and tablet worship layouts with sheets; phone landscape |
 | la / lb | library (books, desks, photos, 발자취); letters, inbox, backups |
+| wx | 서울 날씨 (every kind: particles, fog, clouds, HUD, interiors), quality scaling, render on demand, seasons and Christmas, reduced motion, phone HUD |
 | ev | 😊 표현 (emotes) and 🔥 campfire public voice (relay-only ICE through a local mini TURN, reports, admin, layout) |
 | smoke | the fast cross-section above |
 

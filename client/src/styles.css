@@ -6261,3 +6261,41 @@ body.phone-land.touch:not(.tablet) .campfire-voice-btn .cv-text {
 .admin-voice-item .admin-info {
   min-width: 0;
 }
+
+/* =================== 서울 날씨: clock card weather icon, temperature and source tip =================== */
+.clock-card {
+  position: relative;
+  pointer-events: auto;
+  cursor: default;
+}
+.sky-icon.wx {
+  background: none;
+  box-shadow: none;
+  font-size: 19px;
+  line-height: 22px;
+  text-align: center;
+}
+#clock-wx {
+  font-variant-numeric: tabular-nums;
+}
+.clock-card .eyebrow {
+  white-space: nowrap;
+}
+.clock-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(46, 34, 26, 0.86);
+  color: #fff8ec;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  z-index: 5;
+  pointer-events: none;
+}
+.wx-credit {
+  margin-top: 10px;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}

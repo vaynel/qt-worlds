@@ -17,6 +17,7 @@ import { LibraryService } from './library.js';
 import { LetterService } from './letters.js';
 import { ShotService } from './shots.js';
 import { CampfireVoiceService } from './campfireVoice.js';
+import { WeatherService } from './weather.js';
 import { GroupChatService, GroupService, LanternService, WordBookService } from './services.js';
 
 const PORT = Number(process.env.PORT ?? 5181);
@@ -99,6 +100,12 @@ else if (!oidc.enabled) log('Google login not configured (GOOGLE_CLIENT_ID / GOO
 }
 if (TEST_MODE) log('WARNING: test mode (date overrides, test teleports) is enabled');
 
+// 서울 날씨: MET Norway, every max(15 min, Expires), conditional requests. Test servers never call out (the
+// /api/test/weather override sets it); WORLDS_WEATHER=0 turns it off anywhere.
+const weatherLive = !TEST_MODE && process.env.WORLDS_WEATHER !== '0';
+const weather = new WeatherService({ live: weatherLive, log, onChange: (s) => room.weatherChanged(s) });
+if (!weatherLive) log('weather: MET Norway requests off (test mode or WORLDS_WEATHER=0): season default unless overridden');
+
 const ice = new IceServers();
 const room = new Room({
   seed: SEED,
@@ -117,10 +124,12 @@ const room = new Room({
   footprintTickMs: Number(process.env.WORLDS_FOOTPRINT_TICK_MS ?? 20_000),
   campfireVoice,
   campfireVoiceEnabled: ice.configured,
+  weather,
 });
+weather.start();
 shop.events = room;
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only, campfire voice is off');
-const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, testMode: TEST_MODE });
+const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, weather, testMode: TEST_MODE });
 
 // WORLDS_CLIENT_DIST: tests serve a second build to simulate a deploy.
 const clientDist = process.env.WORLDS_CLIENT_DIST ? resolve(process.env.WORLDS_CLIENT_DIST) : resolve(serverRoot(), '../client/dist');
@@ -219,6 +228,7 @@ const shutdown = () => {
   clearInterval(sweeper);
   clearInterval(shopTimer);
   if (pushTimer) clearInterval(pushTimer);
+  weather.stop();
   room.close();
   wss.close();
   http.close(() => {

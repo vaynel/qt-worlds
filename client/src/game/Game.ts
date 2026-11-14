@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { maxPixelRatio, onGraphicsQuality } from './graphics';
-import type { WordPassage } from '../../../shared/protocol';
+import { graphicsQuality, maxPixelRatio, onGraphicsQuality } from './graphics';
+import type { WeatherState, WordPassage } from '../../../shared/protocol';
 import type { AudioEngine } from '../audio/AudioEngine';
 import { PlayerController } from '../entities/PlayerController';
 import { CameraRig } from '../systems/CameraRig';
@@ -125,6 +125,8 @@ export class Game {
   private coverCheckFrame = -1000;
   private coverModal: Modal | null = null;
   private sheetCovers = false;
+  /** ⚙ 🎨 화면 quality, cached (scales the weather particles). */
+  private quality = graphicsQuality();
   private lastCoveredDraw = 0;
   private readonly terrainChecksum: number;
   private readonly audio: AudioEngine;
@@ -251,6 +253,7 @@ export class Game {
       onReconnect: () => this.voice?.rejoinAfterReconnect(),
       tagView: () => this.tagView(),
       onWord: (word: WordPassage) => void this.devotion?.setWord(word),
+      onWeather: (w) => this.applyWeather(w),
       onLocalLook: (look) => this.applyLocalLook(look),
     });
 
@@ -465,8 +468,31 @@ export class Game {
 
     this.timer.connect(document);
     window.addEventListener('resize', this.resize);
-    onGraphicsQuality(() => this.resize());
+    onGraphicsQuality(() => {
+      this.quality = graphicsQuality();
+      this.resize();
+    });
     this.resize();
+
+    // 서울 날씨: the server pushes changes; thunder rumbles go through the ambience bus.
+    this.world.weather.onRumble = (strength) => this.audio.rumble(strength);
+    session.net?.on({ weather: (w) => this.applyWeather(w) });
+    if (!session.welcome?.weather) this.applyWeather(this.world.weather.state);
+  }
+
+  /** A new 서울 날씨 state: the scene follows over a few seconds, the clock card at once. */
+  private applyWeather(next: WeatherState) {
+    const wx = this.world.weather;
+    wx.setState(next);
+    const w = wx.state; // validated
+    const label = wx.label;
+    const known = !w.stale;
+    this.hud.setWeather(
+      w.kind === 'clear' ? null : label.name,
+      w.kind === 'clear' ? '' : w.kind,
+      known ? Math.round(w.tempC) : null,
+      known ? `서울 ${label.name} · 날씨 정보: MET Norway (CC BY 4.0)` : '날씨를 아직 불러오지 못했어요 · 날씨 정보: MET Norway (CC BY 4.0)',
+    );
   }
 
   private readonly onKeyDown = (e: KeyboardEvent) => {
@@ -1006,6 +1032,16 @@ export class Game {
         this.rig.snap(this.player.position);
       },
       voiceJoin: (groupId: number) => this.voice?.join(groupId),
+      /** 서울 날씨 (client only; the server override is /api/test/weather). */
+      weather: (w: Partial<WeatherState>) => this.applyWeather({ ...this.world.weather.state, ...w }),
+      /** Pretend it's this KST date ('2026-12-24'), or null for today: seasons and Christmas. */
+      weatherDate: (iso: string | null) => this.world.weather.setDate(iso ? Date.parse(`${iso}T12:00:00+09:00`) : null),
+      /** Skip the fade between looks. */
+      weatherSnap: () => this.world.weather.snap(),
+      weatherFlashSoon: () => this.world.weather.flashSoon(),
+      /** Speed up snow cover / melting / drying (1 = real time). */
+      weatherRate: (k: number) => (this.world.weather.rate = k),
+      snowCover: (v: number) => (this.world.weather.snowCover = v),
       /** 표현 through the real path (server echo shows it). */
       emote: (e: number) => this.emotes.fire(e),
       /** 🔥 campfire voice: the ICE config of every peer connection. */
@@ -1286,6 +1322,14 @@ export class Game {
 
     // 4. World streaming, sky, landmark ambience (inside the library the world waits at its door)
     this.world.update(this.elapsed, this.camera, this.inLibrary ? this.world.landmarks.libraryDoor : this.player.position);
+    this.world.weather.update({
+      dt,
+      elapsed: this.elapsed,
+      camera: this.camera,
+      outdoor: !this.inCloset && !this.inLibrary,
+      covered: this.sheetCovers,
+      quality: this.quality,
+    });
 
     // 5. Today's word, ambience, HUD
     this.devotion.update(dt, this.elapsed, !this.inCloset && !this.inLibrary && !this.transitioning);
@@ -1298,10 +1342,10 @@ export class Game {
     this.updateHud();
 
     if (this.inCloset) {
-      this.interior.update(dt, this.elapsed, this.world.dayNight.night);
+      this.interior.update(dt, this.elapsed, this.world.dayNight.night, this.world.weather.gloom);
       if (this.shouldDraw(false)) this.renderer.render(this.interior.scene, this.interior.camera);
     } else if (this.inLibrary) {
-      this.library.update(this.camera, this.elapsed, this.world.dayNight.night);
+      this.library.update(this.camera, this.elapsed, this.world.dayNight.night, this.world.weather.gloom);
       if (this.shouldDraw(true)) this.renderer.render(this.library.scene, this.camera);
     } else if (this.shouldDraw(true)) {
       this.renderer.render(this.scene, this.camera);
@@ -1395,6 +1439,9 @@ export class Game {
       wind: indoor ? 0 : 0.6 + 0.4 * (1 - this.world.dayNight.night * 0.5),
       fire: indoor ? 0 : THREE.MathUtils.clamp(1 - (fireD - 3) / 22, 0, 1),
       room: this.inCloset ? 1 : this.inLibrary ? 0.45 : 0,
+      // Rain outside; behind the 골방 or library walls it's quieter and duller.
+      rain: this.world.weather.rainLevel,
+      muffle: indoor ? 1 : 0,
     });
     this.audio.tick();
   }
@@ -1532,6 +1579,11 @@ export class Game {
         admin: this.isAdmin,
         customize: this.customize.describe(),
         report: this.reportView?.isOpen ?? false,
+      },
+      wx: {
+        ...this.world.weather.describe(),
+        hud: document.querySelector('.clock-card .eyebrow')?.textContent ?? '',
+        icon: document.getElementById('clock-icon')?.textContent ?? '',
       },
       m9: {
         shopOpen: this.shop.open,

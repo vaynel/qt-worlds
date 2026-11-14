@@ -41,6 +41,8 @@ export interface SocialOptions {
   /** 이야기 도서관 shelf counts pushed by the server. */
   onLibrary?: (shelves: BookcaseCounts) => void;
   onWord?: (word: import('../../../shared/protocol').WordPassage) => void;
+  /** 서울 날씨 from a welcome (first join and reconnects). */
+  onWeather?: (weather: import('../../../shared/protocol').WeatherState) => void;
   /** Our own display name (welcome / live rename). */
   onLocalName?: (name: string, guest: boolean) => void;
   tagView?: () => import('../world/NameTag').TagView;
@@ -152,6 +154,7 @@ export class Social {
     this.applyBenches(w.benches);
     this.applyDesks(w.desks);
     if (w.word) this.o.onWord?.(w.word);
+    if (w.weather) this.o.onWeather?.(w.weather);
     // Force a fresh state send so others see us where we really are.
     this.lastSent.t = 0;
     if (isReconnect) {

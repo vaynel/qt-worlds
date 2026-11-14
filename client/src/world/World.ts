@@ -5,6 +5,7 @@ import { DayNight } from './DayNight';
 import { Heightfield } from './Heightfield';
 import { Landmarks } from './Landmarks';
 import { hashString } from './random';
+import { Weather } from './Weather';
 
 export interface WorldOptions {
   seed?: string;
@@ -23,6 +24,8 @@ export class World {
   readonly chunks: ChunkManager;
   readonly landmarks: Landmarks;
   readonly dayNight: DayNight;
+  /** 서울 날씨 and the season's decorations. */
+  readonly weather: Weather;
   private readonly water: THREE.Mesh;
   private readonly nearby: CircleCollider[] = [];
 
@@ -33,6 +36,8 @@ export class World {
     this.chunks = new ChunkManager(this.field, seed, options.shadows);
     this.landmarks = new Landmarks(this.field, options.shadows);
     this.dayNight = new DayNight(scene, options.fixedHours, options.shadows);
+    const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.weather = new Weather(this.dayNight, this.field, this.landmarks.colliders, reducedMotion);
 
     const waterGeo = new THREE.PlaneGeometry(280, 280, 1, 1).rotateX(-Math.PI / 2);
     this.water = new THREE.Mesh(
@@ -43,7 +48,7 @@ export class World {
     this.water.receiveShadow = options.shadows;
     this.water.name = 'water';
 
-    scene.add(this.chunks.root, this.landmarks.group, this.water);
+    scene.add(this.chunks.root, this.landmarks.group, this.water, this.weather.group);
   }
 
   /** Hash of sampled heights: equal seeds must give equal values (QA). */
@@ -86,6 +91,7 @@ export class World {
     this.chunks.update(focus.x, focus.z);
     this.dayNight.update(camera, focus);
     this.landmarks.setNight(this.dayNight.night);
+    this.landmarks.flameLean = this.weather.flameLean;
     this.landmarks.update(elapsed, camera);
     this.water.position.x = Math.round(focus.x / 8) * 8;
     this.water.position.z = Math.round(focus.z / 8) * 8;

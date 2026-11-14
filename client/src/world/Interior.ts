@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Avatar } from '../entities/Avatar';
 import { PALETTE } from './config';
+import { WeatherWindowMaterial } from './surface';
 
 const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) =>
   new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
@@ -16,7 +17,7 @@ export class Interior {
   readonly avatar = new Avatar();
   private readonly candle: THREE.PointLight;
   private readonly flame: THREE.Mesh;
-  private readonly windowPane: THREE.MeshBasicMaterial;
+  private readonly windowPane: WeatherWindowMaterial;
   private readonly sunLight: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private yaw = 0;
@@ -48,8 +49,8 @@ export class Interior {
     add(new THREE.BoxGeometry(6, 0.1, 6), lam(0xd9c4a0), 0, 3.2, 0);
     add(new THREE.BoxGeometry(6, 0.18, 0.12), lam(PALETTE.woodDark), 0, 0.09, -2.94);
 
-    // Window on the right wall: colour follows day/night.
-    this.windowPane = new THREE.MeshBasicMaterial({ color: 0xbfe0f0 });
+    // Window on the right wall: colour follows day/night, and it shows the weather outside.
+    this.windowPane = new WeatherWindowMaterial(0xbfe0f0);
     add(new THREE.BoxGeometry(0.06, 1.1, 1.4), lam(PALETTE.woodDark), 2.95, 1.75, -0.6);
     add(new THREE.BoxGeometry(0.04, 0.95, 1.25), this.windowPane, 2.93, 1.75, -0.6);
     add(new THREE.BoxGeometry(0.05, 0.95, 0.05), lam(PALETTE.woodDark), 2.92, 1.75, -0.6);
@@ -115,13 +116,13 @@ export class Interior {
     this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.003, 0.05, 0.7);
   }
 
-  /** night: 0 day .. 1 night. */
-  update(dt: number, elapsed: number, night: number) {
+  /** night: 0 day .. 1 night; gloom: 0 clear .. 1 dark rain clouds (greyer, dimmer daylight). */
+  update(dt: number, elapsed: number, night: number, gloom = 0) {
     const f = 1 + Math.sin(elapsed * 8.3) * 0.08 + Math.sin(elapsed * 13.1) * 0.05;
     this.flame.scale.set(1, f, 1);
     this.candle.intensity = (1.6 + night * 1.6) * f;
     this.windowPane.color.setHex(night > 0.5 ? 0x1c2747 : 0xbfe0f0);
-    this.sunLight.intensity = 0.9 * (1 - night) + 0.08;
+    this.sunLight.intensity = 0.9 * (1 - night) * (1 - 0.6 * gloom) + 0.08;
     this.hemi.intensity = 0.95 - night * 0.45;
     this.avatar.animate(dt, 0, elapsed);
 

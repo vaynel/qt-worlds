@@ -6,12 +6,13 @@ import type { Heightfield } from './Heightfield';
 import { createLabelSprite } from './labels';
 import { mulberry32 } from './random';
 import { ShopStall } from './ShopStall';
+import { patchSurface } from './surface';
 
 const matCache = new Map<number, THREE.MeshLambertMaterial>();
 function lambert(color: number): THREE.MeshLambertMaterial {
   let m = matCache.get(color);
   if (!m) {
-    m = new THREE.MeshLambertMaterial({ color, flatShading: true });
+    m = patchSurface(new THREE.MeshLambertMaterial({ color, flatShading: true }), 'solid');
     matCache.set(color, m);
   }
   return m;
@@ -444,11 +445,18 @@ export class Landmarks {
     this.shopStall.setNight(night);
   }
 
+  /** Wind lean of the campfire flames (radians, toward +x/+z like the rain). */
+  flameLean = 0;
+
   update(elapsed: number, camera: THREE.Camera) {
     this.shopStall.update(elapsed);
-    // Flame flicker.
+    // Flame flicker, leaning with the wind.
     const f = 1 + Math.sin(elapsed * 9.1) * 0.06 + Math.sin(elapsed * 13.7) * 0.04;
-    for (const flame of this.flames) flame.scale.set(1, f, 1);
+    const lean = this.flameLean * (0.85 + 0.15 * Math.sin(elapsed * 2.3));
+    for (const flame of this.flames) {
+      flame.scale.set(1, f, 1);
+      flame.rotation.set(lean * 0.4, 0, -lean);
+    }
     const fire = this.fireLight;
     if (fire) fire.light.intensity = (fire.day + (fire.night - fire.day) * this.night) * (0.9 + (f - 1) * 1.5);
 

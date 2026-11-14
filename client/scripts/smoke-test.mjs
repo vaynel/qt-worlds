@@ -6,7 +6,7 @@
 // the HUD's four buttons; the phone worship facade (nothing from YouTube until a
 // tap) and the desktop player; 말씀 → a meditation saves → a lantern is shared;
 // campfire chat both ways; 😊 표현 and the 🎙️ campfire voice button; the 📬 badge via /letters/unread (no inbox download);
-// a library bookcase list; the ⚙ menu pages; render-on-demand under a phone sheet.
+// a library bookcase list; the ⚙ menu pages; render-on-demand under a phone sheet; 서울 날씨 in welcome and on the HUD.
 // Waits are predicates (until/waitFor…), never fixed sleeps.
 //   cd client && npm run build && (cd ../server && npm run build) && npm run test:smoke
 // Port: TEST_SERVER_PORT (default 5188). VERBOSE=1 prints steps and server logs.
@@ -170,6 +170,16 @@ try {
     const tools = await p.$$eval('#tools > *', (els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.id));
     check(`${n}: the world renders (${d.renderer.calls} draw calls, ${d.chunks} chunks)`, d.ready && d.renderer.calls > 20 && d.chunks > 0);
     check(`${n}: HUD has 말씀 · 모임 · 찬양 · ⚙`, tools.join(',') === 'btn-word,btn-groups,btn-worship,btn-settings', tools.join(','));
+  }
+  // 서울 날씨: welcome carries it (test servers never call MET Norway), a test override goes out live, the clock card shows it.
+  {
+    const wA = await A.evaluate(() => window.__WORLDS_DEBUG__.wx);
+    check('welcome carries 서울 날씨 (no reading yet: clear, stale → 서울 낮)', wA?.kind === 'clear' && wA.stale === true && wA.hud.startsWith('서울'), JSON.stringify(wA?.hud));
+    await fetch(`${BASE}api/test/weather`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'rain', tempC: 12 }) });
+    for (const p of [A, B]) await until(p, () => window.__WORLDS_DEBUG__.wx.hud === '서울 비 · 12°C' && window.__WORLDS_DEBUG__.wx.counts.rain > 0, null, 10000).catch(() => undefined);
+    const wB = await B.evaluate(() => window.__WORLDS_DEBUG__.wx);
+    check('live weather: both clocks read 서울 비 · 12°C and rain falls', (await A.evaluate(() => window.__WORLDS_DEBUG__.wx.hud)) === '서울 비 · 12°C' && wB.hud === '서울 비 · 12°C' && wB.counts.rain > 0, wB.hud);
+    await fetch(`${BASE}api/test/weather`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reset: true }) });
   }
   // ⚙ → 🎨 화면 품질: default 선명 (1.5 on a DPR-2 phone); 보통 → 1.25; 절약 → 1.
   check('phone pixel ratio default 선명 = 1.5 (DPR 2 device)', (await debug(A)).renderer.pixelRatio === 1.5, String((await debug(A)).renderer.pixelRatio));

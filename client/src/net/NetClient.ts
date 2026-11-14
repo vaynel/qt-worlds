@@ -7,6 +7,7 @@ import {
   type ServerMessage,
   type StatePayload,
   type WordPassage,
+  type WeatherState,
   type AccountInfo,
   type LanternInfo,
   type VoicePeerInfo,
@@ -41,6 +42,8 @@ export interface Welcome {
   guest: boolean;
   /** Our own saved appearance (M8), null = default look. */
   look: Look | null;
+  /** 서울 날씨 (absent on older servers). */
+  weather: WeatherState | null;
 }
 
 export interface NetHandlers {
@@ -58,6 +61,8 @@ export interface NetHandlers {
   error(code: ErrorCode, message: string): void;
   status(status: NetStatus): void;
   word(word: WordPassage): void;
+  /** 서울 날씨 changed. */
+  weather(weather: WeatherState): void;
   rename(id: string, name: string): void;
   look(id: string, look: Look | null): void;
   /** 나눔 소품 가게 (M9). */
@@ -256,6 +261,9 @@ export class NetClient {
       case 'word':
         this.handlers.word?.(msg.word);
         break;
+      case 'weather':
+        this.handlers.weather?.(msg.weather);
+        break;
       default:
         break;
     }
@@ -341,6 +349,7 @@ export class NetClient {
             account: msg.account ?? null,
             guest: msg.guest ?? !msg.account,
             look: msg.look ?? null,
+            weather: msg.weather && typeof msg.weather === 'object' ? msg.weather : null,
           };
           this.setStatus('online');
           if (first) first.onWelcome(w);
@@ -404,6 +413,9 @@ export class NetClient {
           break;
         case 'word':
           if (msg.word && typeof msg.word.text === 'string') this.dispatch(msg);
+          break;
+        case 'weather':
+          if (msg.weather && typeof msg.weather.kind === 'string') this.dispatch(msg);
           break;
         case 'voiceRoom':
         case 'voicePeer':

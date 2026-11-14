@@ -4,6 +4,24 @@ const HINT_DESKTOP = 'WASD · 방향키로 걷기 · Shift 달리기 · 마우�
 const HINT_TOUCH = '왼쪽 아래를 눌러 걷기 · 화면을 끌어서 둘러보기 · 두 손가락으로 가까이/멀리';
 const PROMPT_SECONDS = 6;
 
+/** Small weather icons for the clock card (fixed markup, 24×24), drawn like the sun/moon icon. */
+const CLOUD = '<path d="M7 18h10.5a3.8 3.8 0 0 0 .4-7.6A5.5 5.5 0 0 0 7.4 9.2 4.4 4.4 0 0 0 7 18z" fill="#f4f1ea" stroke="#9aa3ad" stroke-width="1.3"/>';
+const GREY_CLOUD = '<path d="M7 15h10.5a3.6 3.6 0 0 0 .4-7.2A5.3 5.3 0 0 0 7.6 6.6 4.2 4.2 0 0 0 7 15z" fill="#c9ced6" stroke="#7d8794" stroke-width="1.3"/>';
+const drops = (xs: number[], color = '#5d8fc9') =>
+  xs.map((x) => `<path d="M${x} 17.2l-1.1 3.3" stroke="${color}" stroke-width="1.6" stroke-linecap="round"/>`).join('');
+const WX_ICONS: Record<string, string> = {
+  partly: '<circle cx="9" cy="9" r="4.2" fill="#ffd27a"/>' + CLOUD.replace('M7 18', 'M8 19'),
+  cloudy: CLOUD,
+  fog: '<path d="M4 9h16M3 13h18M5 17h14" stroke="#9aa3ad" stroke-width="1.8" stroke-linecap="round"/>',
+  drizzle: GREY_CLOUD + drops([9.5, 15]),
+  rain: GREY_CLOUD + drops([8, 12, 16]),
+  heavyRain: GREY_CLOUD.replace('#c9ced6', '#aab1bc') + drops([7, 10.5, 14, 17.5], '#3f73b5'),
+  thunder: GREY_CLOUD.replace('#c9ced6', '#9ea6b2') + '<path d="M12.5 14.5l-2.6 4.2h2.4l-1.5 3.8 4.2-5.3h-2.5l1.6-2.7z" fill="#ffc94a"/>',
+  snow: GREY_CLOUD + '<circle cx="8.5" cy="18.6" r="1.2" fill="#8fb3dc"/><circle cx="12.5" cy="20.4" r="1.2" fill="#8fb3dc"/><circle cx="16" cy="18.4" r="1.2" fill="#8fb3dc"/>',
+  heavySnow:
+    '<g stroke="#6d9bd1" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.8 4.8 12 6.6l2.2-1.8M9.8 19.2 12 17.4l2.2 1.8"/></g>',
+};
+
 const $ = <T extends HTMLElement>(id: string) => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`#${id} 요소가 없어요`);
@@ -19,6 +37,14 @@ export class Hud {
   private readonly clockTime = $('clock-time');
   private readonly clockPhase = $('clock-phase');
   private readonly clockIcon = $('clock-icon');
+  private readonly clockWx = $('clock-wx');
+  private readonly clockTip = $('clock-tip');
+  private readonly clockCard = this.clockIcon.parentElement as HTMLElement;
+  private wxName: string | null = null;
+  private wxIcon = '';
+  private wxText = '';
+  private wxTip = '';
+  private tipTimer = 0;
   private readonly prompt = $('prompt');
   private readonly hint = $('hint');
   private readonly loading = $('loading');
@@ -42,6 +68,10 @@ export class Hud {
   private promptUntil = 0;
   private hintFadeAt = Infinity;
   private touch: boolean | null = null;
+
+  constructor() {
+    this.clockCard.addEventListener('click', () => this.toggleTip());
+  }
 
   setTouch(touch: boolean) {
     if (touch === this.touch) return;
@@ -197,12 +227,49 @@ export class Hud {
       this.clock = text;
       this.clockTime.textContent = text;
     }
-    if (phase !== this.phase) {
-      this.phase = phase;
-      this.clockPhase.textContent = phase;
+    // A weather word ("비", "눈" …) takes the phase's place; clear skies keep 낮/밤.
+    const label = this.wxName ?? phase;
+    if (label !== this.phase) {
+      this.phase = label;
+      this.clockPhase.textContent = label;
     }
-    this.clockIcon.classList.toggle('moon', night);
-    this.clockIcon.classList.toggle('sun', !night);
+    const wx = this.clockIcon.dataset.wx !== undefined && this.clockIcon.dataset.wx !== '';
+    this.clockIcon.classList.toggle('moon', night && !wx);
+    this.clockIcon.classList.toggle('sun', !night && !wx);
+    this.clockIcon.classList.toggle('wx', wx);
+  }
+
+  /**
+   * 서울 날씨 on the clock card: "서울 비 · 12°C". name null = clear (the phase
+   * shows), icon = the weather kind ('' = the drawn sun/moon), temp null = unknown (no reading yet).
+   */
+  setWeather(name: string | null, icon: string, temp: number | null, tip: string) {
+    this.wxName = name;
+    if (icon !== this.wxIcon) {
+      this.wxIcon = icon;
+      // Fixed icon markup from WX_ICONS (never data from the network).
+      const svg = Object.prototype.hasOwnProperty.call(WX_ICONS, icon) ? WX_ICONS[icon] : '';
+      this.clockIcon.innerHTML = svg ? `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${svg}</svg>` : '';
+      this.clockIcon.dataset.wx = svg ? icon : '';
+    }
+    const text = temp === null ? '' : ` · ${temp}°C`;
+    if (text !== this.wxText) {
+      this.wxText = text;
+      this.clockWx.textContent = text;
+    }
+    this.wxTip = tip;
+    if (!this.clockTip.hidden) this.clockTip.textContent = tip;
+  }
+
+  private toggleTip() {
+    window.clearTimeout(this.tipTimer);
+    if (!this.clockTip.hidden) {
+      this.clockTip.hidden = true;
+      return;
+    }
+    this.clockTip.textContent = this.wxTip;
+    this.clockTip.hidden = false;
+    this.tipTimer = window.setTimeout(() => (this.clockTip.hidden = true), 3500);
   }
 
   /**

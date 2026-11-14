@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CELL_SIZE, CHUNK_CELLS, CHUNK_SIZE, PALETTE, VIEW_RADIUS, WATER_LEVEL } from './config';
 import type { Heightfield } from './Heightfield';
 import { hashCoords, mulberry32 } from './random';
+import { patchSurface } from './surface';
 
 export interface CircleCollider {
   x: number;
@@ -19,15 +20,19 @@ interface Chunk {
 
 /** Shared, never-disposed geometry and materials for scattered props. */
 class PropKit {
-  readonly terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  // Weather looks (snow cover, wet ground, sway, season tints) come from surface.ts.
+  readonly terrainMat = patchSurface(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), 'ground');
   readonly trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 1, 5).translate(0, 0.5, 0);
   readonly pineGeo: THREE.BufferGeometry;
   readonly roundGeo = new THREE.IcosahedronGeometry(1, 0);
   readonly rockGeo = new THREE.DodecahedronGeometry(1, 0);
   readonly bushGeo = new THREE.IcosahedronGeometry(1, 0).scale(1, 0.7, 1);
-  readonly trunkMat = new THREE.MeshLambertMaterial({ color: PALETTE.trunk, flatShading: true });
-  readonly foliageMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
-  readonly rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  readonly trunkMat = patchSurface(new THREE.MeshLambertMaterial({ color: PALETTE.trunk, flatShading: true }), 'solid');
+  /** Round trees and bushes: autumn colours, bare-ish in winter. */
+  readonly foliageMat = patchSurface(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), 'leaf');
+  /** Pines stay green all year. */
+  readonly pineMat = patchSurface(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), 'evergreen');
+  readonly rockMat = patchSurface(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), 'solid');
 
   constructor() {
     // Two stacked cones, merged by hand so a pine is one instanced draw.
@@ -311,7 +316,7 @@ export class ChunkManager {
       d.scale.set(t.scale, h * t.scale, t.scale);
     }, false, true);
 
-    make(kit.pineGeo, kit.foliageMat, pines, (t) => {
+    make(kit.pineGeo, kit.pineMat, pines, (t) => {
       d.position.set(t.x, t.y + 0.9 * t.scale, t.z);
       d.rotation.set(0, t.rot, 0);
       d.scale.setScalar(1.25 * t.scale);

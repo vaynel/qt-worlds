@@ -1,8 +1,9 @@
 /**
  * Procedural ambience with Web Audio only (no audio files):
- *   wind (outdoors), campfire crackle, quiet room tone (골방), and small UI cues.
+ *   wind (outdoors), campfire crackle, quiet room tone (골방), rain (서울 날씨,
+ *   muffled indoors), thunder rumbles, and small UI cues.
  *
- * Bus layout:  [wind|fire|room] -> ambience ┐
+ * Bus layout:  [wind|fire|room|rain] -> ambience ┐
  *                        [chime|page] -> ui ├-> master -> destination
  * The context is created on the first user gesture (browser autoplay rules).
  */
@@ -68,6 +69,10 @@ export interface AmbienceMix {
   fire: number;
   /** 0..1 inside the private room. */
   room: number;
+  /** 0..1 rain loudness (heavier rain is louder). */
+  rain?: number;
+  /** 0 outdoors .. 1 behind walls (the rain goes dull and quiet). */
+  muffle?: number;
 }
 
 function noiseBuffer(ctx: AudioContext, seconds: number, kind: 'white' | 'pink' | 'brown'): AudioBuffer {
@@ -106,10 +111,14 @@ export class AudioEngine {
   private windGain!: GainNode;
   private fireGain!: GainNode;
   private roomGain!: GainNode;
+  private rainGain!: GainNode;
+  private rainLow!: BiquadFilterNode;
   private crackleBus!: GainNode;
   private whiteBuffer!: AudioBuffer;
   private nextCrackle = 0;
-  private mix: AmbienceMix = { wind: 1, fire: 0, room: 0 };
+  private mix: AmbienceMix = { wind: 1, fire: 0, room: 0, rain: 0, muffle: 0 };
+  /** Thunder rumbles played (tests). */
+  rumbles = 0;
   private ducked = false;
   private voiceDucked = false;
   settings: AudioSettings = loadSettings();
@@ -205,6 +214,7 @@ export class AudioEngine {
     this.buildWind(ctx);
     this.buildFire(ctx);
     this.buildRoom(ctx);
+    this.buildRain(ctx);
     this.applyMix(0.1);
     void ctx.resume();
   }
@@ -272,6 +282,45 @@ export class AudioEngine {
     src.connect(low).connect(level).connect(this.roomGain).connect(this.ambience);
   }
 
+  /** Rain: white noise, band-limited to a soft hiss, with a slow swell; a low-pass muffles it indoors. */
+  private buildRain(ctx: AudioContext) {
+    const src = this.loop(ctx, noiseBuffer(ctx, 3, 'white'));
+    const high = ctx.createBiquadFilter();
+    high.type = 'highpass';
+    high.frequency.value = 500;
+    this.rainLow = ctx.createBiquadFilter();
+    this.rainLow.type = 'lowpass';
+    this.rainLow.frequency.value = 5200;
+    const swell = ctx.createGain();
+    swell.gain.value = 0.32;
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = 0;
+    src.connect(high).connect(this.rainLow).connect(swell).connect(this.rainGain).connect(this.ambience);
+    this.lfo(ctx, 0.08, 0.06, swell.gain);
+  }
+
+  /** Distant thunder: a low brown-noise swell (procedural, through the ambience bus). */
+  rumble(strength = 1) {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    this.rumbles++;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, 3.2, 'brown');
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowpass';
+    low.frequency.setValueAtTime(260, t);
+    low.frequency.exponentialRampToValueAtTime(70, t + 3);
+    const g = ctx.createGain();
+    const muffled = 1 - 0.5 * (this.mix.muffle ?? 0);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.9 * strength * muffled, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 3.1);
+    src.connect(low).connect(g).connect(this.ambience);
+    src.start(t);
+    src.stop(t + 3.2);
+  }
+
   private crackle(ctx: AudioContext, when: number) {
     const src = ctx.createBufferSource();
     src.buffer = this.whiteBuffer;
@@ -291,7 +340,11 @@ export class AudioEngine {
 
   setMix(mix: AmbienceMix) {
     const changed =
-      Math.abs(mix.wind - this.mix.wind) > 0.02 || Math.abs(mix.fire - this.mix.fire) > 0.02 || Math.abs(mix.room - this.mix.room) > 0.02;
+      Math.abs(mix.wind - this.mix.wind) > 0.02 ||
+      Math.abs(mix.fire - this.mix.fire) > 0.02 ||
+      Math.abs(mix.room - this.mix.room) > 0.02 ||
+      Math.abs((mix.rain ?? 0) - (this.mix.rain ?? 0)) > 0.02 ||
+      Math.abs((mix.muffle ?? 0) - (this.mix.muffle ?? 0)) > 0.02;
     this.mix = mix;
     if (changed) this.applyMix(0.6);
   }
@@ -303,6 +356,9 @@ export class AudioEngine {
     this.windGain.gain.setTargetAtTime(this.mix.wind * 0.6, t, seconds / 3);
     this.fireGain.gain.setTargetAtTime(this.mix.fire * 0.9, t, seconds / 3);
     this.roomGain.gain.setTargetAtTime(this.mix.room * 0.8, t, seconds / 3);
+    const muffle = this.mix.muffle ?? 0;
+    this.rainGain.gain.setTargetAtTime((this.mix.rain ?? 0) * (1 - 0.6 * muffle), t, seconds);
+    this.rainLow.frequency.setTargetAtTime(5200 - 4500 * muffle, t, seconds / 3);
   }
 
   /** Call every frame: schedules campfire crackles. */
@@ -388,6 +444,7 @@ export class AudioEngine {
       muted: this.muted,
       ducked: this.ducked,
       mix: { ...this.mix },
+      rumbles: this.rumbles,
       settings: { ...this.settings },
       targets: { master: r(t.master), ambience: r(t.ambience), ui: r(t.ui) },
       // Live AudioParam values (they glide toward the targets).
