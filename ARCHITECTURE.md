@@ -67,7 +67,7 @@ Line counts are approximate, as of 2026-11-13.
 | `campfireVoice.ts` | 190 | 🔥 campfire voice reports and automatic mutes (3 reporters / 10 min → 24 h, repeat → 7 days), admin list, export, sweep. |
 | `library.ts`, `letters.ts`, `diary.ts`, `shots.ts`, `footprints.ts` | 590 / 540 / 160 / 250 / 150 | 이야기 도서관: books, letters, diary drafts, screenshots, 발자취. |
 | `shop.ts`, `looks.ts` | 455 / 330 | 나눔 소품 가게 (windows, stock, idempotent rentals); 꾸미기 (appearance, drawn outfits, reports). |
-| `push.ts` | 510 | Web Push: subscriptions, preferences, daily/prayer/prop/story/letter/reply/diary kinds. |
+| `push.ts` | 560 | Web Push: subscriptions, preferences, daily/🏮 lantern reactions (prayer/amen/record, merged)/prop/story/letter/reply/diary kinds. |
 | `dailyWord.ts` | 400 | 오늘의 말씀 from the baked Bible text (`data/bible-krv.json`, `data/curated-verses.json`). |
 | `rateLimit.ts` | 20 | `TokenBucket` for WebSocket messages. |
 | `scripts/backup.mjs` | 170 | Online SQLite backup plus the photo mirror and `--restore-photos`. |
@@ -112,8 +112,14 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   as hidden.
 - **Timers (server):** weather ≥ 15 min (MET Norway, outbound HTTPS to `api.met.no` only), shop clock 1 s, push scheduler 1 min, sweep 1 h (sessions, old chat, photos, stats older than 13 months), footprint
   sample 20 s, online-player sample 5 min (`WORLDS_STATS_SAMPLE_MS`), day change checked every tick (cheap arithmetic; it sends the new 오늘의 말씀 at 00:00 KST).
-- **Push:** `push.ts` decides due notifications (daily word time, prayer, prop expiry, 공감 batches, letters,
+- **Push:** `push.ts` decides due notifications (daily word time, 🏮 lantern reactions, prop expiry, 공감 batches, letters,
   replies, the diary reminder) per user preferences. `WORLDS_PUSH_MOCK=1` records them instead (tests).
+- **🏮 내 등불 반응:** 🤲 기도하기 / 🙏 아멘 / 📌 기록하기 on someone's lantern → `push.lanternReacted` (never self; per-kind
+  opt-out `push_prefs.prayer/amen/record`; same person + lantern + kind counted once per 6 h in `lantern_push_seen`).
+  One notice per owner per 15 min across kinds (`lantern_push` holds the pending counts and `last_sent_at`, so a
+  restart sends nothing extra); several kinds merge into one ("🤲 기도 2 · 🙏 아멘 3 · 📌 기록 1"). Delivery: a
+  `lanternNotice` toast on the owner's open connections, plus Web Push **unless** one of them last reported
+  `{ t: 'visible', visible: true }` (pages send it on welcome and on `visibilitychange`). Fixed text only.
 - **Badges:** the 📬 unread-letters count comes from `GET /api/library/letters/unread` on sign-in (one SQL COUNT),
   then live via the `letters` WS message. The full inbox (`/api/library/letters/inbox`) is fetched only when
   받은 편지 opens.
@@ -217,6 +223,7 @@ Which suite covers what:
 | m5v / m52 / m53 / m54 | voice rooms; tablet chat layout and 골방 room UI; chat fold layouts; benches |
 | m51 | anonymous lanterns |
 | m6 | Web Push, PWA, offline |
+| rx | 🏮 내 등불 반응: 아멘/기록/기도 pushes, merged bursts, 15-min hold, per-kind prefs, anonymity, online toast vs push, live counts |
 | m7 | legal pages, consent, backup, no YouTube (CSP, requests) |
 | m8 | 꾸미기, outfit reports, admin |
 | m9 | 나눔 소품 가게 |

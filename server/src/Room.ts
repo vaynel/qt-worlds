@@ -84,6 +84,8 @@ interface Client {
   lookOwn: Look | null;
   /** Borrowed props (M9) everyone sees. */
   props: PropWear[];
+  /** The page reports itself visible (unknown = false: a push is still sent). */
+  visible: boolean;
 }
 
 const spaceOf = (c: Client): Space => c.state.inside ?? 'world';
@@ -230,6 +232,7 @@ export class Room implements RoomEvents, ShopEvents {
       lookPublic: null,
       lookOwn: null,
       props: [],
+      visible: false,
     };
     client.helloTimer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
     this.clients.set(client.id, client);
@@ -430,6 +433,10 @@ export class Room implements RoomEvents, ShopEvents {
       case 'emote':
         if (!client.buckets.emote.take()) return this.strike(client, 'rate_limited');
         return this.emote(client, msg.e);
+      case 'visible':
+        if (!client.buckets.state.take()) return this.strike(client, 'rate_limited', true);
+        client.visible = msg.visible;
+        return;
     }
   }
 
@@ -808,6 +815,25 @@ export class Room implements RoomEvents, ShopEvents {
   letters(userId: number, unread: number, toast?: string, storyId?: number) {
     for (const c of this.clients.values()) {
       if (c.joined && c.userId === userId && c.accountName) this.send(c, { t: 'letters', unread, ...(toast ? { toast } : {}), ...(storyId ? { storyId } : {}) });
+    }
+  }
+
+  /** 🏮 Is this account connected, and is one of its pages visible right now? */
+  presence(userId: number): { online: boolean; visible: boolean } {
+    let online = false;
+    let visible = false;
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.userId !== userId || !c.accountName) continue;
+      online = true;
+      if (c.visible) visible = true;
+    }
+    return { online, visible };
+  }
+
+  /** 🏮 내 등불 반응: a fixed-text toast on that account's own connections. */
+  lanternNotice(userId: number, text: string) {
+    for (const c of this.clients.values()) {
+      if (c.joined && c.userId === userId && c.accountName) this.send(c, { t: 'lanternNotice', text });
     }
   }
 

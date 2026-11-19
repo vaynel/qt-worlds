@@ -315,6 +315,8 @@ export class Game {
         if (reading && storyId !== null) void this.libraryView.refreshLetters(storyId);
         else if (toast) this.hud.toast(`${toast} · 말씀 → 📬 받은 편지`, this.elapsed, 5);
       },
+      // 🏮 내 등불 반응 (batched, fixed text); the lantern counts update via the 'lantern' message.
+      lanternNotice: (text) => this.hud.toast(text, this.elapsed, 5),
       groupChat: (m) => this.groupsView.receive(m),
       groupChatUpdate: (m) => this.groupsView.update(m),
       groupRead: (gid) => this.groupsView.readElsewhere(gid),

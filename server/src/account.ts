@@ -134,12 +134,14 @@ export class AccountService {
       last_ok_at: number | null;
     }[];
     const prefs = this.db
-      .prepare('SELECT daily, daily_time, prayer, props, library, letters, replies, diary, diary_time, updated_at FROM push_prefs WHERE user_id = ?')
+      .prepare('SELECT daily, daily_time, prayer, amen, record, props, library, letters, replies, diary, diary_time, updated_at FROM push_prefs WHERE user_id = ?')
       .get(userId) as
       | {
           daily: number;
           daily_time: number;
           prayer: number;
+          amen: number;
+          record: number;
           props: number;
           library: number;
           letters: number;
@@ -228,6 +230,8 @@ export class AccountService {
               daily: prefs.daily === 1,
               dailyTimeMinutes: prefs.daily_time,
               prayer: prefs.prayer === 1,
+              amen: prefs.amen === 1,
+              record: prefs.record === 1,
               propReminders: prefs.props === 1,
               myStoryNews: prefs.library === 1,
               newLetters: prefs.letters === 1,

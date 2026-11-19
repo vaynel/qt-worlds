@@ -7,7 +7,10 @@ import { platform, type Platform } from './MicHelp';
 export interface PushPrefs {
   daily: boolean;
   dailyTime: string;
+  /** 🏮 내 등불 반응, per kind (all default on). */
   prayer: boolean;
+  amen?: boolean;
+  record?: boolean;
   /** 소품 만료 알림 (M9). */
   props: boolean;
   /** L-B: 📚 내 이야기 소식 (공감, batched), ✉️ new letters, 💌 answers to my letters. */
@@ -107,7 +110,7 @@ export class NotifySettings {
   private offer() {
     const on = button('🔔 알림 켜기', 'primary', () => this.prePrompt());
     on.id = 'notify-enable';
-    this.head(el('p', 'settings-note', '오늘의 말씀이 도착하거나 누군가 내 등불을 위해 기도하면 알려 드려요.'), on, this.status);
+    this.head(el('p', 'settings-note', '오늘의 말씀이 도착하거나 누군가 내 등불에 기도·아멘·기록을 남기면 알려 드려요.'), on, this.status);
   }
 
   /** Friendly explanation first; the browser asks only after 허용하고 켜기. */
@@ -164,7 +167,8 @@ export class NotifySettings {
   private controls(prefs: PushPrefs) {
     const save = async (patch: Partial<PushPrefs>) => {
       try {
-        Object.assign(prefs, await api<PushPrefs>('PUT', '/api/push/prefs', { ...prefs, ...patch }));
+        // Only the changed field: quick toggles in a row must not overwrite each other with stale values.
+        Object.assign(prefs, await api<PushPrefs>('PUT', '/api/push/prefs', patch));
         this.say('저장했어요.');
       } catch (err) {
         this.say(err instanceof ApiError ? err.message : '저장하지 못했어요.');
@@ -199,7 +203,10 @@ export class NotifySettings {
     });
     const timeRow = el('label', 'notify-time-row');
     timeRow.append(el('span', 'settings-hint', '매일 (한국 시간)'), time);
-    const prayer = toggle('notify-prayer', '🤲 내 등불에 기도하기 반응', prefs.prayer, (v) => void save({ prayer: v }));
+    // 🏮 내 등불 반응: one notice per 15 minutes, all kinds together.
+    const prayer = toggle('notify-prayer', '🤲 기도하기', prefs.prayer, (v) => void save({ prayer: v }));
+    const amen = toggle('notify-amen', '🙏 아멘', prefs.amen !== false, (v) => void save({ amen: v }));
+    const record = toggle('notify-record', '📌 기록하기', prefs.record !== false, (v) => void save({ record: v }));
     const props = toggle('notify-props', '⏰ 소품 만료 알림 (끝나기 10분 전)', prefs.props !== false, (v) => void save({ props: v }));
     // 이야기 도서관 (L-B).
     const library = toggle('notify-library', '📚 내 이야기 소식 (공감, 30분에 한 번 모아서)', prefs.library !== false, (v) => void save({ library: v }));
@@ -241,15 +248,18 @@ export class NotifySettings {
     this.head(
       daily.row,
       timeRow,
-      prayer.row,
       props.row,
+      el('p', 'settings-section notify-section', '🏮 내 등불 반응 (15분에 한 번 모아서)'),
+      prayer.row,
+      amen.row,
+      record.row,
       el('p', 'settings-section notify-section', '📚 이야기 도서관'),
       library.row,
       letters.row,
       replies.row,
       diary.row,
       diaryRow,
-      el('p', 'settings-note', '누가 기도하거나 공감했는지, 편지의 내용과 보낸 분의 이름은 알림에 담기지 않아요. 알림 설정은 내 계정에 저장돼요.'),
+      el('p', 'settings-note', '누가 기도·아멘·기록하거나 공감했는지, 어느 등불인지, 편지의 내용과 보낸 분의 이름은 알림에 담기지 않아요. 알림 설정은 내 계정에 저장돼요.'),
       off,
       this.status,
     );

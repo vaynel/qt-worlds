@@ -533,6 +533,30 @@ export const MIGRATIONS: string[] = [
   INSERT INTO daily_counts (kst_date, key, n)
     SELECT kst_date, 'emote', COUNT(*) FROM footprints WHERE type = 'emote' GROUP BY kst_date;
   `,
+  // v15: 🏮 내 등불 반응. 🙏 아멘 and 📌 기록하기 notify the lantern's author like
+  // 🤲 기도하기 (per-kind opt-outs, default on). The per-owner batch (one notice
+  // per 15 min across all kinds, pending counts) and the 6 h per-person dedupe
+  // used to live in memory; they are in the DB now so a restart can't add pushes.
+  // Neither table holds who reacted beyond the dedupe key (swept after 6 h).
+  `
+  ALTER TABLE push_prefs ADD COLUMN amen INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE push_prefs ADD COLUMN record INTEGER NOT NULL DEFAULT 1;
+  CREATE TABLE lantern_push (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    last_sent_at INTEGER,
+    pray INTEGER NOT NULL DEFAULT 0,
+    amen INTEGER NOT NULL DEFAULT 0,
+    record INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE lantern_push_seen (
+    lantern_id INTEGER NOT NULL REFERENCES lanterns(id) ON DELETE CASCADE,
+    actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (lantern_id, actor_id, type)
+  );
+  CREATE INDEX IF NOT EXISTS lantern_push_seen_at ON lantern_push_seen(at);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

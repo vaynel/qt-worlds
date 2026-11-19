@@ -352,7 +352,9 @@ export type ClientMessage =
   | { t: 'voiceSpeaking'; speaking: boolean }
   | { t: 'voiceKick'; target: string }
   /** 표현: one of EMOTES (index). */
-  | { t: 'emote'; e: number };
+  | { t: 'emote'; e: number }
+  /** Page visibility (document.visibilityState): a visible page shows 🏮 toasts, so no push is needed. */
+  | { t: 'visible'; visible: boolean };
 
 export interface PlayerInfo {
   id: string;
@@ -533,6 +535,8 @@ export type ServerMessage =
    * `toast` (fixed text, never letter content or names) when something new arrived.
    */
   | { t: 'letters'; unread: number; toast?: string; storyId?: number }
+  /** 🏮 내 등불 반응 (only to the author's own connections): fixed text with counts, never who or which lantern. */
+  | { t: 'lanternNotice'; text: string }
   | { t: 'error'; code: ErrorCode; message: string };
 
 // ------------------------------------------------------------------ validation
@@ -652,6 +656,8 @@ export function parseClientMessage(data: string): ClientMessage | null {
       return Number.isInteger(m.e) && (m.e as number) >= 0 && (m.e as number) < EMOTES.length ? { t: 'emote', e: m.e as number } : null;
     case 'voiceLeave':
       return { t: 'voiceLeave' };
+    case 'visible':
+      return typeof m.visible === 'boolean' ? { t: 'visible', visible: m.visible } : null;
     case 'voiceMute':
       return typeof m.muted === 'boolean' ? { t: 'voiceMute', muted: m.muted } : null;
     case 'voiceSpeaking':

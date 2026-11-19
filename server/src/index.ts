@@ -137,6 +137,9 @@ stats.attach({
   backupDir: resolve(process.env.BACKUP_DIR ?? resolve(dirname(dbPath), 'backups')),
 });
 shop.events = room;
+// 🏮 내 등불 반응: toasts on the author's open pages; no push when one of them is visible.
+push.presence = (userId) => room.presence(userId);
+push.inApp = (userId, text) => room.lanternNotice(userId, text);
 if (!ice.configured) log('TURN not configured (TURN_KEY_ID / TURN_KEY_API_TOKEN): voice uses STUN only, campfire voice is off');
 const api = new Api({ sessions, users, oidc, mock, wordbook, groups, lanterns, room, ice, chat, push, accounts, looks, shop, library, letters, footprints, shots, campfireVoice, weather, stats, testMode: TEST_MODE });
 
@@ -233,13 +236,13 @@ const sweeper = setInterval(sweep, 3_600_000);
 // 운영자 통계: online players every 5 minutes (aggregate per KST date and hour; the peak in between counts too).
 const statsTimer = setInterval(() => stats.sample(room.playerCount, room.takePeak()), Number(process.env.WORLDS_STATS_SAMPLE_MS ?? 300_000));
 sweep();
-// Every minute: daily words that are due (Asia/Seoul), batched prayer and 공감 notices,
-// and 📔 밤 일기 알림.
+// Every minute: daily words that are due (Asia/Seoul), batched 등불 반응 and 공감 notices,
+// and 📔 밤 일기 알림. Without Web Push the tick still flushes 등불 반응 batches (in-app toasts).
 // Mock push (tests) is driven by /api/test/push/tick with a fake clock instead.
 // Every second: shop windows (stock release), prop expiry and 10-minute reminders (server clock).
 const shopTimer = setInterval(() => void shop.tick().catch((e) => console.error('shop tick', e)), 1000);
 void shop.tick().catch((e) => console.error('shop tick', e));
-const pushTimer = push.enabled && !push.mock ? setInterval(() => void push.tick().catch((e) => console.error('push tick', e)), 60_000) : null;
+const pushTimer = !push.mock ? setInterval(() => void push.tick().catch((e) => console.error('push tick', e)), 60_000) : null;
 
 http.listen(PORT, HOST, () => log(`worlds server on http://${HOST}:${PORT} (ws /ws, api /api) seed=${SEED} max=${MAX}`));
 

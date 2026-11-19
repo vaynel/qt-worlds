@@ -7,8 +7,9 @@ import { HttpError } from './http.js';
 /**
  * Web Push (M6). Kinds of notifications, each opt-out per user:
  *  - 🕊️ daily word at the user's chosen time (Asia/Seoul), at most once a day;
- *  - 🤲 someone prayed (기도하기) for one of my lanterns: never who, never which
- *    lantern, throttled and batched;
+ *  - 🏮 내 등불 반응: someone prayed (🤲 기도하기), said 🙏 아멘 or 📌 recorded one
+ *    of my lanterns: never who, never which lantern, one combined notice per
+ *    15 min (also as an in-app toast while I'm connected);
  *  - ⏰ a borrowed prop (M9 나눔 소품 가게) has 10 minutes left (sent by ShopService);
  *  - 📚 내 이야기 소식 (L-B): 공감 on one of my books, batched per book (at most
  *    once per STORY_WINDOW_MS: "N명이 공감했어요"), never who;
@@ -24,13 +25,16 @@ export const MAX_SUBSCRIPTIONS = 10;
 export const DEFAULT_DAILY_MIN = 6 * 60;
 /** Missed ticks (restart, sleep) still deliver within this many minutes. */
 export const DAILY_GRACE_MIN = 120;
-/** At most one prayer notification per lantern owner per window; the rest are batched. */
-export const PRAYER_WINDOW_MS = 15 * 60_000;
-/** The same person praying for the same lantern again (toggle) is counted once per this. */
-const PRAYER_DEDUPE_MS = 6 * 3600_000;
+/** At most one 등불 반응 notice per lantern owner per window (all kinds together); the rest are batched. */
+export const LANTERN_WINDOW_MS = 15 * 60_000;
+/** The same person giving the same reaction to the same lantern again (toggle) counts once per this. */
+export const LANTERN_DEDUPE_MS = 6 * 3600_000;
 
 export const DAILY_TITLE = '🕊️ 오늘의 말씀이 도착했어요';
 export const PRAYER_TITLE = '🤲 누군가 당신의 묵상을 위해 기도하고 있어요';
+export const AMEN_TITLE = '🙏 누군가 당신의 묵상에 아멘했어요';
+export const RECORD_TITLE = '📌 누군가 당신의 묵상을 마음에 담아 두었어요';
+export const LANTERN_TITLE = '🏮 당신의 묵상이 누군가에게 닿았어요';
 export const STORY_TITLE = '📚 내 이야기 소식';
 export const LETTER_TITLE = '✉️ 내 이야기에 새 편지가 왔어요';
 export const REPLY_TITLE = '💌 편지에 답장이 왔어요';
@@ -39,8 +43,33 @@ export const DIARY_TITLE = '📔 오늘 하루를 일기로 남겨 볼까요?';
 export const STORY_WINDOW_MS = 30 * 60_000;
 export const DEFAULT_DIARY_MIN = 21 * 60;
 
+export type LanternReaction = 'pray' | 'amen' | 'record';
+
+/**
+ * The fixed text for one 등불 반응 batch (counts only: no names, ids or lantern text).
+ * One kind → its own title; several kinds → one combined notice.
+ */
+export function lanternNotice(c: Record<LanternReaction, number>): { payload: PushPayload; toast: string } | null {
+  const kinds = (['pray', 'amen', 'record'] as const).filter((k) => c[k] > 0);
+  if (kinds.length === 0) return null;
+  const url = '/';
+  const tag = 'lantern';
+  if (kinds.length > 1) {
+    const parts = kinds.map((k) => (k === 'pray' ? `🤲 기도 ${c.pray}` : k === 'amen' ? `🙏 아멘 ${c.amen}` : `📌 기록 ${c.record}`)).join(' · ');
+    return { payload: { kind: 'lantern', title: LANTERN_TITLE, body: parts, url, tag }, toast: `${parts} — 당신의 묵상이 누군가에게 닿았어요` };
+  }
+  const k = kinds[0];
+  const n = c[k];
+  if (k === 'pray') {
+    const body = n > 1 ? `등불 언덕에서 ${n}번의 기도가 더해졌어요` : '등불 언덕에서 기도가 더해졌어요';
+    return { payload: { kind: 'prayer', title: PRAYER_TITLE, body, url, tag }, toast: n > 1 ? `🤲 ${body}` : PRAYER_TITLE };
+  }
+  const title = k === 'amen' ? (n > 1 ? `🙏 ${n}명이 당신의 묵상에 아멘했어요` : AMEN_TITLE) : n > 1 ? `📌 ${n}명이 당신의 묵상을 마음에 담아 두었어요` : RECORD_TITLE;
+  return { payload: { kind: k, title, body: '등불 언덕에서 내 등불을 만나 보세요', url, tag }, toast: title };
+}
+
 export interface PushPayload {
-  kind: 'daily' | 'prayer' | 'prop' | 'story' | 'letter' | 'reply' | 'diary';
+  kind: 'daily' | 'prayer' | 'amen' | 'record' | 'lantern' | 'prop' | 'story' | 'letter' | 'reply' | 'diary';
   title: string;
   body: string;
   url: string;
@@ -58,6 +87,8 @@ interface PrefsRow {
   daily: number;
   daily_time: number;
   prayer: number;
+  amen: number;
+  record: number;
   props: number;
   library: number;
   letters: number;
@@ -111,8 +142,10 @@ export class PushService {
   /** Mock mode only: status the fake push service answers per endpoint (default 201). */
   readonly mockStatus = new Map<string, number>();
   private readonly sender: Sender;
-  private readonly prayerState = new Map<number, { lastSent: number; pending: number }>();
-  private readonly prayerSeen = new Map<string, number>();
+  /** Wired to the Room: is the account connected, and is any of its pages visible? */
+  presence: (userId: number) => { online: boolean; visible: boolean } = () => ({ online: false, visible: false });
+  /** Wired to the Room: a fixed-text toast on that account's own connections. */
+  inApp: (userId: number, text: string) => void = () => {};
 
   constructor(
     private readonly db: DB,
@@ -152,13 +185,6 @@ export class PushService {
             return typeof code === 'number' ? code : 0;
           }
         };
-  }
-
-  /** 회원 탈퇴: drop in-memory prayer batching for that account (DB rows cascade). */
-  forget(userId: number) {
-    this.prayerState.delete(userId);
-    // Keys are `${lanternId}:${actorId}`.
-    for (const k of this.prayerSeen.keys()) if (k.endsWith(`:${userId}`)) this.prayerSeen.delete(k);
   }
 
   // ---------------------------------------------------------------- subscriptions
@@ -233,13 +259,16 @@ export class PushService {
   // ---------------------------------------------------------------- preferences
 
   prefs(userId: number) {
-    const p = this.db.prepare('SELECT daily, daily_time, prayer, props, library, letters, replies, diary, diary_time FROM push_prefs WHERE user_id = ?').get(userId) as
+    const p = this.db.prepare('SELECT daily, daily_time, prayer, amen, record, props, library, letters, replies, diary, diary_time FROM push_prefs WHERE user_id = ?').get(userId) as
       | PrefsRow
       | undefined;
     return {
       daily: p ? p.daily === 1 : true,
       dailyTime: minutesToTime(p ? p.daily_time : DEFAULT_DAILY_MIN),
+      /** 🏮 내 등불 반응, per kind: 🤲 기도하기, 🙏 아멘, 📌 기록하기. */
       prayer: p ? p.prayer === 1 : true,
+      amen: p ? p.amen === 1 : true,
+      record: p ? p.record === 1 : true,
       /** 소품 만료 알림 (M9): 10 minutes before a borrowed prop goes back. */
       props: p ? p.props === 1 : true,
       /** 📚 내 이야기 소식: 공감 on my books (batched). */
@@ -264,6 +293,8 @@ export class PushService {
     };
     const daily = bool(body.daily, cur.daily, '말씀 알림');
     const prayer = bool(body.prayer, cur.prayer, '기도 알림');
+    const amen = bool(body.amen, cur.amen, '아멘 알림');
+    const record = bool(body.record, cur.record, '기록 알림');
     const props = bool(body.props, cur.props, '소품 만료 알림');
     const library = bool(body.library, cur.library, '내 이야기 소식 알림');
     const letters = bool(body.letters, cur.letters, '편지 알림');
@@ -278,12 +309,14 @@ export class PushService {
     const diaryMinutes = time(body.diaryTime === undefined ? cur.diaryTime : body.diaryTime);
     this.db
       .prepare(
-        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, props, library, letters, replies, diary, diary_time, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, props = excluded.props,
+        `INSERT INTO push_prefs (user_id, daily, daily_time, prayer, amen, record, props, library, letters, replies, diary, diary_time, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET daily = excluded.daily, daily_time = excluded.daily_time, prayer = excluded.prayer, amen = excluded.amen,
+           record = excluded.record, props = excluded.props,
            library = excluded.library, letters = excluded.letters, replies = excluded.replies, diary = excluded.diary, diary_time = excluded.diary_time,
            updated_at = excluded.updated_at`,
       )
-      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, props ? 1 : 0, library ? 1 : 0, letters ? 1 : 0, replies ? 1 : 0, diary ? 1 : 0, diaryMinutes, this.now());
+      .run(userId, daily ? 1 : 0, minutes, prayer ? 1 : 0, amen ? 1 : 0, record ? 1 : 0, props ? 1 : 0, library ? 1 : 0, letters ? 1 : 0, replies ? 1 : 0, diary ? 1 : 0, diaryMinutes, this.now());
     return this.prefs(userId);
   }
 
@@ -327,10 +360,12 @@ export class PushService {
 
   /**
    * Runs every minute: daily words that are due (chosen time reached today,
-   * within the grace window, not yet sent today), then batched prayers.
+   * within the grace window, not yet sent today), then batched 등불 반응 (these
+   * also run without Web Push: the in-app toast still needs its batch), 공감 and diaries.
    */
   async tick(now = this.now()): Promise<{ daily: number; prayer: number; stories: number; diary: number }> {
-    if (!this.enabled) return { daily: 0, prayer: 0, stories: 0, diary: 0 };
+    const prayer = await this.flushLanterns(now);
+    if (!this.enabled) return { daily: 0, prayer, stories: 0, diary: 0 };
     const { date, minutes } = seoulClock(now);
     const due = this.db
       .prepare(
@@ -351,7 +386,6 @@ export class PushService {
       await this.sendToUser(user_id, payload!, 6 * 3600);
       daily++;
     }
-    const prayer = await this.flushPrayers(now);
     const stories = await this.flushStories(now);
     const diary = await this.diaryReminders(now);
     return { daily, prayer, stories, diary };
@@ -456,52 +490,79 @@ export class PushService {
     return sent;
   }
 
-  /** 기도하기 was added to a lantern (by `actorId`). Who and which lantern never leave the server. */
-  async prayed(lanternId: number, actorId: number): Promise<void> {
-    if (!this.enabled) return;
+  // ---------------------------------------------------------------- 🏮 내 등불 반응
+
+  /**
+   * 🤲 기도하기 / 🙏 아멘 / 📌 기록하기 was added to a lantern by `actorId`.
+   * Who and which lantern never leave the server: the notice is fixed text with
+   * counts only (anonymous lanterns need nothing special, the text names no one).
+   *  - never for your own lantern; each kind has its own opt-out (default on);
+   *  - the same person on the same lantern counts once per kind per 6 h
+   *    (`lantern_push_seen`, so toggling never spams);
+   *  - one notice per owner per LANTERN_WINDOW_MS across all kinds: the first
+   *    reaction goes out at once, the rest are counted (`lantern_push`) and sent
+   *    as one combined notice by the minute tick once the window has passed.
+   * Batch and dedupe are claimed in the DB (like `story_push`), so a restart
+   * never sends extra notices. Delivery: an in-app toast to every open
+   * connection of the owner, plus Web Push unless one of those connections
+   * reports a visible page (then the toast was seen; no second buzz).
+   */
+  async lanternReacted(lanternId: number, actorId: number, type: LanternReaction): Promise<boolean> {
     const l = this.db.prepare('SELECT user_id FROM lanterns WHERE id = ?').get(lanternId) as { user_id: number } | undefined;
-    if (!l || l.user_id === actorId) return;
+    if (!l || l.user_id === actorId) return false;
     const owner = l.user_id;
-    const p = this.db.prepare('SELECT prayer FROM push_prefs WHERE user_id = ?').get(owner) as { prayer: number } | undefined;
-    if (!p || p.prayer !== 1 || this.count(owner) === 0) return;
+    if (!this.lanternPrefs(owner)[type]) return false;
+    // Nobody to tell (offline, no push device): don't keep anything.
+    if (!this.presence(owner).online && !(this.enabled && this.count(owner) > 0)) return false;
     const now = this.now();
-    const key = `${lanternId}:${actorId}`;
-    if (now - (this.prayerSeen.get(key) ?? -Infinity) < PRAYER_DEDUPE_MS) return;
-    this.prayerSeen.set(key, now);
-    if (this.prayerSeen.size > 20_000) this.prayerSeen.clear();
-    const st = this.prayerState.get(owner) ?? { lastSent: -Infinity, pending: 0 };
-    st.pending++;
-    this.prayerState.set(owner, st);
-    if (now - st.lastSent >= PRAYER_WINDOW_MS) await this.sendPrayers(owner, st, now);
+    const fresh = this.db
+      .prepare(
+        `INSERT INTO lantern_push_seen (lantern_id, actor_id, type, at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(lantern_id, actor_id, type) DO UPDATE SET at = excluded.at WHERE lantern_push_seen.at <= ?`,
+      )
+      .run(lanternId, actorId, type, now, now - LANTERN_DEDUPE_MS).changes;
+    if (!fresh) return false;
+    this.db.prepare(`INSERT INTO lantern_push (user_id, ${type}) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET ${type} = ${type} + 1`).run(owner);
+    return this.sendLantern(owner, now);
   }
 
-  private async sendPrayers(owner: number, st: { lastSent: number; pending: number }, now: number) {
-    const n = st.pending;
-    st.pending = 0;
-    st.lastSent = now;
-    await this.sendToUser(
-      owner,
-      {
-        kind: 'prayer',
-        title: PRAYER_TITLE,
-        body: n > 1 ? `등불 언덕에서 ${n}번의 기도가 더해졌어요` : '등불 언덕에서 기도가 더해졌어요',
-        url: '/',
-        tag: 'prayer',
-      },
-      12 * 3600,
-    );
+  private lanternPrefs(userId: number): Record<LanternReaction, boolean> {
+    const p = this.db.prepare('SELECT prayer, amen, record FROM push_prefs WHERE user_id = ?').get(userId) as { prayer: number; amen: number; record: number } | undefined;
+    return { pray: p ? p.prayer === 1 : true, amen: p ? p.amen === 1 : true, record: p ? p.record === 1 : true };
   }
 
-  private async flushPrayers(now: number): Promise<number> {
+  /** Claim this owner's pending counts (once per window) and deliver one notice. */
+  private async sendLantern(owner: number, now: number): Promise<boolean> {
+    const row = this.db.prepare('SELECT last_sent_at, pray, amen, record FROM lantern_push WHERE user_id = ?').get(owner) as
+      | { last_sent_at: number | null; pray: number; amen: number; record: number }
+      | undefined;
+    if (!row || row.pray + row.amen + row.record === 0) return false;
+    if (row.last_sent_at !== null && now - row.last_sent_at < LANTERN_WINDOW_MS) return false;
+    // Kinds switched off while pending are dropped.
+    const on = this.lanternPrefs(owner);
+    const counts = { pray: on.pray ? row.pray : 0, amen: on.amen ? row.amen : 0, record: on.record ? row.record : 0 };
+    const notice = lanternNotice(counts);
+    const claimed = this.db
+      .prepare(
+        `UPDATE lantern_push SET pray = 0, amen = 0, record = 0, last_sent_at = CASE WHEN ? THEN ? ELSE last_sent_at END
+         WHERE user_id = ? AND pray = ? AND amen = ? AND record = ? AND (last_sent_at IS NULL OR last_sent_at <= ?)`,
+      )
+      .run(notice ? 1 : 0, now, owner, row.pray, row.amen, row.record, now - LANTERN_WINDOW_MS).changes;
+    if (!claimed || !notice) return false;
+    const who = this.presence(owner);
+    if (who.online) this.inApp(owner, notice.toast);
+    if (!who.visible && this.enabled) await this.sendToUser(owner, notice.payload, 12 * 3600);
+    return true;
+  }
+
+  private async flushLanterns(now: number): Promise<number> {
+    const due = this.db
+      .prepare('SELECT user_id FROM lantern_push WHERE pray + amen + record > 0 AND (last_sent_at IS NULL OR last_sent_at <= ?)')
+      .all(now - LANTERN_WINDOW_MS) as { user_id: number }[];
     let sent = 0;
-    for (const [owner, st] of this.prayerState) {
-      if (st.pending > 0 && now - st.lastSent >= PRAYER_WINDOW_MS) {
-        await this.sendPrayers(owner, st, now);
-        sent++;
-      } else if (st.pending === 0 && now - st.lastSent > PRAYER_WINDOW_MS) {
-        this.prayerState.delete(owner);
-      }
-    }
+    for (const { user_id } of due) if (await this.sendLantern(user_id, now)) sent++;
+    this.db.prepare('DELETE FROM lantern_push WHERE pray + amen + record = 0 AND (last_sent_at IS NULL OR last_sent_at < ?)').run(now - LANTERN_WINDOW_MS);
+    this.db.prepare('DELETE FROM lantern_push_seen WHERE at < ?').run(now - LANTERN_DEDUPE_MS);
     return sent;
   }
 }

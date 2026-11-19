@@ -11,7 +11,7 @@
     "test:m2": "node scripts/m2-test.mjs",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:st": "node scripts/st-test.mjs",
-    "test:all": "node scripts/smoke-test.mjs && node scripts/m2-test.mjs && node scripts/m3-test.mjs && node scripts/m4-test.mjs && node scripts/m41-test.mjs && node scripts/m5v-test.mjs && node scripts/m51-test.mjs && node scripts/m52-test.mjs && node scripts/m53-test.mjs && node scripts/m54-test.mjs && node scripts/m6-test.mjs && node scripts/m7-test.mjs && node scripts/m8-test.mjs && node scripts/m9-test.mjs && node scripts/m10-test.mjs && node scripts/nw-test.mjs && node scripts/p13-test.mjs && node scripts/la-test.mjs && node scripts/lb-test.mjs && node scripts/ev-test.mjs && node scripts/wx-test.mjs && node scripts/st-test.mjs"
+    "test:all": "node scripts/smoke-test.mjs && node scripts/m2-test.mjs && node scripts/m3-test.mjs && node scripts/m4-test.mjs && node scripts/m41-test.mjs && node scripts/m5v-test.mjs && node scripts/m51-test.mjs && node scripts/m52-test.mjs && node scripts/m53-test.mjs && node scripts/m54-test.mjs && node scripts/m6-test.mjs && node scripts/rx-test.mjs && node scripts/m7-test.mjs && node scripts/m8-test.mjs && node scripts/m9-test.mjs && node scripts/m10-test.mjs && node scripts/nw-test.mjs && node scripts/p13-test.mjs && node scripts/la-test.mjs && node scripts/lb-test.mjs && node scripts/ev-test.mjs && node scripts/wx-test.mjs && node scripts/st-test.mjs"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3",

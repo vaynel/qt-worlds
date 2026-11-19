@@ -90,6 +90,8 @@ export interface NetHandlers {
   groupRead(groupId: number, lastReadId: number): void;
   /** ✉️ 받은 편지 badge (L-B), with a fixed-text toast when something arrived. */
   letters(unread: number, toast: string | null, storyId: number | null): void;
+  /** 🏮 내 등불 반응: fixed text (counts only) for a gentle toast. */
+  lanternNotice(text: string): void;
 }
 
 /** Codes after which reconnecting would just fail again. */
@@ -144,7 +146,14 @@ export class NetClient {
     private readonly testDate: string | null = null,
     /** ?test=1: marks the session as a test client (honoured only by test servers). */
     private readonly testClient = false,
-  ) {}
+  ) {
+    // 🏮 The server skips the push for a 등불 반응 when one of our pages is visible (the toast is enough).
+    document.addEventListener('visibilitychange', () => this.sendVisibility());
+  }
+
+  private sendVisibility(): void {
+    this.raw({ t: 'visible', visible: document.visibilityState === 'visible' });
+  }
 
   on(handlers: Partial<NetHandlers>): void {
     this.handlers = { ...this.handlers, ...handlers };
@@ -259,6 +268,9 @@ export class NetClient {
       case 'letters':
         this.handlers.letters?.(msg.unread, msg.toast ?? null, msg.storyId ?? null);
         break;
+      case 'lanternNotice':
+        this.handlers.lanternNotice?.(msg.text);
+        break;
       case 'word':
         this.handlers.word?.(msg.word);
         break;
@@ -357,6 +369,7 @@ export class NetClient {
             weather: msg.weather && typeof msg.weather === 'object' ? msg.weather : null,
           };
           this.setStatus('online');
+          this.sendVisibility();
           if (first) first.onWelcome(w);
           this.handlers.welcome?.(w);
           break;
@@ -436,6 +449,9 @@ export class NetClient {
           break;
         case 'letters':
           if (typeof msg.unread === 'number') this.dispatch(msg);
+          break;
+        case 'lanternNotice':
+          if (typeof msg.text === 'string') this.dispatch(msg);
           break;
         case 'emote':
           if (typeof msg.id === 'string' && Number.isInteger(msg.e)) this.dispatch(msg);

@@ -540,6 +540,18 @@ try {
   const server1 = await N.evaluate(() => fetch('/api/push/prefs').then((r) => r.json()));
   check('allow → permission asked once → subscribed on the server', (await N.evaluate(() => window.__permAsked)) === 1 && server1.subscriptions === 1);
   check('controls: daily word (06:00 default), prayer reactions; no group-chat toggle', (await N.inputValue('#notify-time')) === '06:00' && (await N.isChecked('#notify-daily')) && (await N.isChecked('#notify-prayer')) && (await N.locator('#notify-group').count()) === 0);
+  check(
+    '🏮 내 등불 반응 group: 기도하기 / 아멘 / 기록하기 toggles, all on by default',
+    (await N.isChecked('#notify-amen')) && (await N.isChecked('#notify-record')) && (await N.textContent('#notify-settings')).includes('🏮 내 등불 반응'),
+  );
+  await N.uncheck('#notify-amen');
+  let amenOff = null;
+  for (let i = 0; i < 20 && amenOff?.amen !== false; i++) {
+    await sleep(150);
+    amenOff = await N.evaluate(() => fetch('/api/push/prefs').then((r) => r.json()));
+  }
+  check('the 아멘 toggle saves on its own (기록 and 기도 stay on)', amenOff.amen === false && amenOff.record === true);
+  await N.check('#notify-amen');
   await N.selectOption('#notify-time', '07:00');
   await until(N, () => document.querySelector('#notify-settings .groups-status')?.textContent === '저장했어요.');
   await N.uncheck('#notify-prayer');

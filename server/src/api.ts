@@ -315,7 +315,6 @@ export class Api {
           d.room.groupChat(d.chat.system(t.groupId, `모임을 만든 분이 떠나서 ${t.newOwner}님이 모임장이 되었어요`), false);
           d.room.membershipChanged(t.newOwnerId);
         }
-        d.push.forget(u.id);
         d.ice.forget(u.id);
         d.room.libraryChanged();
         this.chatBuckets.delete(u.id);
@@ -996,8 +995,10 @@ export class Api {
       if (typeof type === 'string' && detail.myReactions.includes(type as never) && !detail.mine) {
         d.footprints.event(u.id, 'lantern_react', `${kstDateOf(Date.now())}:${lid}:${type}`, { lanternId: lid, type });
       }
-      // 🤲 to the lantern's author (never who prayed; throttled and batched in PushService).
-      if (type === 'pray' && detail.myReactions.includes('pray')) void d.push.prayed(lid, u.id).catch((e) => console.error('push prayed', e));
+      // 🏮 to the lantern's author (never who, never which lantern; deduped and batched in PushService).
+      if ((type === 'pray' || type === 'amen' || type === 'record') && detail.myReactions.includes(type)) {
+        void d.push.lanternReacted(lid, u.id, type).catch((e) => console.error('push lantern', e));
+      }
       sendJson(res, 200, detail);
     });
   }
