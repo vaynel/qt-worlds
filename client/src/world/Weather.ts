@@ -100,6 +100,13 @@ export class Weather {
   private readonly fireflies: Particles;
   private readonly clouds: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>;
   private readonly cloudGroup = new THREE.Group();
+  /** Per-cloud layout; they drift across the sky with the wind and wrap around. */
+  private readonly cloudBase: { x: number; y: number; z: number; rot: number; w: number }[] = [];
+  private cloudDrift = 0;
+  private readonly cm = new THREE.Matrix4();
+  private readonly cq = new THREE.Quaternion();
+  private readonly cs = new THREE.Vector3();
+  private readonly cp = new THREE.Vector3();
   private readonly decor: SeasonDecor;
   /** Smoothed look (fades between kinds over a few seconds). */
   private readonly look: Look = { ...BASE };
@@ -169,10 +176,11 @@ export class Weather {
     for (let i = 0; i < CLOUDS_MAX; i++) {
       const a = i * 2.39996;
       const r = 150 + ((i * 53) % 90);
-      p.set(Math.cos(a) * r, 34 + ((i * 29) % 30), Math.sin(a) * r);
-      q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, a * 1.7);
-      const w = 16 + ((i * 17) % 14);
-      s.set(w, w * 0.36, w * 0.62);
+      const base = { x: Math.cos(a) * r, y: 34 + ((i * 29) % 30), z: Math.sin(a) * r, rot: a * 1.7, w: 16 + ((i * 17) % 14) };
+      this.cloudBase.push(base);
+      p.set(base.x, base.y, base.z);
+      q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, base.rot);
+      s.set(base.w, base.w * 0.36, base.w * 0.62);
       this.clouds.setMatrixAt(i, m.compose(p, q, s));
     }
     this.clouds.count = 0;
@@ -360,8 +368,22 @@ export class Weather {
 
     // Clouds: count by kind (quality-scaled a little), drifting slowly round the dome.
     this.cloudGroup.position.set(cam.position.x, 0, cam.position.z);
-    if (!this.reducedMotion) this.cloudGroup.rotation.y += dt * 0.006 * (0.5 + wind / 6);
     this.clouds.count = outdoor ? Math.round(L.clouds * (0.6 + 0.4 * QUALITY_SCALE[f.quality])) : 0;
+    // Drift west → east (Korea's prevailing westerlies), faster with real wind,
+    // wrapping across a 520 m band so the sky never empties.
+    if (!this.reducedMotion && this.clouds.count > 0) {
+      this.cloudDrift += dt * (2.5 + wind * 1.6);
+      const SPAN = 520;
+      for (let i = 0; i < this.clouds.count; i++) {
+        const b = this.cloudBase[i];
+        const x = ((b.x + this.cloudDrift + SPAN / 2) % SPAN + SPAN) % SPAN - SPAN / 2;
+        this.cp.set(x, b.y, b.z);
+        this.cq.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, b.rot);
+        this.cs.set(b.w, b.w * 0.36, b.w * 0.62);
+        this.clouds.setMatrixAt(i, this.cm.compose(this.cp, this.cq, this.cs));
+      }
+      this.clouds.instanceMatrix.needsUpdate = true;
+    }
     const shade = L.shade * (1 - night * 0.55);
     this.clouds.material.color.setScalar(shade);
     this.clouds.material.emissiveIntensity = 0.5 * L.shade * (1 - night * 0.8) + this.flash * 0.8;
