@@ -429,12 +429,18 @@ export class LanternService {
     const word = JSON.parse(page.word_json) as WordPassage;
 
     return this.db.transaction(() => {
-      // Stable, non-overlapping spot: lowest slot not held by an active lantern.
+      // Stable, non-overlapping spot that continues after the most recently lit
+      // lantern (wrapping round the hill), so a new lantern always appears next
+      // to the newest ones and people can see "someone just lit another".
       const used = new Set(
         (this.db.prepare('SELECT slot FROM lanterns WHERE removed_at IS NULL AND created_at >= ?').all(this.since()) as { slot: number }[]).map((r) => r.slot),
       );
+      const last = this.db.prepare('SELECT slot FROM lanterns ORDER BY created_at DESC, id DESC LIMIT 1').get() as { slot: number } | undefined;
+      const n = LANTERN_SLOTS.length;
+      const start = last ? (last.slot + 1) % n : 0;
       let slot = -1;
-      for (let i = 0; i < LANTERN_SLOTS.length; i++) {
+      for (let k = 0; k < n; k++) {
+        const i = (start + k) % n;
         if (!used.has(i)) {
           slot = i;
           break;
