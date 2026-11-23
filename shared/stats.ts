@@ -64,6 +64,8 @@ export interface AdminStats {
     mau: number[];
     signups: number[];
     guestSessions: number[];
+    /** Distinct accounts that saved a meditation today (KST). A count only. */
+    meditatorsToday: number;
     sessions: number[];
   };
   retention: {

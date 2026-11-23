@@ -557,6 +557,19 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS lantern_push_seen_at ON lantern_push_seen(at);
   `,
+  // v16: one-time reflow (owner request, 2026-11-23). Lanterns on the hill (the
+  // last 5 days, not taken down) are renumbered 0,1,2… in the order they were lit,
+  // so the hill reads in time order and new lanterns continue after the newest.
+  // 124 = LANTERN_SLOTS.length in shared/protocol.ts.
+  `
+  UPDATE lanterns SET slot = (
+    SELECT (r.rn - 1) % 124 FROM (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS rn FROM lanterns
+      WHERE removed_at IS NULL AND created_at >= (CAST(strftime('%s','now') AS INTEGER) * 1000 - 5 * 86400000)
+    ) r WHERE r.id = lanterns.id
+  )
+  WHERE removed_at IS NULL AND created_at >= (CAST(strftime('%s','now') AS INTEGER) * 1000 - 5 * 86400000);
+  `,
 ];
 
 export function openDb(path = defaultDbPath()): DB {

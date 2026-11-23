@@ -21,7 +21,7 @@ import { HttpError } from './http.js';
 
 const DAY_MS = 86_400_000;
 /** Lanterns stay on the hill this long. */
-export const LANTERN_DAYS = 3;
+export const LANTERN_DAYS = 5;
 /** Lanterns one person can light per KST day. */
 export const LANTERNS_PER_DAY = 3;
 export const LANTERN_CAP = 120;

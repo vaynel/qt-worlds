@@ -424,7 +424,13 @@ export class StatsService {
       today,
       collectStart,
       days,
-      visits: { ...rolling, signups, guestSessions: counter('session_guest'), sessions: counter('session_total') },
+      visits: {
+        ...rolling,
+        signups,
+        guestSessions: counter('session_guest'),
+        sessions: counter('session_total'),
+        meditatorsToday: (this.db.prepare('SELECT COUNT(DISTINCT user_id) n FROM meditations WHERE date = ?').get(today) as { n: number }).n,
+      },
       retention: {
         cohorts: weeklyCohorts(members, today, collectStart),
         overall: {

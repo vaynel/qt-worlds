@@ -239,6 +239,7 @@ function render() {
     const tiles = el('div', 'st-tiles');
     const lastOf = (a: number[]) => a[a.length - 1] ?? 0;
     tiles.append(
+      tile('오늘 묵상한 사람', `${fmtNum(s.visits.meditatorsToday ?? 0)}명`, '오늘 묵상을 저장한 계정 수'),
       tile('오늘 접속 (DAU)', `${fmtNum(lastOf(s.visits.dau))}명`),
       tile('7일 접속 (WAU)', `${fmtNum(lastOf(s.visits.wau))}명`),
       tile('30일 접속 (MAU)', `${fmtNum(lastOf(s.visits.mau))}명`),
