@@ -1816,22 +1816,23 @@ button.danger:not(.ghost) {
   margin-top: 4px;
 }
 
-/* =================== M4.1: first-time guide =================== */
+/* =================== First-time picture guide (ui/Guide.ts) and coach tips (ui/CoachTips.ts) =================== */
+/* Replaces the M4.1 six-page text guide. Pictures: client/public/guide/*.webp (scripts/make-guide-shots.mjs). */
 
 .sheet.guide {
+  --guide-chrome: 236px; /* header + caption + nav + 시작하기 */
   display: flex;
   flex-direction: column;
-  width: min(520px, 100%);
-  background:
-    linear-gradient(90deg, rgba(176, 120, 72, 0.05), transparent 8%, transparent 92%, rgba(176, 120, 72, 0.05)),
-    linear-gradient(#fffaf0, #fbf1dc);
+  width: min(560px, 100%);
+  overflow: hidden;
+  background: linear-gradient(#fffaf0, #fbf1dc);
 }
 
 .guide-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px 0;
+  padding: 8px 10px 4px 18px;
 }
 
 .guide-step {
@@ -1840,95 +1841,342 @@ button.danger:not(.ghost) {
   font-variant-numeric: tabular-nums;
 }
 
-.guide-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 22px 12px;
-  line-height: 1.65;
+.guide-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.guide-title {
-  margin: 4px 0 12px;
-  font-size: 1.2rem;
-  color: var(--ink);
+.guide-track {
+  display: flex;
+  height: 100%;
+  transition: transform 0.35s cubic-bezier(0.22, 0.8, 0.3, 1);
 }
 
-.guide-body p {
-  margin: 0 0 8px;
+.guide-card {
+  flex: 0 0 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
-.guide-soft {
-  color: var(--ink-soft);
-  font-size: 0.9rem;
+.guide-pic {
+  position: relative;
+  width: min(100%, calc((var(--vvh, 100dvh) - 32px - var(--guide-chrome)) * 4 / 3));
+  aspect-ratio: 4 / 3;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #e9dcc0;
+  box-shadow: 0 8px 22px rgba(74, 52, 38, 0.22);
 }
 
-.guide-flow {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #fff1cf;
-  font-weight: 700;
+.guide-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.guide-cap {
   text-align: center;
 }
 
-.guide-list {
-  list-style: none;
-  margin: 0 0 8px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.guide-title {
+  margin: 0 0 4px;
+  font-size: 1.28rem;
+  line-height: 1.35;
+  color: var(--ink);
+  word-break: keep-all;
 }
 
-.guide-list li {
-  display: grid;
-  grid-template-columns: 6.5em 1fr;
-  gap: 8px;
+.guide-sub {
+  margin: 0;
   font-size: 0.92rem;
+  color: var(--ink-soft);
+  word-break: keep-all;
 }
 
-.guide-list strong {
-  color: var(--accent);
+/* Card 1: walking, shown (a joystick on touch screens, WASD on desktop). */
+.guide-controls {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 20px);
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  background: rgba(46, 34, 26, 0.74);
+  color: #fff8ec;
+  font-size: 0.8rem;
+  line-height: 1.3;
 }
 
-.guide-map {
-  display: block;
-  width: 100%;
-  max-width: 340px;
-  margin: 0 auto 10px;
+.guide-stick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 248, 236, 0.75);
+}
+
+.guide-stick-knob {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--glow);
+  animation: guide-stick 2.4s ease-in-out infinite;
+}
+
+@keyframes guide-stick {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(0, -7px); }
+  50% { transform: translate(6px, -4px); }
+  75% { transform: translate(-6px, -4px); }
+}
+
+.guide-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 16px);
+  grid-template-rows: repeat(2, 16px);
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.guide-key {
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: rgba(255, 248, 236, 0.9);
+  color: var(--ink);
+  font: 700 0.62rem/1 inherit;
+  animation: guide-key 2.4s steps(1) infinite;
+}
+
+.guide-key.k-w { grid-column: 2; grid-row: 1; }
+.guide-key.k-a { grid-column: 1; grid-row: 2; animation-delay: -1.8s; }
+.guide-key.k-s { grid-column: 2; grid-row: 2; animation-delay: -1.2s; }
+.guide-key.k-d { grid-column: 3; grid-row: 2; animation-delay: -0.6s; }
+
+@keyframes guide-key {
+  0% { background: var(--glow); }
+  25%, 100% { background: rgba(255, 248, 236, 0.9); }
 }
 
 .guide-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+  justify-content: center;
+  gap: 14px;
+  padding: 10px 16px 0;
 }
 
-.guide-nav button {
-  min-width: 88px;
+.guide-arrow {
+  width: 40px;
+  height: 40px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.guide-arrow:disabled {
+  opacity: 0.35;
 }
 
 .guide-dots {
   display: flex;
-  gap: 6px;
+  gap: 2px;
 }
 
-.guide-dots span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.guide-dot {
+  width: 24px;
+  height: 28px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: grid;
+  place-items: center;
+}
+
+.guide-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
   background: #e2d2b0;
+  transition: width 0.25s ease, background 0.25s ease;
 }
 
-.guide-dots span.on {
+.guide-dot.on::before {
+  width: 20px;
   background: var(--accent);
+}
+
+.guide-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+.guide-start {
+  width: 100%;
+  min-height: 50px;
+  font-size: 1.08rem;
+  border-radius: 14px;
+}
+
+.guide-tips-reset {
+  align-self: center;
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
 @media (max-width: 600px) {
   .sheet.guide {
+    width: 100%;
     height: var(--vvh, 100dvh);
+    max-height: none;
     border-radius: 0;
+  }
+}
+
+/* Phone portrait: a squarer picture (sides trimmed) fills the tall screen better. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .guide-pic {
+    aspect-ratio: 1 / 1;
+    width: min(100%, calc(var(--vvh, 100dvh) - var(--guide-chrome) - 16px));
+  }
+  .guide-title {
+    font-size: 1.4rem;
+  }
+  .guide-sub {
+    font-size: 1rem;
+  }
+}
+
+/* Phone landscape: picture beside its words. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .sheet.guide {
+    --guide-chrome: 180px; /* header + nav + 시작하기 + the phone-land sheet's padding */
+    width: min(760px, 100%);
+    height: var(--vvh, 100dvh);
+    max-height: none;
+    border-radius: 0;
+  }
+  .guide-top {
+    padding-top: 4px;
+    padding-bottom: 0;
+  }
+  .guide-card {
+    flex-direction: row;
+    gap: 18px;
+  }
+  .guide-pic {
+    width: min(58%, calc((var(--vvh, 100dvh) - var(--guide-chrome)) * 4 / 3));
+  }
+  .guide-cap {
+    flex: 1 1 0;
+    text-align: left;
+  }
+  .guide-nav {
+    padding-top: 4px;
+  }
+  .guide-foot {
+    flex-direction: row;
+    align-items: center;
+    padding-top: 6px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .guide-start {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-track {
+    transition: none;
+  }
+  .guide-stick-knob,
+  .guide-key {
+    animation: none;
+  }
+}
+
+/* Coach tip: one small bubble at a time, pointing at the real button or 3D spot. Below every sheet (z 30). */
+.coach-tip {
+  --arrow: 50%;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 27;
+  max-width: min(230px, calc(100vw - 16px));
+  padding: 8px 13px;
+  border-radius: 12px;
+  border: 2px solid var(--glow);
+  background: #fff8ea;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: keep-all;
+  box-shadow: 0 6px 18px rgba(74, 52, 38, 0.28), 0 0 14px rgba(255, 196, 107, 0.55);
+  cursor: pointer;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+}
+
+.coach-tip.on {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+  animation: coach-bob 1.8s ease-in-out infinite;
+}
+
+.coach-tip::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff8ea;
+  border: 2px solid var(--glow);
+  border-top-color: transparent;
+  border-left-color: transparent;
+}
+
+.coach-tip[data-side='top']::after { left: calc(var(--arrow) - 7px); bottom: -7px; transform: rotate(45deg); }
+.coach-tip[data-side='bottom']::after { left: calc(var(--arrow) - 7px); top: -7px; transform: rotate(225deg); }
+.coach-tip[data-side='left']::after { top: calc(var(--arrow) - 7px); right: -7px; transform: rotate(-45deg); }
+.coach-tip[data-side='right']::after { top: calc(var(--arrow) - 7px); left: -7px; transform: rotate(135deg); }
+
+@keyframes coach-bob {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coach-tip.on {
+    animation: none;
   }
 }
 

@@ -38,6 +38,9 @@ npm run test:all                      # everything, in order (hours)
 ```
 
 - Load test pages with `?test=1`; `window.__WORLDS_DEBUG__` exists only then.
+- **Guide pictures:** when the world's look changes (landmarks, lighting, avatars, the meditation sheet), regenerate the
+  onboarding images with `node client/scripts/make-guide-shots.mjs` (after building both), look at them, and rerun
+  `ob-test.mjs`.
 - Wait on predicates (`until(page, () => window.__WORLDS_DEBUG__…)`), not sleeps.
 - Stop every process you start, and drop test DBs (`dropDb`).
 

@@ -43,9 +43,10 @@ Line counts are approximate, as of 2026-11-13.
 | `ui/*View.ts`, `ui/*.ts` | ~5,000 | One file per sheet or widget: `WordBookView`, `MeditationView`, `SettingsView`, `NotifySettings`, `GroupsView`, `ShopView`, `CustomizeView`, `OutfitPainter`, `AdminView`, `ReportView`, `Guide`, `Legal`, `Hud`, `ChatPanel`, `VoicePanel`, `EntryScreen` … |
 | `ui/dom.ts` | 100 | `el()`, `button()` and **`Modal`** (every sheet: one open at a time, Esc, focus return, `worlds-modal` event). |
 | `voice/VoiceClient.ts` | 600 | WebRTC voice rooms (signalling over `/ws`): group prayer rooms, and the 🔥 campfire's public room (room 0, relay-only ICE). |
+| `ui/Guide.ts`, `ui/CoachTips.ts` | 250 / 220 | **Onboarding, picture-first.** `Guide`: 5 swipeable picture cards (real screenshots from `client/public/guide/*.webp`, one short line each, 시작하기 on every card, an animated joystick/WASD hint on card 1); once per account (`/api/me/onboarded`) or once per device for guests (`worlds.guide.seen`); ⚙ → ❓ 사용 안내 reopens it with 도움말 다시 보기. `CoachTips`: one-time coach marks in the world (letter, 말씀, seat/door, campfire chat, 😊, lantern hill, library, after the first meditation), asked for in `Game.updateTips`; once per device (`worlds.tips.seen`), one at a time (queue), never under a sheet or over the HUD, gone on tap, on doing the thing or after 8 s. |
 | `ui/EmotePicker.ts`, `ui/CampfireVoice.ts` | 100 / 160 | 😊 표현 button and grid (keys 1–8); the campfire voice join button, room-switch prompt and 🚩 음성 신고 sheet. |
 | `audio/AudioEngine.ts` | 400 | Ambience and settings (전체 / 환경음 / 효과음 / 음성 volumes, mute); ducks the ambience in voice rooms. |
-| `pwa/pwa.ts`, `client/sw/` | 210 | Service worker registration and update toast; `vite.config.ts` generates `dist/sw.js` with the precache list. |
+| `pwa/pwa.ts`, `client/sw/` | 210 | Service worker registration and update toast; `vite.config.ts` generates `dist/sw.js` with the precache list (including the guide pictures under `/guide/`). |
 | `legal/pages.ts`, `config/legal.ts` | 540 | `/privacy` and `/terms` (rendered at build time). |
 | `admin/*` (+ `client/admin/index.html`, `vite.admin.config.ts`) | 1,700 | 📊 운영 통계 dashboard (`/admin`): a separate Vite build into `dist/admin/` (not in the game bundle or the SW precache), hand-rolled SVG charts (`charts.ts`), own CSS (`admin.css`). |
 | `styles.css` | 5,220 | **All CSS in one file**, appended per milestone (see conventions). |
@@ -83,6 +84,12 @@ and the PII detector. The server compiles it into `server/dist/shared/`.
 ### Other
 
 - `client/scripts/`: browser end-to-end suites (`*-test.mjs`), the smoke test and `lib/harness.mjs`.
+- `client/scripts/make-guide-shots.mjs`: regenerates the picture guide's images (`client/public/guide/*.webp`). It runs a
+  production-like server on 5196 (mock login, test mode, throwaway DB) with a fixed time of day, clear weather, a fixed
+  season date, posed raw-protocol bots and the HUD hidden, captures 960×720 and writes 640×480 WebP (quality stepped
+  down to ≤ 40 KB each; the set stays ≤ 200 KB). No frame shows emoji, because headless Chromium has no emoji font.
+  `ONLY=letter,closet,lanterns,campfire,library` redoes some of the images, and `KEEP_PNG=1` keeps the source PNGs in
+  `docs/screenshots/`. The test hook `ownTag(false)` hides your own name tag for these frames.
 - `data/`: Bible text and curated verses, baked into the image.
 - `deploy/`: the deploy README, the nginx config and **example** env files only.
 - `docs/`: audits (`perf/`), plans, QA notes and screenshots written by the tests.
@@ -153,7 +160,8 @@ push.ts (minute tick) ─▶ Web Push service ─▶ service worker (client/sw/s
   names, emails, ids or per-user rows; the st suite deep-scans them). New activity counters go through
   `stats.bump(key)` at the write point, plus the key in `shared/stats.ts` `ACTIVITY_KEYS` and the dashboard.
 - **Test switches:** `?test=1` turns on client test hooks (`window.__WORLDS_TEST__`) **and** the `__WORLDS_DEBUG__`
-  mirror. Real players never pay for either. Server: `WORLDS_TEST_MODE`, `WORLDS_AUTH_MOCK`, `WORLDS_ALLOW_TEST_DATES`
+  mirror. `&noguide=1` skips the first-time guide **and** the coach tips (every older suite uses it); add `&tips=1` to
+  keep the tips. Real players never pay for either. Server: `WORLDS_TEST_MODE`, `WORLDS_AUTH_MOCK`, `WORLDS_ALLOW_TEST_DATES`
   and `WORLDS_PUSH_MOCK`. The server refuses to start with any of them under `NODE_ENV=production`.
 - **Migrations:** append a new string to `MIGRATIONS` in `server/src/db.ts`. Never edit an applied one. Use
   `IF NOT EXISTS` for indexes.
@@ -218,7 +226,8 @@ Which suite covers what:
 |---|---|
 | m2 | multiplayer, snapshots, mats, campfire chat, reconnect, day change |
 | m3 | 골방, 오늘의 말씀, meditation, word book |
-| m41 | first-time guide, name tags |
+| m41 | first-time guide (shown once per account/device, reopened from ⚙), name tags |
+| ob | picture guide (images, swipe/arrows/dots, 시작하기 on any card, sizes, ≤ 200 KB, SW precache) and the first-time coach tips (triggers, one at a time, never under a sheet or over the HUD, reset) |
 | m4 | accounts, groups, lanterns, production mode |
 | m5v / m52 / m53 / m54 | voice rooms; tablet chat layout and 골방 room UI; chat fold layouts; benches |
 | m51 | anonymous lanterns |

@@ -424,6 +424,12 @@ export class LibraryInterior implements Ground {
     return r ? { x: r.front.x, z: r.front.y } : null;
   }
 
+  /** Middle of a bookcase (first-time tips point at it). */
+  shelfPoint(id: BookcaseId): { x: number; y: number; z: number } | null {
+    const r = this.shelves.get(id);
+    return r ? { x: r.group.position.x, y: 1.3, z: r.group.position.z } : null;
+  }
+
   spots() {
     return { write: { x: this.writeDesk.x, z: this.writeDesk.y }, exit: { ...LIBRARY_EXIT } };
   }

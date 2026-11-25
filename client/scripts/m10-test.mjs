@@ -361,9 +361,9 @@ try {
   step('settings guide');
   await M.tap('#settings-nav-guide');
   await waitModal(M, '사용 안내');
-  for (let i = 0; i < 5; i++) await M.tap('#guide-next');
-  const lastPage = await M.textContent('.guide-body');
-  check('사용 안내 reopens from ⚙; its last page names 말씀 and ⚙ → 꾸미기', lastPage.includes('말씀') && lastPage.includes('⚙ → 👕 꾸미기') && !lastPage.includes('말씀 책\n'), lastPage.slice(0, 120));
+  // Picture guide (2026-11): cards with one line each; from ⚙ it also offers 도움말 다시 보기.
+  const cards = await M.$$eval('.guide-card', (n) => n.length);
+  check('사용 안내 reopens from ⚙ as the picture guide, with 도움말 다시 보기', cards >= 4 && (await M.isVisible('#guide-start')) && (await M.isVisible('#guide-tips-reset')), `${cards} cards`);
   await M.tap('.guide-skip');
   await waitModal(M, null);
 

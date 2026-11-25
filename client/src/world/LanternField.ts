@@ -174,6 +174,12 @@ export class LanternField {
     return l ? Math.hypot(l.x - x, l.z - z) : Infinity;
   }
 
+  /** Where a lantern hangs (first-time tips point at it). */
+  pointOf(id: number): { x: number; y: number; z: number } | null {
+    const l = this.lanterns.get(id);
+    return l ? { x: l.x, y: l.y + 1.1, z: l.z } : null;
+  }
+
   /** Lantern under a ray (tap/click), or null. */
   pick(raycaster: THREE.Raycaster): number | null {
     const hit = raycaster.intersectObject(this.hits, false)[0];

@@ -8,7 +8,8 @@ import { renderPrivacy, renderTerms } from './src/legal/pages';
 
 /**
  * Writes dist/sw.js after the build: client/sw/sw.js (hand-written) prefixed
- * with the precache list (index.html, hashed /assets/*, small icons, manifest)
+ * with the precache list (index.html, hashed /assets/*, the picture guide's
+ * /guide/*.webp, small icons, manifest)
  * and SW_VERSION, a hash of all of them. Only builds get a service worker; the
  * dev server never registers one (see src/pwa/pwa.ts).
  * WORLDS_SW_KILL=1 ships client/sw/sw-killswitch.js as /sw.js instead.
@@ -31,7 +32,10 @@ function serviceWorker(): Plugin {
       const walk = (dir: string): string[] =>
         readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : [join(dir, f)]));
       const assets = walk(join(outDir, 'assets')).map((f) => '/' + relative(outDir, f).split(sep).join('/'));
-      const list = ['/index.html', ...assets.sort(), ...SHELL_EXTRAS.filter((p) => statSync(join(outDir, p), { throwIfNoEntry: false }))];
+      // First-time guide pictures (public/guide, made by scripts/make-guide-shots.mjs).
+      const guideDir = join(outDir, 'guide');
+      const guide = statSync(guideDir, { throwIfNoEntry: false }) ? walk(guideDir).map((f) => '/' + relative(outDir, f).split(sep).join('/')) : [];
+      const list = ['/index.html', ...assets.sort(), ...guide.sort(), ...SHELL_EXTRAS.filter((p) => statSync(join(outDir, p), { throwIfNoEntry: false }))];
       const template = readFileSync(join(swDir, 'sw.js'), 'utf-8');
       const h = createHash('sha256').update(template);
       for (const p of list) h.update(p).update(readFileSync(join(outDir, p)));

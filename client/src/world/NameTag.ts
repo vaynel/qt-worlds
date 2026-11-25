@@ -112,6 +112,12 @@ export class NameTag {
     s.visible = s.material.opacity > 0.02;
   }
 
+  /** Hide at once (until the next update). */
+  hide() {
+    this.sprite.material.opacity = 0;
+    this.sprite.visible = false;
+  }
+
   dispose() {
     this.parent.remove(this.sprite);
     disposeSprite(this.sprite);

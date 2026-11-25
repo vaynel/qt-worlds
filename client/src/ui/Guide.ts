@@ -1,171 +1,99 @@
 import { button, el, Modal } from './dom';
-import { legalLinks } from './Legal';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-interface Page {
+interface Card {
+  img: string;
+  alt: string;
   title: string;
-  build: () => HTMLElement[];
-}
-
-const p = (text: string, cls = '') => el('p', cls, text);
-
-function list(items: [string, string][]): HTMLElement {
-  const ul = el('ul', 'guide-list');
-  for (const [k, v] of items) {
-    const li = el('li');
-    li.append(el('strong', '', k), el('span', '', v));
-    ul.append(li);
-  }
-  return ul;
-}
-
-/** Hand-drawn style mini map (SVG built in code, no image files). */
-function miniMap(): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 300 220');
-  svg.setAttribute('class', 'guide-map');
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', '장소 지도: 광장을 가운데로 북쪽 등불 언덕, 서쪽 기도의 뜰, 북서쪽 이야기 도서관, 동쪽 모닥불 모임터, 남서쪽 골방');
-  const add = (tag: string, attrs: Record<string, string>, text?: string) => {
-    const n = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-    if (text) n.textContent = text;
-    svg.append(n);
-    return n;
-  };
-  add('rect', { x: '4', y: '4', width: '292', height: '212', rx: '18', fill: '#e9f0d6', stroke: '#c9b48c' });
-  const plaza = { x: 150, y: 120 };
-  const spots: [string, number, number, string][] = [
-    ['등불 언덕', 150, 34, '#ffc46b'],
-    ['기도의 뜰', 52, 112, '#8fb36a'],
-    ['모닥불 모임터', 248, 112, '#e07a4a'],
-    ['골방', 78, 190, '#c8644a'],
-    ['이야기 도서관', 98, 70, '#7d5a7e'],
-  ];
-  for (const [, x, y] of spots) {
-    add('path', { d: `M${plaza.x} ${plaza.y} L${x} ${y}`, stroke: '#d8bf8e', 'stroke-width': '7', 'stroke-linecap': 'round', fill: 'none' });
-  }
-  add('circle', { cx: String(plaza.x), cy: String(plaza.y), r: '20', fill: '#f4ead5', stroke: '#b09070', 'stroke-width': '2' });
-  add('text', { x: String(plaza.x), y: String(plaza.y + 5), 'text-anchor': 'middle', 'font-size': '13', 'font-weight': '700', fill: '#4a3426' }, '광장');
-  for (const [name, x, y, color] of spots) {
-    add('circle', { cx: String(x), cy: String(y), r: '11', fill: color, stroke: '#fff8ea', 'stroke-width': '3' });
-    const ty = y < 60 ? y - 16 : name === '이야기 도서관' ? y - 16 : y + 26;
-    add('text', { x: String(x), y: String(Math.min(212, ty)), 'text-anchor': 'middle', 'font-size': '12', 'font-weight': '700', fill: '#4a3426' }, name);
-  }
-  add('text', { x: '282', y: '24', 'text-anchor': 'end', 'font-size': '11', fill: '#8a6a50' }, '↑ 북쪽 (처음 바라보는 쪽)');
-  return svg;
+  sub: string;
 }
 
 /**
- * First-time guide: six gentle pages. Shown once per account (server flag)
- * or once per device for guests; reopenable from ⚙ 설정 → ❓ 사용 안내.
+ * Picture cards: real in-game screenshots made by client/scripts/make-guide-shots.mjs
+ * (served same-origin from public/guide/ and precached by the service worker).
+ * Regenerate them whenever the world's look changes.
+ */
+const CARDS: readonly Card[] = [
+  {
+    img: '/guide/letter.webp',
+    alt: '광장 근처 들판에서 내 캐릭터 앞에 "오늘의 말씀" 편지가 빛나며 내려와 있어요',
+    title: '매일 말씀 편지가 날아와요',
+    sub: '편지를 눌러 오늘의 말씀을 읽어요',
+  },
+  {
+    img: '/guide/closet.webp',
+    alt: '십자가가 걸린 따뜻한 골방에서 말씀 · 묵상 · 느낀 점 · 적용 순서의 묵상 카드가 열려 있어요',
+    title: '골방에서 조용히 묵상해요',
+    sub: '말씀 · 묵상 · 느낀 점 · 적용',
+  },
+  {
+    img: '/guide/lanterns.webp',
+    alt: '저녁 등불 언덕에 사람들이 나눈 묵상 등불이 동그랗게 켜져 있어요',
+    title: '묵상을 등불로 나눠요',
+    sub: '등불을 읽고 함께 기도해 줘요',
+  },
+  {
+    img: '/guide/campfire.webp',
+    alt: '밤 모닥불가 통나무에 여러 사람이 앉아 "오늘 말씀 참 좋았어요", "함께 기도해요" 하고 이야기하고 있어요',
+    title: '모닥불에서 함께 이야기해요',
+    sub: '가까이 가면 이야기 창이 열려요',
+  },
+  {
+    img: '/guide/library.webp',
+    alt: '이야기 도서관 안, 하나님 이야기 책장과 일기 책장에 책이 꽂혀 있어요',
+    title: '도서관에 하나님 이야기를',
+    sub: '함께 읽고, 내 이야기도 꽂아요',
+  },
+];
+
+/** Image URLs (the SW precache list and the tests read the same files). */
+export const GUIDE_IMAGES = CARDS.map((c) => c.img);
+
+export interface GuideOpenOptions {
+  /** Reopened from ⚙: also offer "도움말 다시 보기" (resets the first-time tips). */
+  onResetTips?: () => void;
+}
+
+/**
+ * First-time guide: a few picture cards (show, don't tell). Shown once per
+ * account (server flag) or once per device for guests; reopenable from
+ * ⚙ 설정 → ❓ 사용 안내. Swipe, arrows (buttons or ← →) and dots move between
+ * cards; 시작하기 is on every card. The first card shows a small animated
+ * controls hint (joystick on touch screens, WASD on desktop).
  */
 export class Guide {
   private readonly modal = new Modal('guide-overlay', '사용 안내');
   private page = 0;
   private finishHandler: ((started: boolean) => void) | null = null;
-  private readonly pages: Page[];
+  private track: HTMLElement | null = null;
+  private dots: HTMLButtonElement[] = [];
+  private prev: HTMLButtonElement | null = null;
+  private next: HTMLButtonElement | null = null;
+  private drag: { id: number; x: number; y: number; dx: number; horizontal: boolean | null } | null = null;
 
   constructor(private readonly isTouch: () => boolean) {
-    this.pages = [
-      {
-        title: 'QT 월드에 오신 것을 환영해요',
-        build: () => [
-          p('매일 오늘의 말씀이 편지로 날아와요.'),
-          p('말씀을 읽고 묵상하고, 함께 기도하고, 마음을 나누는 작은 세상이에요.'),
-          p('천천히 둘러보세요. 서두르지 않아도 괜찮아요.', 'guide-soft'),
-        ],
-      },
-      {
-        title: '조작법',
-        build: () =>
-          this.isTouch()
-            ? [
-                list([
-                  ['걷기', '왼쪽 아래 조이스틱 (끝까지 밀면 달리기)'],
-                  ['둘러보기', '화면을 끌기'],
-                  ['가까이/멀리', '두 손가락으로 벌리기·오므리기'],
-                  ['행동', '화면에 나타나는 버튼 누르기 (앉기, 들어가기, 등불 읽기)'],
-                  ['표현', '오른쪽 아래 😊 버튼 (🙏 기도해요, 👋 안녕하세요 …)'],
-                ]),
-              ]
-            : [
-                list([
-                  ['걷기', 'WASD 또는 방향키'],
-                  ['달리기', 'Shift'],
-                  ['둘러보기', '마우스로 끌기'],
-                  ['가까이/멀리', '마우스 휠'],
-                  ['행동', 'E 키 (앉기, 들어가기, 등불 읽기) · 이야기는 Enter'],
-                  ['표현', '숫자 1~8 키 또는 오른쪽 아래 😊 버튼 (🙏 기도해요, 👋 안녕하세요 …)'],
-                ]),
-              ],
-      },
-      {
-        title: '장소 지도',
-        build: () => [
-          miniMap() as unknown as HTMLElement,
-          list([
-            ['광장', '오늘의 말씀 편지가 내려오는 곳'],
-            ['골방', '나만의 방. 다른 사람에게 보이지 않는 조용한 곳에서 묵상해요'],
-            ['기도의 뜰', '돗자리에 앉아 함께 조용히 기도해요. 기도하는 모습과 촛불이 보여요'],
-            ['모닥불', '가까이 가면 채팅이 열려요. 근처 사람끼리 나눠요'],
-            ['등불 언덕', '나눈 묵상이 등불로 밝혀져요. 아멘·기도하기·기록하기'],
-            ['이야기 도서관', '🙏 하나님 이야기와 📔 일기, 두 책장에서 함께 읽고 써요. 📸 사진도 일기에 넣을 수 있어요'],
-          ]),
-        ],
-      },
-      {
-        title: '묵상하기',
-        build: () => [
-          p('상단의 "말씀"을 누르면 📖 나의 말씀 책의 [오늘]에서 오늘의 말씀을 읽고 "✍️ 묵상하기"를 누를 수 있어요.'),
-          p('골방에 들어가거나 기도의 뜰 돗자리에 앉아도 "묵상하기" 버튼이 보여요.'),
-          el('p', 'guide-flow', '말씀 → 묵상 → 느낀 점 → 적용 → 말씀 책에 담기'),
-          p('내 묵상은 나만 볼 수 있어요. 로그인하면 휴대폰과 PC에서 같은 말씀 책을 볼 수 있어요.', 'guide-soft'),
-        ],
-      },
-      {
-        title: '등불과 모임',
-        build: () => [
-          p('말씀 → [오늘]이나 [지난 말씀]에서 "🏮 등불로 나누기"를 누르면 등불 언덕에 등불이 켜져요.'),
-          list([
-            ['공개', '누구나 볼 수 있어요'],
-            ['비공개', '같은 모임 사람만 볼 수 있어요'],
-          ]),
-          p('상단의 "모임" 버튼에서 모임을 만들면 6자리 코드가 생겨요. 코드를 나누면 그 코드로 참여할 수 있어요.'),
-          p('등불은 5일 동안 밝혀져 있어요. 하루 3개까지 밝힐 수 있어요.', 'guide-soft'),
-        ],
-      },
-      {
-        title: '상단 버튼',
-        build: () => [
-          list([
-            ['말씀', '📖 나의 말씀 책: [오늘] 말씀과 묵상 · [지난 말씀] · [담아 둔 묵상]'],
-            ['모임', '모임 만들기 · 코드로 참여하기'],
-            ['⚙', '설정: 👕 꾸미기, 🔊 소리, 🔔 알림, 👤 계정, ❓ 사용 안내'],
-          ]),
-          p('내 모습은 ⚙ → 👕 꾸미기에서 옷 색과 머리 모양을 고르고, 옷에 그림을 그려 입을 수 있어요 (로그인).'),
-          p('이제 시작해 볼까요?', 'guide-soft'),
-          legalLinks('guide'),
-        ],
-      },
-    ];
+    this.modal.root.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') this.go(this.page + 1);
+      else if (e.key === 'ArrowLeft') this.go(this.page - 1);
+      else return;
+      e.preventDefault();
+    });
   }
 
   get isOpen(): boolean {
     return this.modal.isOpen;
   }
 
-  /** started=true when finished with 시작하기, false for 건너뛰기/닫기. */
-  open(onFinish?: (started: boolean) => void) {
+  /** started=true when closed with 시작하기, false for 건너뛰기/닫기. */
+  open(onFinish?: (started: boolean) => void, options: GuideOpenOptions = {}) {
     this.page = 0;
     this.finishHandler = onFinish ?? null;
-    this.render();
+    this.build(options);
     this.modal.open(() => {
       const fn = this.finishHandler;
       this.finishHandler = null;
       fn?.(false);
     });
+    requestAnimationFrame(() => this.modal.sheet.querySelector<HTMLElement>('#guide-start')?.focus({ preventScroll: true }));
   }
 
   private finish(started: boolean) {
@@ -175,35 +103,146 @@ export class Guide {
     fn?.(started);
   }
 
-  private render() {
+  private build(options: GuideOpenOptions) {
     const sheet = this.modal.sheet;
     sheet.className = 'sheet guide';
     sheet.replaceChildren();
-    const page = this.pages[this.page];
-    const top = el('header', 'guide-top');
-    top.append(el('span', 'guide-step', `${this.page + 1} / ${this.pages.length}`), button('건너뛰기', 'ghost guide-skip', () => this.finish(false)));
-    const body = el('article', 'guide-body');
-    body.append(el('h2', 'guide-title', page.title), ...page.build());
-    const dots = el('div', 'guide-dots');
-    dots.setAttribute('aria-hidden', 'true');
-    this.pages.forEach((_, i) => dots.append(el('span', i === this.page ? 'on' : '')));
-    const nav = el('footer', 'guide-nav');
-    const prev = button('이전', '', () => this.go(-1));
-    prev.disabled = this.page === 0;
-    prev.id = 'guide-prev';
-    const last = this.page === this.pages.length - 1;
-    const next = last ? button('시작하기', 'primary', () => this.finish(true)) : button('다음', 'primary', () => this.go(1));
-    next.id = last ? 'guide-start' : 'guide-next';
-    nav.append(prev, dots, next);
-    sheet.append(top, body, nav);
-  }
 
-  private go(delta: number) {
-    this.page = Math.max(0, Math.min(this.pages.length - 1, this.page + delta));
+    const top = el('header', 'guide-top');
+    const skip = button('건너뛰기', 'ghost guide-skip', () => this.finish(false));
+    top.append(el('span', 'guide-step', ''), skip);
+
+    const viewport = el('div', 'guide-viewport');
+    const track = el('div', 'guide-track');
+    track.setAttribute('aria-live', 'polite');
+    CARDS.forEach((c, i) => {
+      const card = el('figure', 'guide-card');
+      card.setAttribute('aria-roledescription', '카드');
+      card.setAttribute('aria-label', `${i + 1} / ${CARDS.length}`);
+      const pic = el('div', 'guide-pic');
+      const img = el('img', 'guide-img');
+      img.src = c.img;
+      img.alt = c.alt;
+      img.width = 640;
+      img.height = 480;
+      img.decoding = 'async';
+      img.draggable = false;
+      pic.append(img);
+      if (i === 0) pic.append(this.controlsHint());
+      const cap = el('figcaption', 'guide-cap');
+      cap.append(el('h2', 'guide-title', c.title), el('p', 'guide-sub', c.sub));
+      card.append(pic, cap);
+      track.append(card);
+    });
+    viewport.append(track);
+    this.bindSwipe(viewport);
+
+    const nav = el('div', 'guide-nav');
+    this.prev = button('‹', 'guide-arrow', () => this.go(this.page - 1));
+    this.prev.id = 'guide-prev';
+    this.prev.setAttribute('aria-label', '이전 카드');
+    this.next = button('›', 'guide-arrow', () => this.go(this.page + 1));
+    this.next.id = 'guide-next';
+    this.next.setAttribute('aria-label', '다음 카드');
+    const dots = el('div', 'guide-dots');
+    this.dots = CARDS.map((c, i) => {
+      const d = button('', 'guide-dot', () => this.go(i));
+      d.setAttribute('aria-label', `${i + 1}번째 카드: ${c.title}`);
+      dots.append(d);
+      return d;
+    });
+    nav.append(this.prev, dots, this.next);
+
+    const foot = el('footer', 'guide-foot');
+    const start = button('시작하기', 'primary guide-start', () => this.finish(true));
+    start.id = 'guide-start';
+    foot.append(start);
+    if (options.onResetTips) {
+      const reset = options.onResetTips;
+      const again = button('도움말 다시 보기', 'ghost guide-tips-reset', () => {
+        reset();
+        this.finish(true);
+      });
+      again.id = 'guide-tips-reset';
+      foot.append(again);
+    }
+
+    sheet.append(top, viewport, nav, foot);
+    this.track = track;
     this.render();
   }
 
+  /** First card only: walking, shown rather than explained. */
+  private controlsHint(): HTMLElement {
+    const hint = el('div', 'guide-controls');
+    hint.setAttribute('aria-hidden', 'true');
+    if (this.isTouch()) {
+      const stick = el('span', 'guide-stick');
+      stick.append(el('span', 'guide-stick-knob'));
+      hint.append(stick, el('span', 'guide-controls-text', '왼쪽 아래 조이스틱으로 걸어요'));
+    } else {
+      const keys = el('span', 'guide-keys');
+      for (const k of ['W', 'A', 'S', 'D']) keys.append(el('kbd', `guide-key k-${k.toLowerCase()}`, k));
+      hint.append(keys, el('span', 'guide-controls-text', 'WASD로 걷고, 끌어서 둘러봐요'));
+    }
+    return hint;
+  }
+
+  private bindSwipe(viewport: HTMLElement) {
+    viewport.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, horizontal: null };
+    });
+    viewport.addEventListener('pointermove', (e) => {
+      const d = this.drag;
+      if (!d || d.id !== e.pointerId || !this.track) return;
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (d.horizontal === null && Math.hypot(dx, dy) > 8) {
+        d.horizontal = Math.abs(dx) > Math.abs(dy);
+        if (d.horizontal) viewport.setPointerCapture(e.pointerId);
+      }
+      if (!d.horizontal) return;
+      d.dx = dx;
+      // Rubber band at both ends.
+      const edge = (this.page === 0 && dx > 0) || (this.page === CARDS.length - 1 && dx < 0);
+      this.track.style.transition = 'none';
+      this.track.style.transform = `translateX(calc(${-this.page * 100}% + ${edge ? dx / 3 : dx}px))`;
+    });
+    const end = (e: PointerEvent) => {
+      const d = this.drag;
+      if (!d || d.id !== e.pointerId) return;
+      this.drag = null;
+      if (!this.track) return;
+      this.track.style.transition = '';
+      const width = viewport.clientWidth || 1;
+      if (d.horizontal && Math.abs(d.dx) > Math.min(60, width * 0.18)) this.go(this.page + (d.dx < 0 ? 1 : -1));
+      else this.render();
+    };
+    viewport.addEventListener('pointerup', end);
+    viewport.addEventListener('pointercancel', end);
+  }
+
+  private go(page: number) {
+    this.page = Math.max(0, Math.min(CARDS.length - 1, page));
+    this.render();
+  }
+
+  private render() {
+    if (!this.track) return;
+    this.track.style.transform = `translateX(${-this.page * 100}%)`;
+    this.track.querySelectorAll('.guide-card').forEach((c, i) => c.setAttribute('aria-hidden', i === this.page ? 'false' : 'true'));
+    this.dots.forEach((d, i) => {
+      d.classList.toggle('on', i === this.page);
+      d.setAttribute('aria-current', i === this.page ? 'true' : 'false');
+    });
+    if (this.prev) this.prev.disabled = this.page === 0;
+    if (this.next) this.next.disabled = this.page === CARDS.length - 1;
+    const step = this.modal.sheet.querySelector('.guide-step');
+    if (step) step.textContent = `${this.page + 1} / ${CARDS.length}`;
+  }
+
   describe() {
-    return { open: this.isOpen, page: this.page };
+    return { open: this.isOpen, page: this.page, cards: CARDS.length };
   }
 }

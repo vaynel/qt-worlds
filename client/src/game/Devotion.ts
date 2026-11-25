@@ -50,6 +50,8 @@ export class Devotion {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private lastSaved: MeditationPlace | null = null;
+  /** Meditations saved in this page's life (the first-time 등불 tip follows the first). */
+  savedCount = 0;
   /** The meditation sheet was opened from 말씀 → 오늘: go back there after saving. */
   private backToBook = false;
 
@@ -66,6 +68,7 @@ export class Devotion {
     this.meditation = new MeditationView(o.store, o.needLogin);
     this.meditation.onSaved((place) => {
       this.lastSaved = place;
+      this.savedCount++;
       o.hud.toast(`${place}에서의 묵상을 말씀 책에 담았어요.`, o.now(), 4);
       if (this.backToBook) void this.openBook('today');
       this.backToBook = false;
@@ -115,6 +118,11 @@ export class Devotion {
     this.letter.update(dt, elapsed, this.target);
     if (this.letter.state === 'waiting' && this.letterState === 'flying') this.letterState = 'waiting';
     this.o.hud.setLetter(this.letterState === 'waiting' && !Modal.anyOpen);
+  }
+
+  /** Where today's letter is in the world while it can be tapped (first-time tip), or null. */
+  letterPoint(): THREE.Vector3 | null {
+    return this.letter && this.letter.group.visible ? this.letter.group.position : null;
   }
 
   /** Canvas tap at client coords; true if it opened the letter. */

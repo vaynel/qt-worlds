@@ -21,6 +21,7 @@ import { MicHelp } from '../ui/MicHelp';
 import { EmotePicker } from '../ui/EmotePicker';
 import { CampfireVoiceUi } from '../ui/CampfireVoice';
 import { Guide } from '../ui/Guide';
+import { CoachTips, type TipAnchor } from '../ui/CoachTips';
 import { InstallGuide } from '../ui/InstallGuide';
 import { api } from '../net/api';
 import { ChatPanel } from '../ui/ChatPanel';
@@ -154,7 +155,16 @@ export class Game {
   private account: AccountInfo | null;
   private nearLantern: number | null = null;
   private localTag: NameTag | null = null;
+  /** Test hook (guide screenshots): keep our own name tag hidden. */
+  private ownTagHidden = false;
   private readonly guide: Guide;
+  /** First-time coach marks in the world (once per device). */
+  private readonly tips: CoachTips;
+  /** Today's letter was opened from the letter itself in this page's life (the 말씀 tip follows it). */
+  private letterOpenedHere = false;
+  private lastLetterState = '';
+  private tipsSavedSeen = 0;
+  private worldSeconds = 0;
   private readonly installGuide = new InstallGuide();
   private voice: VoiceClient | null = null;
   private voicePanel: VoicePanel | null = null;
@@ -299,7 +309,10 @@ export class Game {
       openPanel: () => this.voicePanel?.open(),
       toast: (text) => this.hud.toast(text, this.elapsed, 4),
     });
-    this.emotes = new EmotePicker((e) => this.social.sendEmote(e));
+    this.emotes = new EmotePicker((e) => {
+      this.tips?.done('emote');
+      this.social.sendEmote(e);
+    });
     this.reportView = new ReportView(this.social.remotes, () => !!this.account, (reason) => this.loginPrompt.open(reason, ''));
     if (session.account) {
       void getMe().then((me) => {
@@ -357,6 +370,8 @@ export class Game {
 
     this.guide = new Guide(() => this.input.isTouch);
     this.guideDue = session.guideDue;
+    // ?test=1&noguide=1 (every older suite) also keeps the tips away; &tips=1 brings them back.
+    this.tips = new CoachTips(!(this.testMode && params.get('noguide') === '1' && params.get('tips') !== '1'));
     this.settings = new SettingsView(
       this.audio,
       () => this.account,
@@ -364,7 +379,13 @@ export class Game {
         if (this.account) this.account = { ...this.account, nickname: name };
         this.setLocalName(name, false);
       },
-      () => this.guide.open((started) => started && this.showPaths()),
+      () =>
+        this.guide.open((started) => started && this.showPaths(), {
+          onResetTips: () => {
+            this.tips.reset();
+            this.hud.toast('처음 도움말을 다시 보여 드릴게요.', this.elapsed, 3);
+          },
+        }),
       this.installGuide,
       session.pushEnabled,
       {
@@ -1056,6 +1077,11 @@ export class Game {
       openSettings: (page?: SettingsPage) => this.settings.open(page),
       /** Painter/customize state right now (the debug object lags a few frames). */
       customize: () => this.customize.describe(),
+      /** Hide our own name tag (guide screenshots). */
+      ownTag: (show: boolean) => {
+        this.ownTagHidden = !show;
+        if (!show) this.localTag?.hide();
+      },
       /** Turn our avatar (screenshots). */
       face: (yaw: number) => {
         this.player.yaw = yaw;
@@ -1326,10 +1352,11 @@ export class Game {
     this.lanterns.setNight(this.world.dayNight.night);
     this.player.avatar.setNight(this.world.dayNight.night);
     this.social.remotes.setNight(this.world.dayNight.night);
-    if (!this.inCloset) this.localTag?.update(this.tagView());
+    if (!this.inCloset && !this.ownTagHidden) this.localTag?.update(this.tagView());
     this.lanterns.update(this.elapsed, this.inCloset || this.inLibrary ? null : this.nearLantern);
     this.updateAudio();
     this.updateHud();
+    this.updateTips(dt);
 
     if (this.inCloset) {
       this.interior.update(dt, this.elapsed, this.world.dayNight.night, this.world.weather.gloom);
@@ -1485,6 +1512,91 @@ export class Game {
     this.hud.update(this.elapsed, this.input.hasMoved);
   }
 
+  /** Screen point of a world position, or null when it is behind the camera. */
+  private screenOf(x: number, y: number, z: number): TipAnchor {
+    const v = this.tipVec.set(x, y, z).project(this.camera);
+    if (v.z > 1 || v.z < -1) return null;
+    const r = this.canvas.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+  }
+  private readonly tipVec = new THREE.Vector3();
+
+  /**
+   * First-time tips: ask for each at the moment it is useful, and mark it done
+   * when the player does the thing anyway. CoachTips shows one at a time and
+   * never under a sheet.
+   */
+  private updateTips(dt: number) {
+    const t = this.tips;
+    if (!t.enabled) return;
+    const modal = Modal.current?.name ?? null;
+    const touch = this.input.isTouch;
+    const byId = (id: string) => document.getElementById(id);
+    const letter = this.devotion.letterState;
+    // Edge, not level: after 도움말 다시 보기 an already-opened letter must not count as "done" again.
+    const letterJustOpened = letter === 'opened' && (this.lastLetterState === 'flying' || this.lastLetterState === 'waiting');
+    if (letterJustOpened && modal === '오늘의 말씀') this.letterOpenedHere = true;
+    this.lastLetterState = letter;
+    const outside = !this.inCloset && !this.inLibrary && !this.transitioning;
+    if (outside) this.worldSeconds += dt;
+
+    // Done by doing.
+    if (letterJustOpened) t.done('letter');
+    if (modal === '나의 말씀 책' || modal === '묵상하기') t.done('word');
+    if (this.player.seat >= 0 || this.inCloset) t.done('seat');
+    if (this.chat.focused) t.done('chat');
+    if (modal === '등불') t.done('lantern');
+    if (modal === '이야기 도서관') t.done('library');
+    if (this.emotes.isOpen) t.done('emote');
+
+    // Asked for when useful.
+    if (outside && (letter === 'flying' || letter === 'waiting')) {
+      t.request('letter', '편지를 눌러 보세요', () => {
+        const p = this.devotion.letterPoint();
+        return p ? this.screenOf(p.x, p.y, p.z) : null;
+      });
+    }
+    if (this.letterOpenedHere && !modal) t.request('word', '말씀 → 오늘에서 묵상하기', () => byId('btn-word'));
+    const action = byId('action-btn');
+    const sitOrEnter = () =>
+      !this.inCloset && !this.inLibrary && this.player.seat < 0 && !!action && !action.hidden && (this.nearDoor() || this.nearLibraryDoor() || !!this.social.seatAction(this.input.isTouch));
+    if (outside && sitOrEnter()) t.request('seat', touch ? '앉기 / 들어가기 버튼을 눌러요' : '버튼이나 E 키로 앉고 들어가요', () => (sitOrEnter() ? action : null));
+    if (this.chat.isVisible) {
+      t.request('chat', '여기서 이야기를 나눠요', () => {
+        if (!this.chat.isVisible) return null;
+        const input = byId('chat-input');
+        return input && !this.chat.isFolded && input.getBoundingClientRect().height > 0 ? input : byId('chat-pill');
+      });
+    }
+    if (outside && this.world.locate(this.player.position.x, this.player.position.z)?.id === 'lanternHill') {
+      const near = this.lanterns.nearest(this.player.position.x, this.player.position.z, 14);
+      if (near) {
+        t.request('lantern', '등불을 눌러 읽어 보세요', () => {
+          const p0 = this.player.position;
+          const l = this.lanterns.nearest(p0.x, p0.z, 14);
+          const p = l ? this.lanterns.pointOf(l.id) : null;
+          return p ? this.screenOf(p.x, p.y, p.z) : null;
+        });
+      }
+    }
+    if (this.inLibrary && !this.transitioning) {
+      t.request('library', '책장을 눌러 이야기를 읽어요', () => {
+        if (!this.inLibrary) return null;
+        const p = this.library.shelfPoint(BOOKCASE_IDS[0]);
+        return p ? this.screenOf(p.x, p.y, p.z) : null;
+      });
+    }
+    if (this.devotion.savedCount > this.tipsSavedSeen) {
+      this.tipsSavedSeen = this.devotion.savedCount;
+      t.request('share', '🏮 등불로 나누면 다른 사람이 함께 기도해요', () => byId('btn-word'));
+    }
+    if (outside && (t.isSeen('chat') || this.worldSeconds > 90) && t.isSeen('letter')) {
+      t.request('emote', '마음을 표현해 보세요', () => byId('emote-btn'));
+    }
+    // A sheet, the install card or a door transition: wait.
+    t.update(Modal.anyOpen || this.transitioning || !!byId('install-offer'));
+  }
+
   private updateLibraryHud(touch: boolean) {
     const p = this.player.position;
     this.nearLantern = null;
@@ -1550,6 +1662,7 @@ export class Game {
         lanterns: this.lanterns.describe(),
         nearLantern: this.nearLantern,
         guide: this.guide.describe(),
+        tips: this.tips.describe(),
         voice: this.voice?.describe() ?? null,
         emoteOpen: this.emotes.isOpen,
         voiceReportOpen: this.campfireUi.reportOpen,

@@ -1,5 +1,5 @@
 // M4.1 test: first-time guide (account once across devices, guest once per device,
-// reopen from ⚙, its 상단 버튼 page lists exactly 말씀 · 모임 · ⚙) and name tags
+// reopen from ⚙; since 2026-11 it is the picture guide, checked in depth by ob-test) and name tags
 // (own + others, 손님 marker, live rename). The worship playlist checks went with
 // the player (removed 2026-11-14). Ports: 5182 preview, 5183 server.
 //   cd client && npm run build && (cd ../server && npm run build) && node scripts/m41-test.mjs
@@ -78,18 +78,12 @@ try {
   check('guide opens right after the first login (닉네임 정하기)', true);
   await sleep(1200);
   await A.screenshot({ path: resolve(shotDir, 'm41-onboarding-desktop.png') });
-  const controlsText = await (async () => {
-    await A.click('#guide-next');
-    return A.textContent('.guide-body');
-  })();
-  check('controls page shows keyboard/mouse on desktop', controlsText.includes('WASD') && controlsText.includes('E 키'));
+  // Picture guide: the first card shows walking with WASD on desktop (no controls page).
+  const controlsText = await A.textContent('.guide-card:first-child .guide-controls');
+  check('first card shows the WASD hint on desktop', controlsText.includes('WASD'));
+  const guideText = await A.textContent('.sheet.guide');
+  check('the guide never mentions 찬양', !guideText.includes('찬양'));
   await A.click('#guide-next');
-  await A.waitForSelector('.guide-map');
-  check('map page draws the mini map with every place', ['광장', '등불 언덕', '기도의 뜰', '모닥불 모임터', '골방'].every((t) => true) && (await A.textContent('.guide-map')).includes('모닥불 모임터'));
-  await A.screenshot({ path: resolve(shotDir, 'm41-onboarding-map-desktop.png') });
-  for (let i = 0; i < 3; i++) await A.click('#guide-next');
-  const hudPage = await A.textContent('.guide-body');
-  check('guide 상단 버튼 page: 말씀 · 모임 · ⚙, no 찬양', hudPage.includes('말씀') && hudPage.includes('모임') && hudPage.includes('⚙') && !hudPage.includes('찬양'), hudPage.slice(0, 80));
   await A.click('#guide-start');
   await until(A, () => window.__WORLDS_DEBUG__.m3.modal === null);
   check('시작하기 closes the guide', true);
@@ -122,11 +116,8 @@ try {
   await sleep(1500);
   const gBox = await box(G, '.sheet.guide');
   check('guest sees the guide; on mobile it fits the screen', gBox && gBox.x >= 0 && gBox.y >= 0 && gBox.x + gBox.width <= 390.5 && gBox.y + gBox.height <= 844.5, JSON.stringify(gBox));
-  const touchControls = await (async () => {
-    await G.tap('#guide-next');
-    return G.textContent('.guide-body');
-  })();
-  check('controls page shows touch controls on a phone', touchControls.includes('조이스틱'));
+  const touchControls = await G.textContent('.guide-card:first-child .guide-controls');
+  check('first card shows the joystick hint on a phone', touchControls.includes('조이스틱'));
   await G.screenshot({ path: resolve(shotDir, 'm41-onboarding-mobile.png') });
   await G.tap('.guide-skip');
   await until(G, () => window.__WORLDS_DEBUG__.m3.modal === null);
